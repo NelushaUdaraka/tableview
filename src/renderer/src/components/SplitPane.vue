@@ -1,6 +1,12 @@
 <script setup lang="ts">
-/** Two panes with a draggable divider. Size is the first pane's extent in px. */
-import { onBeforeUnmount, ref, watch } from 'vue'
+/**
+ * Two panes with a draggable divider.
+ *
+ * `modelValue` is the extent, in pixels, of whichever pane `pane` names — the
+ * first one by default, which is the sidebar; the second when the fixed pane
+ * is on the right, like the row inspector. The other pane takes the rest.
+ */
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 const props = withDefaults(
   defineProps<{
@@ -8,9 +14,11 @@ const props = withDefaults(
     modelValue: number
     min?: number
     max?: number
+    /** Hides the sized pane and the divider, keeping the other one whole. */
     collapsed?: boolean
+    pane?: 'first' | 'second'
   }>(),
-  { direction: 'horizontal', min: 140, max: 900, collapsed: false }
+  { direction: 'horizontal', min: 140, max: 900, collapsed: false, pane: 'first' }
 )
 
 const emit = defineEmits<{ (event: 'update:modelValue', value: number): void }>()
@@ -26,6 +34,12 @@ watch(
   }
 )
 
+const sizeStyle = computed(() =>
+  props.direction === 'horizontal'
+    ? { width: `${size.value}px`, flex: `0 0 ${size.value}px` }
+    : { height: `${size.value}px`, flex: `0 0 ${size.value}px` }
+)
+
 function onMouseDown(event: MouseEvent): void {
   event.preventDefault()
   dragging.value = true
@@ -38,8 +52,15 @@ function onMouseDown(event: MouseEvent): void {
 function onMouseMove(event: MouseEvent): void {
   if (!dragging.value || !root.value) return
   const rect = root.value.getBoundingClientRect()
+  // A pane on the far side grows as the pointer moves towards its own edge.
   const raw =
-    props.direction === 'horizontal' ? event.clientX - rect.left : event.clientY - rect.top
+    props.direction === 'horizontal'
+      ? props.pane === 'first'
+        ? event.clientX - rect.left
+        : rect.right - event.clientX
+      : props.pane === 'first'
+        ? event.clientY - rect.top
+        : rect.bottom - event.clientY
   size.value = Math.min(props.max, Math.max(props.min, raw))
   emit('update:modelValue', size.value)
 }
@@ -58,13 +79,10 @@ onBeforeUnmount(onMouseUp)
 <template>
   <div ref="root" class="split" :class="`split--${direction}`">
     <div
-      v-show="!collapsed"
+      v-show="!(collapsed && pane === 'first')"
       class="split__first"
-      :style="
-        direction === 'horizontal'
-          ? { width: `${size}px`, flex: `0 0 ${size}px` }
-          : { height: `${size}px`, flex: `0 0 ${size}px` }
-      "
+      :class="{ 'split__pane--flex': pane === 'second' }"
+      :style="pane === 'first' ? sizeStyle : undefined"
     >
       <slot name="first" />
     </div>
@@ -74,7 +92,12 @@ onBeforeUnmount(onMouseUp)
       :class="{ 'split__divider--active': dragging }"
       @mousedown="onMouseDown"
     ></div>
-    <div class="split__second">
+    <div
+      v-show="!(collapsed && pane === 'second')"
+      class="split__second"
+      :class="{ 'split__pane--flex': pane === 'first' }"
+      :style="pane === 'second' ? sizeStyle : undefined"
+    >
       <slot name="second" />
     </div>
   </div>
@@ -100,7 +123,7 @@ onBeforeUnmount(onMouseUp)
   min-height: 0;
   overflow: hidden;
 }
-.split__second {
+.split__pane--flex {
   flex: 1;
 }
 .split__divider {

@@ -1,141 +1,133 @@
 /**
- * Application menu. Items that act on editor or grid state send a named action
- * to the renderer rather than trying to reach into it from here.
+ * The native application menu.
+ *
+ * The items come from the shared menu model, which the renderer also draws in
+ * the custom title bar. On Windows and Linux the native bar is hidden — the
+ * window is frameless and the title bar draws the menus itself — but the menu
+ * is still installed, because that is what makes the accelerators fire.
  */
 import { BrowserWindow, Menu, MenuItemConstructorOptions, app, shell } from 'electron'
 import { CHANNELS } from '../shared/ipc'
+import { MenuAction, MenuItemModel, MenuRole, buildMenuModel } from '../shared/menu'
 
-export type MenuAction =
-  | 'connection:new'
-  | 'connection:manage'
-  | 'connection:disconnect'
-  | 'tab:new-query'
-  | 'tab:close'
-  | 'tab:next'
-  | 'tab:previous'
-  | 'query:open-file'
-  | 'query:save'
-  | 'query:save-as'
-  | 'query:run'
-  | 'query:run-selection'
-  | 'query:run-current'
-  | 'query:cancel'
-  | 'query:format'
-  | 'results:export'
-  | 'results:copy'
-  | 'view:toggle-sidebar'
-  | 'view:toggle-theme'
-  | 'view:focus-filter'
-  | 'schema:refresh'
-  | 'help:shortcuts'
+export type { MenuAction, MenuRole } from '../shared/menu'
 
-export function buildMenu(
-  getWindow: () => BrowserWindow | null,
-  onNewWindow: () => void
-): Menu {
+/** Electron's role names for the roles the model uses. */
+const ELECTRON_ROLES: Record<MenuRole, MenuItemConstructorOptions['role']> = {
+  about: 'about',
+  services: 'services',
+  hide: 'hide',
+  hideOthers: 'hideOthers',
+  unhide: 'unhide',
+  quit: 'quit',
+  undo: 'undo',
+  redo: 'redo',
+  cut: 'cut',
+  copy: 'copy',
+  paste: 'paste',
+  selectAll: 'selectAll',
+  resetZoom: 'resetZoom',
+  zoomIn: 'zoomIn',
+  zoomOut: 'zoomOut',
+  toggleFullScreen: 'togglefullscreen',
+  toggleDevTools: 'toggleDevTools',
+  minimize: 'minimize',
+  closeWindow: 'close'
+}
+
+export function buildMenu(getWindow: () => BrowserWindow | null, onNewWindow: () => void): Menu {
   const send = (action: MenuAction) => (): void => {
     getWindow()?.webContents.send(CHANNELS.eventMenuAction, action)
   }
 
   const isMac = process.platform === 'darwin'
 
-  const template: MenuItemConstructorOptions[] = [
-    ...(isMac
-      ? ([
-          {
-            label: app.name,
-            submenu: [
-              { role: 'about' },
-              { type: 'separator' },
-              { role: 'services' },
-              { type: 'separator' },
-              { role: 'hide' },
-              { role: 'hideOthers' },
-              { role: 'unhide' },
-              { type: 'separator' },
-              { role: 'quit' }
-            ]
-          }
-        ] as MenuItemConstructorOptions[])
-      : []),
-    {
-      label: '&File',
-      submenu: [
-        { label: 'New Window', accelerator: 'CmdOrCtrl+N', click: onNewWindow },
-        { label: 'New Connection…', accelerator: 'CmdOrCtrl+Shift+N', click: send('connection:new') },
-        { label: 'Manage Connections', accelerator: 'CmdOrCtrl+Shift+M', click: send('connection:manage') },
-        { type: 'separator' },
-        { label: 'New Query Tab', accelerator: 'CmdOrCtrl+T', click: send('tab:new-query') },
-        { label: 'Open SQL File…', accelerator: 'CmdOrCtrl+O', click: send('query:open-file') },
-        { label: 'Save Query', accelerator: 'CmdOrCtrl+S', click: send('query:save') },
-        { label: 'Save Query As…', accelerator: 'CmdOrCtrl+Shift+S', click: send('query:save-as') },
-        { type: 'separator' },
-        { label: 'Export Results…', accelerator: 'CmdOrCtrl+Shift+E', click: send('results:export') },
-        { type: 'separator' },
-        { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: send('tab:close') },
-        { label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W', role: 'close' },
-        { label: 'Disconnect', click: send('connection:disconnect') },
-        { type: 'separator' },
-        isMac ? { role: 'close' } : { role: 'quit' }
-      ]
-    },
-    {
-      label: '&Edit',
-      submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
-        { type: 'separator' },
-        { role: 'cut' },
-        { role: 'copy' },
-        { role: 'paste' },
-        { role: 'selectAll' },
-        { type: 'separator' },
-        { label: 'Format SQL', accelerator: 'CmdOrCtrl+Shift+F', click: send('query:format') },
-        { label: 'Focus Filter', accelerator: 'CmdOrCtrl+F', click: send('view:focus-filter') }
-      ]
-    },
-    {
-      label: '&Query',
-      submenu: [
-        { label: 'Run', accelerator: 'CmdOrCtrl+Return', click: send('query:run') },
-        { label: 'Run Selection', accelerator: 'CmdOrCtrl+Shift+Return', click: send('query:run-selection') },
-        { label: 'Run Current Statement', accelerator: 'CmdOrCtrl+Alt+Return', click: send('query:run-current') },
-        { label: 'Cancel', accelerator: 'Escape', click: send('query:cancel') },
-        { type: 'separator' },
-        { label: 'Copy Results', accelerator: 'CmdOrCtrl+Shift+C', click: send('results:copy') }
-      ]
-    },
-    {
-      label: '&View',
-      submenu: [
-        { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: send('view:toggle-sidebar') },
-        { label: 'Toggle Theme', accelerator: 'CmdOrCtrl+Shift+L', click: send('view:toggle-theme') },
-        { label: 'Refresh Schema', accelerator: 'F5', click: send('schema:refresh') },
-        { type: 'separator' },
-        { label: 'Next Tab', accelerator: 'Ctrl+Tab', click: send('tab:next') },
-        { label: 'Previous Tab', accelerator: 'Ctrl+Shift+Tab', click: send('tab:previous') },
-        { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' },
-        { role: 'toggleDevTools' }
-      ]
-    },
-    {
-      label: '&Help',
-      submenu: [
-        { label: 'Keyboard Shortcuts', accelerator: 'CmdOrCtrl+/', click: send('help:shortcuts') },
-        {
-          label: 'SQL Server Documentation',
-          click: () => {
-            void shell.openExternal('https://learn.microsoft.com/sql/t-sql/language-reference')
-          }
-        }
-      ]
+  function toElectronItem(item: MenuItemModel): MenuItemConstructorOptions {
+    if (item.separator) return { type: 'separator' }
+
+    const base: MenuItemConstructorOptions = { label: item.label }
+    // Electron only reads the accelerator from a role when none is given, and
+    // the roles' defaults already match the model, so pass ours through.
+    if (item.accelerator) base.accelerator = item.accelerator
+
+    if (item.role) return { ...base, role: ELECTRON_ROLES[item.role] }
+    if (item.action) return { ...base, click: send(item.action) }
+    if (item.command === 'window:new') return { ...base, click: onNewWindow }
+    if (item.link) {
+      const url = item.link
+      return { ...base, click: () => void shell.openExternal(url) }
     }
-  ]
+    return base
+  }
+
+  const template: MenuItemConstructorOptions[] = buildMenuModel(process.platform).map((menu) => ({
+    // `&` marks the Alt mnemonic on Windows and Linux; macOS shows it verbatim.
+    label: isMac ? menu.label : `&${menu.label}`,
+    submenu: menu.items.map(toElectronItem)
+  }))
 
   return Menu.buildFromTemplate(template)
+}
+
+/**
+ * Runs one of the menu roles on behalf of the title bar's copy of the menu.
+ * The renderer cannot reach the clipboard, the zoom level or the window frame,
+ * so those items come back here.
+ */
+export function runMenuRole(role: MenuRole, window: BrowserWindow | null): void {
+  const contents = window?.webContents
+
+  switch (role) {
+    case 'undo':
+      contents?.undo()
+      break
+    case 'redo':
+      contents?.redo()
+      break
+    case 'cut':
+      contents?.cut()
+      break
+    case 'copy':
+      contents?.copy()
+      break
+    case 'paste':
+      contents?.paste()
+      break
+    case 'selectAll':
+      contents?.selectAll()
+      break
+    case 'resetZoom':
+      contents?.setZoomLevel(0)
+      break
+    case 'zoomIn':
+      if (contents) contents.setZoomLevel(Math.min(9, contents.getZoomLevel() + 0.5))
+      break
+    case 'zoomOut':
+      if (contents) contents.setZoomLevel(Math.max(-8, contents.getZoomLevel() - 0.5))
+      break
+    case 'toggleFullScreen':
+      if (window) window.setFullScreen(!window.isFullScreen())
+      break
+    case 'toggleDevTools':
+      contents?.toggleDevTools()
+      break
+    case 'minimize':
+      window?.minimize()
+      break
+    case 'closeWindow':
+      window?.close()
+      break
+    case 'quit':
+      app.quit()
+      break
+    case 'about':
+      app.showAboutPanel()
+      break
+    // The remaining macOS roles are only ever shown in the system menu bar.
+    case 'services':
+    case 'hide':
+    case 'hideOthers':
+    case 'unhide':
+      break
+  }
 }

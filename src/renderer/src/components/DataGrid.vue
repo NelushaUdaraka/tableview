@@ -35,6 +35,12 @@ const props = withDefaults(
     /** Row number of the first row, for paged views. */
     rowOffset?: number
     primaryKey?: string[]
+    /**
+     * Column index -> what its foreign key points at, e.g.
+     * `dbo.customers.customer_id`. Those cells get an arrow that asks the
+     * parent to open the referenced row.
+     */
+    foreignKeys?: Record<number, string>
     emptyMessage?: string
   }>(),
   {
@@ -45,6 +51,7 @@ const props = withDefaults(
     sorts: () => [],
     rowOffset: 0,
     primaryKey: () => [],
+    foreignKeys: () => ({}),
     emptyMessage: 'No rows'
   }
 )
@@ -55,12 +62,15 @@ const emit = defineEmits<{
   (event: 'delete-rows', rowIndexes: number[]): void
   (event: 'row-context', payload: { rowIndex: number; columnIndex: number; x: number; y: number }): void
   (event: 'selection', payload: { rowIndex: number; columnIndex: number } | null): void
+  (event: 'follow-key', payload: { rowIndex: number; columnIndex: number }): void
 }>()
 
 const ROW_HEIGHT = 26
 const OVERSCAN = 8
 const MIN_WIDTH = 60
 const MAX_AUTO_WIDTH = 420
+/** How far the editor may grow over the rows below before it scrolls. */
+const MAX_EDITOR_HEIGHT = 220
 
 const viewport = ref<HTMLElement | null>(null)
 const scrollTop = ref(0)
@@ -69,7 +79,7 @@ const widths = ref<number[]>([])
 const selected = ref<{ row: number; col: number } | null>(null)
 const editing = ref<{ row: number; col: number } | null>(null)
 const editValue = ref('')
-const editInput = ref<HTMLInputElement | null>(null)
+const editInput = ref<HTMLTextAreaElement | null>(null)
 
 /**
  * A plain `ref="editInput"` would not work here: Vue collects template refs
@@ -78,7 +88,22 @@ const editInput = ref<HTMLInputElement | null>(null)
  * single element that `v-if` actually renders.
  */
 function bindEditInput(element: Element | ComponentPublicInstance | null): void {
-  editInput.value = (element as HTMLInputElement | null) ?? null
+  editInput.value = (element as HTMLTextAreaElement | null) ?? null
+}
+
+/**
+ * Grows the editor to fit its text.
+ *
+ * Cells are one line tall, but the values in them are not: an `nvarchar(max)`
+ * or a JSON blob is unreadable through a 26px slot. The editor is a textarea
+ * that overflows its cell downwards, which is also what makes newlines
+ * editable at all.
+ */
+function autoSizeEditor(): void {
+  const input = editInput.value
+  if (!input) return
+  input.style.height = 'auto'
+  input.style.height = `${Math.min(MAX_EDITOR_HEIGHT, Math.max(ROW_HEIGHT, input.scrollHeight + 2))}px`
 }
 
 const totalHeight = computed(() => props.rows.length * ROW_HEIGHT)
@@ -157,6 +182,9 @@ watch(
     measureColumns()
     selected.value = null
     editing.value = null
+    // A new shape means the old selection is meaningless; say so, or a row
+    // inspector would keep showing a row that is no longer there.
+    emit('selection', null)
   },
   { immediate: true, deep: false }
 )
@@ -274,17 +302,25 @@ function canEditColumn(columnIndex: number): boolean {
   return Boolean(props.editable && column && !column.isReadOnly)
 }
 
-function beginEdit(row: number, col: number): void {
+/**
+ * Opens the editor on a cell. `initial` replaces the cell's text — that is the
+ * "just start typing" path, where the caret has to land after the character
+ * that opened the editor rather than selecting it.
+ */
+function beginEdit(row: number, col: number, initial?: string): void {
   if (!canEditColumn(col)) return
   const key = cellKey(row, col)
   const current = key in props.editedCells ? props.editedCells[key] : props.rows[row]?.[col]
-  editValue.value = current === null || current === undefined ? '' : formatCellFull(current)
+  editValue.value =
+    initial ?? (current === null || current === undefined ? '' : formatCellFull(current))
   editing.value = { row, col }
   void nextTick(() => {
     const input = editInput.value
     if (!input) return
     input.focus()
-    input.select()
+    if (initial === undefined) input.select()
+    else input.setSelectionRange(input.value.length, input.value.length)
+    autoSizeEditor()
   })
 }
 
@@ -397,8 +433,7 @@ function onCellKeydown(event: KeyboardEvent): void {
         !event.metaKey &&
         !event.altKey
       ) {
-        beginEdit(row, col)
-        editValue.value = event.key
+        beginEdit(row, col, event.key)
         event.preventDefault()
       }
   }
@@ -428,6 +463,17 @@ async function copySelection(wholeRow: boolean): Promise<void> {
         .join('\t')
     : (displayValue(row, col) ?? '')
   await api.copyToClipboard(text)
+}
+
+/** An arrow is only offered where there is a row to open. */
+function canFollowKey(row: number, col: number): boolean {
+  return Boolean(props.foreignKeys[col]) && displayValue(row, col) !== null
+}
+
+function followKey(row: number, col: number): void {
+  if (!canFollowKey(row, col)) return
+  selectCell(row, col)
+  emit('follow-key', { rowIndex: row, columnIndex: col })
 }
 
 function onCellContextMenu(row: number, col: number, event: MouseEvent): void {
@@ -491,11 +537,18 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
           :class="[
             row.index % 2 === 1 ? 'grid__row--odd' : '',
             row.state === 'inserted' ? 'grid__row--inserted' : '',
-            row.state === 'deleted' ? 'grid__row--deleted' : ''
+            row.state === 'deleted' ? 'grid__row--deleted' : '',
+            editing?.row === row.index ? 'grid__row--editing' : ''
           ]"
           :style="{ transform: `translateY(${row.top}px)`, gridTemplateColumns: gridTemplate }"
         >
-          <div class="grid__rownum">{{ rowOffset + row.index + 1 }}</div>
+          <div
+            class="grid__rownum"
+            @mousedown="selectCell(row.index, 0)"
+            @contextmenu="onCellContextMenu(row.index, 0, $event)"
+          >
+            {{ rowOffset + row.index + 1 }}
+          </div>
           <div
             v-for="(column, colIndex) in columns"
             :key="colIndex"
@@ -504,27 +557,48 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
               `grid__cell--${column.jsKind}`,
               selected?.row === row.index && selected?.col === colIndex ? 'grid__cell--selected' : '',
               isEdited(row.index, colIndex) ? 'grid__cell--edited' : '',
-              displayValue(row.index, colIndex) === null ? 'grid__cell--null' : ''
+              displayValue(row.index, colIndex) === null ? 'grid__cell--null' : '',
+              editing?.row === row.index && editing?.col === colIndex ? 'grid__cell--editing' : ''
             ]"
             @mousedown="selectCell(row.index, colIndex)"
             @dblclick="beginEdit(row.index, colIndex)"
             @contextmenu="onCellContextMenu(row.index, colIndex, $event)"
           >
-            <input
+            <textarea
               v-if="editing?.row === row.index && editing?.col === colIndex"
               :ref="bindEditInput"
               v-model="editValue"
               class="grid__editor"
+              rows="1"
               spellcheck="false"
-              @keydown.enter.prevent.stop="commitEdit('down')"
+              @input="autoSizeEditor"
+              @keydown.enter.exact.prevent.stop="commitEdit('down')"
               @keydown.esc.prevent.stop="cancelEdit"
               @keydown.tab.prevent.stop="commitEdit('right')"
               @keydown.stop
               @blur="commitEdit()"
-            />
+            ></textarea>
             <template v-else>
               <span v-if="displayValue(row.index, colIndex) === null" class="grid__null">NULL</span>
               <span v-else class="truncate">{{ displayValue(row.index, colIndex) }}</span>
+              <button
+                v-if="canFollowKey(row.index, colIndex)"
+                class="grid__fk"
+                :title="`Open ${foreignKeys[colIndex]} = ${displayValue(row.index, colIndex)}`"
+                @mousedown.stop
+                @click.stop="followKey(row.index, colIndex)"
+              >
+                <svg viewBox="0 0 12 12" aria-hidden="true">
+                  <path
+                    d="M4 2.4 7.8 6 4 9.6"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
             </template>
           </div>
         </div>
@@ -641,8 +715,13 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
   text-decoration: line-through;
   opacity: 0.7;
 }
+/* The open editor overflows its cell, so its row has to paint over the rest. */
+.grid__row--editing {
+  z-index: 5;
+}
 
 .grid__rownum {
+  cursor: default;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -657,8 +736,10 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
 }
 
 .grid__cell {
+  position: relative;
   display: flex;
   align-items: center;
+  gap: 4px;
   padding: 0 8px;
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
@@ -681,6 +762,47 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
 .grid__cell--edited {
   background: var(--cell-edited);
 }
+.grid__cell--editing {
+  overflow: visible;
+  z-index: 2;
+}
+.grid__cell > .truncate {
+  min-width: 0;
+}
+
+/* --- foreign key arrow --------------------------------------------------- */
+.grid__fk {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--info);
+  opacity: 0.5;
+  cursor: pointer;
+}
+/* Right-aligned values keep their edge; the arrow follows the number. */
+.grid__cell--number .grid__fk,
+.grid__cell--bytes .grid__fk {
+  margin-left: 0;
+}
+.grid__fk svg {
+  width: 11px;
+  height: 11px;
+}
+.grid__cell:hover .grid__fk,
+.grid__cell--selected .grid__fk {
+  opacity: 1;
+}
+.grid__fk:hover {
+  background: color-mix(in srgb, var(--info) 22%, transparent);
+}
 .grid__null {
   color: var(--text-muted);
   font-style: italic;
@@ -688,15 +810,27 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
 }
 
 .grid__editor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 6;
   width: 100%;
-  height: 22px;
-  padding: 0 4px;
+  /* Narrow columns still need room to read what is being typed. */
+  min-width: 240px;
+  max-width: 520px;
+  min-height: 26px;
+  padding: 4px 5px;
   border: 1px solid var(--border-focus);
   border-radius: 2px;
   background: var(--bg-input);
+  box-shadow: var(--shadow);
   color: var(--text-primary);
   font-family: var(--font-mono);
   font-size: 12px;
+  line-height: 16px;
+  white-space: pre-wrap;
+  overflow-y: auto;
+  resize: none;
   outline: none;
   user-select: text;
 }

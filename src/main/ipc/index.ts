@@ -27,12 +27,15 @@ import {
   TableChangeSet,
   TableDataRequest
 } from '../../shared/types'
-import { AppInfo, CHANNELS, IpcResult } from '../../shared/ipc'
+import { AppInfo, CHANNELS, IpcResult, WindowChromeState } from '../../shared/ipc'
+import { MenuRole } from '../../shared/menu'
 import { EXPORT_EXTENSIONS, exportRows } from '../../shared/export'
 import { credentialsToEnv, parseAwsCredentials } from '../../shared/aws/credentials'
 import { ConnectionRegistry } from '../db/registry'
 import { serializeError } from '../db/sqlserver/client'
 import { AppData } from '../storage/appData'
+import { runMenuRole } from '../menu'
+import { chromeState } from '../window'
 import { checkSsmPrerequisites } from '../tunnel/ssmPreflight'
 import { listSsmInstances } from '../tunnel/ec2Instances'
 
@@ -95,6 +98,31 @@ export function registerIpcHandlers(context: IpcContext): void {
     // The creator lives in main/index.ts; it registers itself here.
     if (!newWindowFactory) throw new Error('Window creation is not available')
     newWindowFactory()
+  })
+
+  // -- window frame ---------------------------------------------------------
+  // The title bar is drawn by the renderer, so the buttons on it come back
+  // here to act on the real window.
+
+  handle(CHANNELS.windowMinimize, (call) => {
+    call.window?.minimize()
+  })
+
+  handle(CHANNELS.windowToggleMaximize, (call) => {
+    const window = call.window
+    if (!window) return
+    if (window.isMaximized()) window.unmaximize()
+    else window.maximize()
+  })
+
+  handle(CHANNELS.windowClose, (call) => {
+    call.window?.close()
+  })
+
+  handle(CHANNELS.windowChrome, (call): WindowChromeState => chromeState(call.window))
+
+  handle(CHANNELS.windowMenuRole, (call, role: MenuRole) => {
+    runMenuRole(role, call.window)
   })
 
   // -- saved connections ----------------------------------------------------
@@ -329,7 +357,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     return result.filePath
   })
 
-  handle('shell:openExternal', (_call, url: string) => shell.openExternal(url))
+  handle(CHANNELS.shellOpenExternal, (_call, url: string) => shell.openExternal(url))
 }
 
 /** Set by main/index.ts so the renderer can ask for another window. */

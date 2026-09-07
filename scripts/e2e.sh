@@ -62,7 +62,8 @@ case "$SUITE" in
   smoke)     run smoke ;;
   workspace) run workspace ;;
   editing)   run editing ;;
+  table-ui)  run table-ui ;;
   ssm-form)  run ssm-form ;;
-  all)       run smoke; run workspace; run editing; run ssm-form ;;
-  *) echo "usage: $0 {smoke|workspace|editing|ssm-form|all}" >&2; exit 1 ;;
+  all)       run smoke; run workspace; run editing; run table-ui; run ssm-form ;;
+  *) echo "usage: $0 {smoke|workspace|editing|table-ui|ssm-form|all}" >&2; exit 1 ;;
 esac

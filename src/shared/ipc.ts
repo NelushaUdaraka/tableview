@@ -21,6 +21,7 @@ import {
   TableForeignKey,
   TableStructure
 } from './types'
+import type { MenuRole } from './menu'
 
 /** Result of the AWS SSM readiness check; mirrors `main/tunnel/ssmPreflight`. */
 export interface SsmCheckResult {
@@ -81,7 +82,15 @@ export const CHANNELS = {
   connectionsTest: 'connections:test',
   ssmCheck: 'ssm:check',
   ssmInstances: 'ssm:instances',
+
   windowNew: 'window:new',
+  windowMinimize: 'window:minimize',
+  windowToggleMaximize: 'window:toggleMaximize',
+  windowClose: 'window:close',
+  windowChrome: 'window:chrome',
+  windowMenuRole: 'window:menuRole',
+
+  shellOpenExternal: 'shell:openExternal',
 
   dbConnect: 'db:connect',
   dbDisconnect: 'db:disconnect',
@@ -122,8 +131,20 @@ export const CHANNELS = {
   /** main -> renderer */
   eventStatusChanged: 'event:statusChanged',
   eventServerMessage: 'event:serverMessage',
-  eventMenuAction: 'event:menuAction'
+  eventMenuAction: 'event:menuAction',
+  eventWindowChrome: 'event:windowChrome'
 } as const
+
+/**
+ * What the custom title bar needs to know about its window. The frame is drawn
+ * in the renderer, so the maximise button and the macOS traffic-light inset
+ * have to be told when the real window changes state.
+ */
+export interface WindowChromeState {
+  maximized: boolean
+  fullScreen: boolean
+  focused: boolean
+}
 
 export interface AppInfo {
   version: string
@@ -149,7 +170,15 @@ export interface RendererApi {
   checkSsmPrerequisites(config: SsmConfig, connectionId?: string): Promise<SsmPreflight>
   /** Instances in the configured region, so the bastion can be picked rather than typed. */
   listSsmInstances(config: SsmConfig, connectionId?: string): Promise<SsmInstanceList>
+
   openNewWindow(): Promise<void>
+  minimizeWindow(): Promise<void>
+  toggleMaximizeWindow(): Promise<void>
+  closeWindow(): Promise<void>
+  getWindowChrome(): Promise<WindowChromeState>
+  /** Runs a menu item the renderer cannot: clipboard, zoom, dev tools, quit. */
+  runMenuRole(role: MenuRole): Promise<void>
+  openExternal(url: string): Promise<void>
 
   connect(connectionId: string, password?: string): Promise<ConnectionStatus>
   disconnect(connectionId: string): Promise<void>
@@ -201,6 +230,7 @@ export interface RendererApi {
 
   onStatusChanged(handler: (status: ConnectionStatus) => void): () => void
   onMenuAction(handler: (action: string) => void): () => void
+  onWindowChrome(handler: (state: WindowChromeState) => void): () => void
 }
 
 declare global {

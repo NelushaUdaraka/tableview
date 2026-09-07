@@ -6,7 +6,7 @@
  * real Errors that keep the SQL Server error number, line and procedure.
  */
 import { contextBridge, ipcRenderer } from 'electron'
-import { CHANNELS, IpcResult, RendererApi } from '../shared/ipc'
+import { CHANNELS, IpcResult, RendererApi, WindowChromeState } from '../shared/ipc'
 import type {
   ConnectionStatus,
   ExportRequest,
@@ -45,6 +45,12 @@ const api: RendererApi = {
   listSsmInstances: (config, connectionId) =>
     invoke(CHANNELS.ssmInstances, config, connectionId),
   openNewWindow: () => invoke(CHANNELS.windowNew),
+  minimizeWindow: () => invoke(CHANNELS.windowMinimize),
+  toggleMaximizeWindow: () => invoke(CHANNELS.windowToggleMaximize),
+  closeWindow: () => invoke(CHANNELS.windowClose),
+  getWindowChrome: () => invoke(CHANNELS.windowChrome),
+  runMenuRole: (role) => invoke(CHANNELS.windowMenuRole, role),
+  openExternal: (url) => invoke(CHANNELS.shellOpenExternal, url),
 
   connect: (connectionId, password) => invoke(CHANNELS.dbConnect, connectionId, password),
   disconnect: (connectionId) => invoke(CHANNELS.dbDisconnect, connectionId),
@@ -93,7 +99,9 @@ const api: RendererApi = {
   onStatusChanged: (handler: (status: ConnectionStatus) => void) =>
     subscribe(CHANNELS.eventStatusChanged, handler as (payload: never) => void),
   onMenuAction: (handler: (action: string) => void) =>
-    subscribe(CHANNELS.eventMenuAction, handler as (payload: never) => void)
+    subscribe(CHANNELS.eventMenuAction, handler as (payload: never) => void),
+  onWindowChrome: (handler: (state: WindowChromeState) => void) =>
+    subscribe(CHANNELS.eventWindowChrome, handler as (payload: never) => void)
 }
 
 contextBridge.exposeInMainWorld('api', api)

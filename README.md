@@ -117,6 +117,30 @@ npm install
 npm run dev          # hot-reloading dev build
 ```
 
+### If `npm run dev` says "Electron uninstall"
+
+Electron 44 has no postinstall hook — it exposes an `install-electron` bin and otherwise fetches its
+binary lazily on first launch. electron-vite reads `node_modules/electron/path.txt` directly, so it
+never triggers that lazy fetch and fails instead. The `postinstall` script in `package.json` runs the
+installer for you; if you installed with `--ignore-scripts`, or the download was blocked, run it by
+hand:
+
+```bash
+npx install-electron
+```
+
+That downloads roughly 100 MB from GitHub releases and writes `path.txt`. Behind a proxy or a
+mirror, point it somewhere reachable first:
+
+```bash
+# a mirror
+set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+npx install-electron
+
+# or an already-downloaded, unzipped build
+set ELECTRON_OVERRIDE_DIST_PATH=C:\path\to\electron-v44.1.1-win32-x64
+```
+
 ### Build for Windows
 
 The whole production dependency tree is **pure JavaScript** — no native modules — so there is no

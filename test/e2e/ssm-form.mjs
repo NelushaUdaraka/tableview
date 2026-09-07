@@ -1,0 +1,270 @@
+/**
+ * Verifies the tunnel picker and the AWS SSM preflight in the real UI.
+ *
+ * `.tmp/bin` holds stand-ins for `aws` and `session-manager-plugin`, so both
+ * the pass and fail states of the prerequisite check can be shown without an
+ * AWS account or a real install.
+ */
+import { spawn } from 'node:child_process'
+import { writeFileSync, mkdirSync } from 'node:fs'
+import { setTimeout as delay } from 'node:timers/promises'
+
+const PROJECT = new URL('../..', import.meta.url).pathname.replace(/\/$/, '')
+const PORT = 9227
+const SHOTS = process.argv[2] ?? `${PROJECT}/.tmp/e2e-ssm`
+mkdirSync(SHOTS, { recursive: true })
+
+const logs = []
+const child = spawn(
+  `${PROJECT}/node_modules/.bin/electron`,
+  ['.', `--remote-debugging-port=${PORT}`, '--no-sandbox', `--user-data-dir=${PROJECT}/.tmp/profile-ssm`],
+  {
+    cwd: PROJECT,
+    env: {
+      ...process.env,
+      DISPLAY: process.env.DISPLAY ?? ':99',
+      // Put the stand-ins ahead of anything real on PATH.
+      PATH: `${PROJECT}/.tmp/bin:${process.env.PATH}`
+    }
+  }
+)
+child.stdout.on('data', (d) => logs.push(d.toString()))
+child.stderr.on('data', (d) => logs.push(d.toString()))
+
+const steps = []
+function bail(message) {
+  console.log('SSM FORM E2E FAIL:', message)
+  console.log(JSON.stringify(steps, null, 2))
+  process.stdout.write(logs.join('').split('\n').slice(-25).join('\n'))
+  child.kill('SIGKILL')
+  process.exit(1)
+}
+
+let url
+for (let i = 0; i < 60; i += 1) {
+  try {
+    const targets = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json()
+    const page = targets.find((t) => t.type === 'page' && t.webSocketDebuggerUrl)
+    if (page) { url = page.webSocketDebuggerUrl; break }
+  } catch { /* waiting */ }
+  await delay(500)
+}
+if (!url) bail('devtools never appeared')
+
+const socket = new WebSocket(url)
+let nextId = 1
+const pending = new Map()
+socket.addEventListener('message', (e) => {
+  const m = JSON.parse(e.data)
+  if (m.id && pending.has(m.id)) {
+    const { resolve, reject } = pending.get(m.id); pending.delete(m.id)
+    m.error ? reject(new Error(JSON.stringify(m.error))) : resolve(m.result)
+  }
+})
+await new Promise((r) => socket.addEventListener('open', r))
+const send = (method, params = {}) => {
+  const id = nextId++
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject })
+    socket.send(JSON.stringify({ id, method, params }))
+    setTimeout(() => { if (pending.has(id)) { pending.delete(id); reject(new Error(method + ' timeout')) } }, 30000)
+  })
+}
+const ev = async (expr) => {
+  const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true })
+  if (r.exceptionDetails) bail('evaluate: ' + (r.exceptionDetails.exception?.description ?? ''))
+  return r.result.value
+}
+const waitFor = async (expr, label, ms = 30000) => {
+  const end = Date.now() + ms
+  while (Date.now() < end) {
+    const v = await ev(`(() => { try { return ${expr} } catch { return null } })()`)
+    if (v) return v
+    await delay(250)
+  }
+  bail('timed out waiting for ' + label)
+}
+const shot = async (name) => {
+  const r = await send('Page.captureScreenshot', { format: 'png' })
+  writeFileSync(`${SHOTS}/${name}.png`, Buffer.from(r.data, 'base64'))
+}
+const setInput = (selector, value) => ev(`
+  (() => {
+    const el = document.querySelector(${JSON.stringify(selector)})
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    setter.call(el, ${JSON.stringify(value)})
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    return el.value
+  })()
+`)
+
+await send('Runtime.enable'); await send('Page.enable')
+await waitFor(`!!document.querySelector('.brand__title')`, 'connection screen')
+
+// Start from a clean slate.
+await ev(`(async () => { for (const c of await window.api.listConnections()) await window.api.deleteConnection(c.id) })()`)
+await ev('location.reload()')
+await delay(1200)
+await send('Runtime.enable')
+await waitFor(`!!document.querySelector('.brand__title')`, 'reloaded')
+
+// Open the new-connection form and go to the Tunnel tab.
+await ev(`[...document.querySelectorAll('.btn')].find(b => b.textContent.includes('New connection')).click()`)
+await waitFor(`!!document.querySelector('.form__tabs')`, 'connection form')
+await ev(`[...document.querySelectorAll('.form__tab')].find(t => t.textContent.includes('Tunnel')).click()`)
+await waitFor(`!!document.querySelector('.choices')`, 'tunnel picker')
+
+steps.push({
+  step: 'tunnel picker',
+  choices: await ev(`[...document.querySelectorAll('.choice__label')].map(e => e.textContent.trim())`),
+  active: await ev(`document.querySelector('.choice--active .choice__label')?.textContent?.trim()`)
+})
+await shot('01-tunnel-picker')
+
+// Choose AWS SSM.
+await ev(`[...document.querySelectorAll('.choice')].find(c => c.textContent.includes('AWS SSM')).click()`)
+await waitFor(`!!document.querySelector('input[placeholder="i-0123456789abcdef0"]')`, 'ssm fields')
+steps.push({
+  step: 'ssm selected',
+  active: await ev(`document.querySelector('.choice--active .choice__label')?.textContent?.trim()`),
+  fields: await ev(`[...document.querySelectorAll('.form__group .field__label')].map(e => e.textContent.trim())`)
+})
+
+// Invalid instance id should be rejected inline.
+await setInput('input[placeholder="i-0123456789abcdef0"]', 'not-an-instance')
+await delay(300)
+steps.push({
+  step: 'validation',
+  error: await ev(`document.querySelector('.form__group .error-text')?.textContent?.trim() ?? null`),
+  saveDisabled: await ev(`document.querySelector('button[type=submit]').disabled`)
+})
+
+// Now a valid one.
+await setInput('input[placeholder="i-0123456789abcdef0"]', 'i-0123456789abcdef0')
+await delay(300)
+steps.push({
+  step: 'validation cleared',
+  error: await ev(`document.querySelector('.form__group .error-text')?.textContent?.trim() ?? null`),
+  saveDisabled: await ev(`document.querySelector('button[type=submit]').disabled`)
+})
+
+// Paste credentials the way the portal hands them out. They now belong to the
+// connection, so they are saved with it rather than applied globally.
+steps.push({
+  step: 'credentials required before save',
+  blocked: await ev(`document.querySelector('.form__group .error-text')?.textContent?.trim() ?? null`)
+})
+
+await ev(`
+  (() => {
+    const box = document.querySelector('.creds__box')
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(box, [
+      'export AWS_ACCESS_KEY_ID="ASIAIOSFODNN7EXAMPLE"',
+      'export AWS_SECRET_ACCESS_KEY="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"',
+      'export AWS_SESSION_TOKEN="IQoJb3JpZ2luX2VjEJr//////////wEaCXVzLWVhc3QtMSJH"',
+      'export AWS_DEFAULT_REGION="eu-west-2"'
+    ].join('\\n'))
+    box.dispatchEvent(new Event('input', { bubbles: true }))
+    return box.value.length
+  })()
+`)
+await delay(300)
+steps.push({
+  step: 'credentials typed',
+  blockCleared: await ev(`document.querySelector('.form__group .error-text')?.textContent?.trim() ?? null`)
+})
+await shot('02-credentials-pasted')
+
+// Preflight with a bogus CLI path — expect a failure row for the CLI.
+await setInput('input[placeholder="aws (found on PATH)"]', '/nonexistent/aws')
+await delay(200)
+await ev(`[...document.querySelectorAll('.preflight .btn')].find(b => b.textContent.includes('Check')).click()`)
+await waitFor(`!!document.querySelector('.preflight__results')`, 'preflight results', 40000)
+await delay(400)
+steps.push({
+  step: 'preflight with a bad CLI path',
+  rows: await ev(`[...document.querySelectorAll('.preflight__row')].map(r => r.textContent.replace(/\\s+/g,' ').trim())`)
+})
+await shot('04-preflight-failure')
+
+// Clear the path so the stand-in on PATH is used — expect all green.
+await setInput('input[placeholder="aws (found on PATH)"]', '')
+await delay(200)
+await ev(`[...document.querySelectorAll('.preflight .btn')].find(b => b.textContent.includes('Check')).click()`)
+await waitFor(
+  `[...document.querySelectorAll('.preflight__mark')].every(m => m.textContent.trim() === '✓')`,
+  'all prerequisites green',
+  40000
+)
+steps.push({
+  step: 'preflight success',
+  rows: await ev(`[...document.querySelectorAll('.preflight__row')].map(r => r.textContent.replace(/\\s+/g,' ').trim())`)
+})
+await shot('05-preflight-success')
+
+// Fill the rest and save, then confirm it round-trips through storage.
+await ev(`[...document.querySelectorAll('.form__tab')].find(t => t.textContent.includes('General')).click()`)
+await waitFor(`!!document.querySelector('input[placeholder="Production reporting"]')`, 'general tab')
+await setInput('input[placeholder="Production reporting"]', 'Prod via bastion')
+await setInput('input[placeholder="localhost"]', 'prod.abc123.eu-west-2.rds.amazonaws.com')
+await delay(300)
+await ev(`document.querySelector('button[type=submit]').click()`)
+await waitFor(`!!document.querySelector('.card')`, 'saved connection card', 20000)
+
+steps.push({
+  step: 'saved',
+  stored: await ev(`
+    (async () => {
+      const list = await window.api.listConnections()
+      const c = list[0]
+      return JSON.stringify({
+        name: c.name,
+        host: c.host,
+        hasSavedAwsCredentials: c.hasSavedAwsCredentials,
+        ssm: c.ssm,
+        sshEnabled: c.ssh.enabled
+      })
+    })()
+  `),
+  // The secret must never come back to the renderer, even after saving.
+  secretReachesRenderer: await ev(`
+    (async () => JSON.stringify(await window.api.listConnections()).includes('wJalrXUtnFEMI'))()
+  `),
+  cardSubtitle: await ev(`document.querySelector('.card__sub')?.textContent?.trim()`)
+})
+
+// Reopen the saved connection: the summary should be there, the box empty.
+await ev(`[...document.querySelectorAll('.card__buttons .btn')].find(b => b.textContent.includes('Edit')).click()`)
+await waitFor(`!!document.querySelector('.form__tabs')`, 'edit form')
+await ev(`[...document.querySelectorAll('.form__tab')].find(t => t.textContent.includes('Tunnel')).click()`)
+await waitFor(`!!document.querySelector('.creds__current')`, 'stored credential summary')
+steps.push({
+  step: 'reopened',
+  summary: await ev(`document.querySelector('.creds__key')?.textContent?.trim()`),
+  savedAt: await ev(`document.querySelector('.creds__arn')?.textContent?.trim()`),
+  boxEmpty: await ev(`document.querySelector('.creds__box').value === ''`),
+  secretInDom: await ev(`document.body.innerHTML.includes('wJalrXUtnFEMI')`)
+})
+await shot('07-reopened')
+await ev(`[...document.querySelectorAll('.modal__head .btn')].pop().click()`)
+await delay(400)
+
+// A second window must open, and be independent of the first.
+const before = (await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json()).filter(
+  (t) => t.type === 'page'
+).length
+await ev(`(async () => { await window.api.openNewWindow() })()`)
+await delay(2500)
+const after = (await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json()).filter(
+  (t) => t.type === 'page'
+).length
+steps.push({ step: 'new window', pagesBefore: before, pagesAfter: after })
+await shot('06-saved')
+
+const rendererErrors = logs.join('').split('\n')
+  .filter((l) => /ERROR|Uncaught/i.test(l))
+  .filter((l) => !/GPU|gpu_|dbus|libva|Vulkan|EGL|gbm|sandbox|DevTools|Fontconfig|MESA|swiftshader|CertVerif/i.test(l))
+
+console.log(JSON.stringify({ steps, rendererErrors }, null, 2))
+socket.close(); child.kill('SIGKILL'); process.exit(0)

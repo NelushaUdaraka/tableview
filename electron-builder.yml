@@ -1,0 +1,66 @@
+appId: com.beekeeperclone.app
+productName: Beekeeper Clone
+copyright: Copyright © 2026
+
+directories:
+  buildResources: build
+  output: release/${version}
+
+# The renderer, main and preload bundles are already built by electron-vite;
+# node_modules is included because the database and SSH drivers are marked
+# external (they are CommonJS and must not be bundled).
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+  - '!node_modules/**/{test,tests,__tests__,example,examples,doc,docs}/**'
+  - '!node_modules/**/*.{md,markdown,ts,map}'
+  - '!node_modules/.bin'
+
+# Every production dependency is pure JavaScript, so nothing needs rebuilding
+# for the target platform.
+npmRebuild: false
+buildDependenciesFromSource: false
+
+asar: true
+
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  # Unsigned builds are fine for local use; set CSC_LINK / CSC_KEY_PASSWORD
+  # to sign, and electron-builder will pick them up automatically.
+  signAndEditExecutable: true
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Beekeeper Clone
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
+
+linux:
+  icon: build/icon.png
+  category: Development
+  target:
+    - AppImage
+    - deb
+  maintainer: beekeeper-clone
+  synopsis: SQL Server client
+  description: A cross-platform SQL Server client built with Electron.
+
+mac:
+  icon: build/icon.png
+  category: public.app-category.developer-tools
+  target:
+    - dmg

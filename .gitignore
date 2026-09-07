@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+
+# build output
+out/
+dist/
+release/
+.vite/
+*.tsbuildinfo
+
+# test scratch: screenshots, Electron profiles, generated SSH keys, CLI stubs
+.tmp/
+
+# local secrets and environment
+.env
+.env.*
+*.pem
+*.key
+!build/*.key
+
+# editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# logs and coverage
+*.log
+npm-debug.log*
+coverage/

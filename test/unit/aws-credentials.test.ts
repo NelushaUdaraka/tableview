@@ -7,6 +7,7 @@ import {
   maskAccessKeyId,
   parseAwsCredentials
 } from '../../src/shared/aws/credentials'
+import { AWS_REGIONS, describeRegion, isRegionLike } from '../../src/shared/aws/regions'
 
 const KEY = 'ASIAIOSFODNN7EXAMPLE'
 const SECRET = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
@@ -189,5 +190,29 @@ describe('credential metadata', () => {
   it('treats an unknown expiry as not expired', () => {
     expect(isExpired({ accessKeyId: KEY, secretAccessKey: SECRET })).toBe(false)
     expect(expiresAt({ accessKeyId: KEY, secretAccessKey: SECRET })).toBeNull()
+  })
+})
+
+describe('region list', () => {
+  it('offers the regions people actually run bastions in', () => {
+    const codes = AWS_REGIONS.map((region) => region.code)
+    expect(codes).toContain('eu-west-2')
+    expect(codes).toContain('us-east-1')
+    expect(new Set(codes).size).toBe(codes.length)
+    expect(AWS_REGIONS.every((region) => isRegionLike(region.code))).toBe(true)
+  })
+
+  it('names a region it knows, and passes through one it does not', () => {
+    expect(describeRegion('eu-west-2')).toBe('eu-west-2 — London')
+    expect(describeRegion(' ap-southeast-9 ')).toBe('ap-southeast-9')
+  })
+
+  it('recognises the shape of a region code without pinning the list', () => {
+    expect(isRegionLike('eu-central-1')).toBe(true)
+    expect(isRegionLike('us-gov-west-1')).toBe(true)
+    // New regions must not be rejected just for being new.
+    expect(isRegionLike('ap-southeast-9')).toBe(true)
+    expect(isRegionLike('eu-west')).toBe(false)
+    expect(isRegionLike('London')).toBe(false)
   })
 })

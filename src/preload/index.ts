@@ -42,6 +42,8 @@ const api: RendererApi = {
   testConnection: (input) => invoke(CHANNELS.connectionsTest, input),
   checkSsmPrerequisites: (config, connectionId) =>
     invoke(CHANNELS.ssmCheck, config, connectionId),
+  listSsmInstances: (config, connectionId) =>
+    invoke(CHANNELS.ssmInstances, config, connectionId),
   openNewWindow: () => invoke(CHANNELS.windowNew),
 
   connect: (connectionId, password) => invoke(CHANNELS.dbConnect, connectionId, password),

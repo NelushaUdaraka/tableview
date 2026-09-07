@@ -35,6 +35,41 @@ export interface SsmPreflight {
   credentials: SsmCheckResult
 }
 
+/**
+ * One instance an SSM session could target, as `main/tunnel/ec2Instances`
+ * reports it.
+ *
+ * Everything past the ID is decoration for the picker — it is there so a
+ * bastion can be recognised by its Name tag and its state rather than by an ID
+ * that changes with every deployment.
+ */
+export interface SsmInstance {
+  instanceId: string
+  /** The `Name` tag, when the instance has one. */
+  name?: string
+  /** EC2 lifecycle state; `unknown` for instances only Systems Manager knows about. */
+  state: string
+  instanceType?: string
+  privateIpAddress?: string
+  publicIpAddress?: string
+  availabilityZone?: string
+  vpcId?: string
+  platform?: string
+  launchTime?: string
+  /** Registered with Systems Manager, so `start-session` can target it. */
+  ssmManaged: boolean
+  /** Agent reachability as SSM reports it: `Online`, `ConnectionLost`, `Inactive`. */
+  ssmPingStatus?: string
+}
+
+export interface SsmInstanceList {
+  /** The region the list was read from, resolved from the config or the credentials. */
+  region?: string
+  instances: SsmInstance[]
+  /** Set when part of the lookup failed but the rest still produced a list. */
+  warning?: string
+}
+
 
 export const CHANNELS = {
   appInfo: 'app:info',
@@ -45,6 +80,7 @@ export const CHANNELS = {
   connectionsDuplicate: 'connections:duplicate',
   connectionsTest: 'connections:test',
   ssmCheck: 'ssm:check',
+  ssmInstances: 'ssm:instances',
   windowNew: 'window:new',
 
   dbConnect: 'db:connect',
@@ -111,6 +147,8 @@ export interface RendererApi {
   testConnection(input: Partial<ConnectionConfig>): Promise<ConnectionStatus>
   /** `connectionId` lets the check fall back to credentials already saved. */
   checkSsmPrerequisites(config: SsmConfig, connectionId?: string): Promise<SsmPreflight>
+  /** Instances in the configured region, so the bastion can be picked rather than typed. */
+  listSsmInstances(config: SsmConfig, connectionId?: string): Promise<SsmInstanceList>
   openNewWindow(): Promise<void>
 
   connect(connectionId: string, password?: string): Promise<ConnectionStatus>

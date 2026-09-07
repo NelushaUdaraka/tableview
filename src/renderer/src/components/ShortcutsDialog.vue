@@ -30,10 +30,14 @@ const GROUPS = [
     items: [
       ['Arrows', 'Move between cells'],
       ['Enter / F2', 'Edit the cell'],
+      ['Type anything', 'Start editing with that character'],
+      ['Shift+Enter', 'New line inside the cell editor'],
+      ['Tab', 'Commit and move to the next cell'],
       ['Escape', 'Cancel the edit'],
       ['Delete', 'Set the cell to NULL'],
       ['Ctrl+C', 'Copy the cell'],
       ['Ctrl+Shift+C', 'Copy the row'],
+      ['Click the › arrow', 'Open the row a foreign key points at'],
       ['Double-click a divider', 'Fit the column to its contents'],
       ['Shift+click a header', 'Add a secondary sort']
     ]
@@ -42,6 +46,7 @@ const GROUPS = [
     title: 'App',
     items: [
       ['Ctrl+B', 'Toggle the sidebar'],
+      ['Ctrl+I', 'Toggle the row panel'],
       ['Ctrl+F', 'Focus the filter box'],
       ['F5', 'Refresh the schema'],
       ['Ctrl+Shift+L', 'Toggle light / dark'],

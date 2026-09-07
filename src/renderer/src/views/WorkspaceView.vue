@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { CellValue, ColumnMeta, SchemaObjectType } from '@shared/types'
+import type { CellValue, ColumnMeta, SchemaObjectType, TableFilter } from '@shared/types'
 import {
   buildCreateTableDdl,
   buildDeleteTemplate,
@@ -23,6 +23,7 @@ import { useSettingsStore } from '../stores/settings'
 import { useTabStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
 import type { QueryTab, TableTab } from '../stores/tabs'
+import { onMenuAction } from '../lib/menuBus'
 import { api } from '../lib/api'
 
 const connections = useConnectionStore()
@@ -53,6 +54,12 @@ function openTable(
 ): void {
   if (!connectionId.value) return
   tabs.openTable(connectionId.value, schemaName, table, type, view)
+}
+
+/** Following a foreign key: the referenced table, filtered to the row it names. */
+function openRelated(schemaName: string, table: string, filters: TableFilter[]): void {
+  if (!connectionId.value) return
+  tabs.openTable(connectionId.value, schemaName, table, 'table', 'data', filters)
 }
 
 function openSql(sql: string, title = 'Query'): void {
@@ -139,6 +146,9 @@ function handleAction(action: string): void {
     case 'view:toggle-sidebar':
       sidebarCollapsed.value = !sidebarCollapsed.value
       break
+    case 'view:toggle-row-panel':
+      void settings.update({ showRowPanel: !settings.settings.showRowPanel })
+      break
     case 'view:toggle-theme':
       settings.toggleTheme()
       break
@@ -189,7 +199,7 @@ let unsubscribeStatus: (() => void) | null = null
 
 onMounted(() => {
   document.addEventListener('keydown', onKeydown)
-  unsubscribeMenu = api.onMenuAction(handleAction)
+  unsubscribeMenu = onMenuAction(handleAction)
   unsubscribeStatus = api.onStatusChanged((status) => connections.setStatus(status))
   if (tabs.tabs.length === 0) newQueryTab()
 })
@@ -239,6 +249,7 @@ onBeforeUnmount(() => {
               :tab="tabs.active as TableTab"
               @export="(columns, rows, name) => (exportPayload = { columns, rows, name })"
               @open-sql="openSql"
+              @open-related="openRelated"
             />
             <div v-else class="empty-state">
               <div class="empty-state__title">No open tabs</div>

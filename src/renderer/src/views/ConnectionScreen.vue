@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { ConnectionConfig, SavedConnection } from '@shared/types'
 import BaseModal from '../components/BaseModal.vue'
 import ConnectionForm from '../components/ConnectionForm.vue'
@@ -7,6 +7,7 @@ import ContextMenu, { type MenuEntry } from '../components/ContextMenu.vue'
 import { useConnectionStore } from '../stores/connections'
 import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toasts'
+import { onMenuAction } from '../lib/menuBus'
 import { api } from '../lib/api'
 
 const connections = useConnectionStore()
@@ -31,9 +32,17 @@ const filtered = computed(() => {
   )
 })
 
+let unsubscribeMenu: (() => void) | null = null
+
 onMounted(() => {
   void connections.load()
+  // File → New Connection has nowhere else to land while this screen is up.
+  unsubscribeMenu = onMenuAction((action) => {
+    if (action === 'connection:new') startNew()
+  })
 })
+
+onBeforeUnmount(() => unsubscribeMenu?.())
 
 function startNew(): void {
   editing.value = null

@@ -102,9 +102,33 @@ connect, and holding only one of them still produces a usable list.
 - Filter builder (16 operators, AND/OR) and a raw `WHERE` mode; values are always **bound
   parameters**, and `contains`/`starts with`/`ends with` escape LIKE wildcards
 - Column resize by drag, double-click a divider to fit
+- **Row panel** beside the grid (`Ctrl+I`): the selected row as one field per line, with room for
+  the values a 26px cell cannot show, editable in place and moving with the selection
+- **Follow a foreign key**: a `›` at the end of a referencing cell opens the referenced table in its
+  own tab, filtered to the row it points at — composite keys included
+
+**Following a foreign key**
+
+A cell in a column that references another table carries a small arrow. Clicking it opens the
+referenced table filtered to that row, shows the filter that produced it, and puts the row straight
+into the row panel:
+
+```
+sales.orders                          dbo.customers   WHERE customer_id = 2
+┌────────────┬──────────────┬─────┐   ┌─────────────┬───────────────────┐
+│ order_id   │ customer_id  │ …   │   │ customer_id │ email             │
+│ 110        │ 2         ›  │ …   │ → │ 2           │ alan@example.com  │
+└────────────┴──────────────┴─────┘   └─────────────┴───────────────────┘
+```
+
+Values travel as bound parameters, so the referenced row is found by an ordinary `WHERE`. Two shapes
+have no conversion worth trusting — a NULL, and a binary key — and the arrow stays inert for them
+rather than opening a query that would match nothing.
 
 **Table editing**
-- Edit cells in place, insert rows, mark rows for deletion — all staged locally
+- Edit cells in place — the editor grows past the cell for long or multi-line values, `Enter`
+  commits, `Shift+Enter` adds a line, `Tab` moves on — or edit the same row from the row panel
+- Insert rows, mark rows for deletion — all staged locally
 - One `Apply` sends the whole change set, executed **inside a transaction**: either all of it lands
   or none of it does
 - Rows are addressed by primary key; a keyless table falls back to matching every column and the UI
@@ -118,6 +142,14 @@ connect, and holding only one of them still produces a usable list.
 - Multiple result sets per batch, rows-affected, `PRINT` output, and errors with their
   message number, state and line
 - SQL formatting, open/save `.sql` files, saved queries, searchable query history
+
+**One title bar**
+
+Window controls and the menu live in the same strip, VS Code style: the window is frameless on
+Windows and Linux (inset on macOS, where the traffic lights stay put and the system menu bar keeps
+the menus), and the renderer draws the menus, the document title and the minimise/maximise/close
+buttons itself. The native menu is still installed and still owns every accelerator — the title bar
+and it are built from one shared model in `src/shared/menu.ts`, so they cannot drift apart.
 
 **Windows and connections**
 
@@ -201,7 +233,7 @@ Three layers, all runnable on Linux:
 
 | Command | What it covers |
 | --- | --- |
-| `npm test` | 343 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config |
+| `npm test` | 411 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config |
 | `npm run test:integration` | 66 tests against a **real SQL Server 2022** and a **real sshd** |
 | `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
 
@@ -219,7 +251,7 @@ and flips `AllowTcpForwarding` on, which the `linuxserver/openssh-server` image 
 ### End-to-end
 
 ```bash
-scripts/e2e.sh all          # or: smoke | workspace | editing
+scripts/e2e.sh all          # or: smoke | workspace | editing | table-ui | ssm-form
 ```
 
 On a headless box it starts Xvfb itself. It needs Electron's usual Linux libraries:
@@ -230,13 +262,16 @@ apt-get install -y xvfb libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2
   libasound2t64 libnss3 libnspr4 libgtk-3-0t64 libatspi2.0-0t64
 ```
 
-The three suites:
+The suites:
 - **smoke** — the window opens, the preload bridge exposes the API, settings load, IPC errors arrive
   as real `Error`s, and a saved password never appears in renderer-visible data
 - **workspace** — connects to the container, loads the schema tree, opens a table, reads the grid,
   checks the structure tab, types and runs a JOIN in the editor, provokes a SQL error, toggles theme
 - **editing** — edits a cell, stages an insert, applies the change set, verifies the rows in the
   database, deletes through the context menu, and drives the filter builder
+- **table-ui** — opens the title bar's View menu, reads the selected row out of the row panel, edits
+  a field there and applies it to the database, follows a foreign key into the referenced table and
+  checks the filter and the row it lands on, opens the expanding cell editor, and hides the panel
 - **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block,
   fetches the account's instances and picks the bastion from the list (including the empty answer a
   wrong region gives), runs the prerequisite check in both its failing and passing states, saves,
@@ -260,11 +295,13 @@ src/
 │   │                         (the bastion picker's lookup), shared contract
 │   ├── storage/              JSON stores + credential vault
 │   ├── ipc/                  handlers, each wrapped in a result envelope
-│   ├── menu.ts, window.ts    menu bar, window state
+│   ├── menu.ts, window.ts    native menu + roles, frameless windows and their state
 │   └── index.ts
 ├── preload/index.ts          contextBridge façade
 ├── shared/                   used by both sides
 │   ├── types.ts              the IPC contract
+│   ├── menu.ts               the menu model the native menu and title bar share
+│   ├── foreignKeys.ts        which cells carry an arrow, and what it filters on
 │   ├── aws/credentials.ts    parses the AWS portal's credential blocks
 │   ├── aws/regions.ts        the region list the connection form offers
 │   ├── sql/                  identifier escaping, T-SQL lexer, query builders
@@ -273,8 +310,9 @@ src/
 │   └── ipcSerialize.ts       strips Vue proxies before they hit contextBridge
 └── renderer/src/             Vue 3 + Pinia
     ├── lib/api.ts            the only place that touches window.api
+    ├── lib/menuBus.ts        menu actions, whichever menu raised them
     ├── stores/               connections, schema, tabs, library, settings, toasts
-    ├── components/           grid, editor, sidebar, dialogs
+    ├── components/           title bar, grid, row panel, editor, sidebar, dialogs
     └── views/                connection screen, workspace, query, table
 ```
 
@@ -295,6 +333,12 @@ for editor conveniences like "run the statement under the cursor".
 **Cell values are tagged across IPC.** Dates, binary and bigints do not survive structured clone
 with their identity intact, so they cross as `{ t: 'date' | 'bytes' | 'bigint' | 'json', v: … }` and
 round-trip back when a row is written. `bigint` stays textual so precision beyond 2^53 is not lost.
+
+**The menu is described once and rendered twice.** `src/shared/menu.ts` holds the model; the main
+process turns it into an Electron `Menu` (which macOS shows and which supplies the accelerators on
+every platform) and the title bar draws the same items in the window. Items the renderer cannot
+carry out itself — clipboard, zoom, dev tools, closing the window — name an Electron role and come
+back over IPC.
 
 **The renderer converts reactive state to plain data before the bridge.** `contextBridge` clones
 arguments with the structured clone algorithm, which refuses to clone a Proxy — which is exactly

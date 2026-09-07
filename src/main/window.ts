@@ -4,9 +4,15 @@
  * Several windows can be open at once — the intended way to work with more
  * than one connection. Each is independent; the most recently moved or resized
  * one supplies the default geometry for the next.
+ *
+ * The frame is drawn by the renderer: Windows and Linux get a frameless window
+ * and macOS an inset title bar, so one strip can hold the menus, the title and
+ * the window buttons. Everything the renderer cannot see for itself — whether
+ * the window is maximised, full screen or focused — is pushed to it.
  */
 import path from 'node:path'
 import { BrowserWindow, screen } from 'electron'
+import { CHANNELS, WindowChromeState } from '../shared/ipc'
 import { JsonStore } from './storage/store'
 
 interface WindowState {
@@ -51,6 +57,7 @@ export class WindowManager {
   create(preloadPath: string): BrowserWindow {
     const state = this.restoreState()
     const offset = this.windows.size * CASCADE_STEP
+    const isMac = process.platform === 'darwin'
 
     const window = new BrowserWindow({
       width: state.width,
@@ -62,6 +69,11 @@ export class WindowManager {
       show: false,
       title: 'Beekeeper Clone',
       backgroundColor: '#16181d',
+      // The custom title bar replaces the system one. On macOS the traffic
+      // lights stay, inset over the renderer's strip.
+      frame: isMac,
+      titleBarStyle: isMac ? 'hiddenInset' : 'default',
+      trafficLightPosition: isMac ? { x: 12, y: 11 } : undefined,
       autoHideMenuBar: false,
       webPreferences: {
         preload: preloadPath,
@@ -72,16 +84,27 @@ export class WindowManager {
       }
     })
 
+    // The menu still supplies every accelerator; only its bar is hidden,
+    // because the title bar draws those items itself.
+    if (!isMac) window.setMenuBarVisibility(false)
+
     // Only the first window inherits "maximized"; later ones cascade instead.
     if (state.maximized && this.windows.size === 0) window.maximize()
     window.once('ready-to-show', () => window.show())
 
     const persist = (): void => this.persistState(window)
+    const announce = (): void => sendChromeState(window)
     window.on('resize', persist)
     window.on('move', persist)
     window.on('close', persist)
+    window.on('maximize', announce)
+    window.on('unmaximize', announce)
+    window.on('enter-full-screen', announce)
+    window.on('leave-full-screen', announce)
+    window.on('blur', announce)
     window.on('focus', () => {
       this.lastFocused = window
+      announce()
     })
     window.on('closed', () => {
       this.windows.delete(window)
@@ -128,4 +151,21 @@ export class WindowManager {
       maximized
     })
   }
+}
+
+/** What the renderer's title bar needs to draw itself correctly. */
+export function chromeState(window: BrowserWindow | null): WindowChromeState {
+  if (!window || window.isDestroyed()) {
+    return { maximized: false, fullScreen: false, focused: false }
+  }
+  return {
+    maximized: window.isMaximized(),
+    fullScreen: window.isFullScreen(),
+    focused: window.isFocused()
+  }
+}
+
+function sendChromeState(window: BrowserWindow): void {
+  if (window.isDestroyed()) return
+  window.webContents.send(CHANNELS.eventWindowChrome, chromeState(window))
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { CellValue, ColumnMeta } from '@shared/types'
+import type { CellValue, ColumnMeta, TableFilter } from '@shared/types'
 import TableDataView from './TableDataView.vue'
 import TableStructureView from './TableStructureView.vue'
 import { useTabStore } from '../stores/tabs'
@@ -10,6 +10,7 @@ const props = defineProps<{ tab: TableTab }>()
 const emit = defineEmits<{
   (event: 'export', columns: ColumnMeta[], rows: CellValue[][], name: string): void
   (event: 'open-sql', sql: string, title: string): void
+  (event: 'open-related', schema: string, table: string, filters: TableFilter[]): void
 }>()
 
 const tabs = useTabStore()
@@ -55,6 +56,7 @@ defineExpose({
         :key="`${tab.id}-data`"
         :tab="tab"
         @export="(columns, rows, name) => emit('export', columns, rows, name)"
+        @open-related="(schema, table, filters) => emit('open-related', schema, table, filters)"
       />
       <TableStructureView
         v-else

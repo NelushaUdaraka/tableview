@@ -7,7 +7,7 @@
  * key; a table without one falls back to matching on every column, which the
  * banner warns about because it can match more rows than intended.
  */
-import { computed, onMounted, reactive, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import type {
   CellValue,
   ColumnMeta,
@@ -20,7 +20,10 @@ import type {
 import DataGrid, { type RowState } from '../components/DataGrid.vue'
 import FilterBuilder from '../components/FilterBuilder.vue'
 import ContextMenu, { type MenuEntry } from '../components/ContextMenu.vue'
+import RowDetailPanel, { type RowField } from '../components/RowDetailPanel.vue'
+import SplitPane from '../components/SplitPane.vue'
 import { exportRows } from '@shared/export'
+import { foreignKeyFilters, foreignKeyTargets } from '@shared/foreignKeys'
 import { useSettingsStore } from '../stores/settings'
 import { useSchemaStore } from '../stores/schema'
 import { useTabStore } from '../stores/tabs'
@@ -31,6 +34,7 @@ import { api } from '../lib/api'
 const props = defineProps<{ tab: TableTab }>()
 const emit = defineEmits<{
   (event: 'export', columns: ColumnMeta[], rows: CellValue[][], name: string): void
+  (event: 'open-related', schema: string, table: string, filters: TableFilter[]): void
 }>()
 
 const settings = useSettingsStore()
@@ -50,6 +54,7 @@ const durationMs = ref(0)
 const lastSql = ref('')
 const grid = ref<InstanceType<typeof DataGrid> | null>(null)
 const menu = ref<{ x: number; y: number; row: number; col: number } | null>(null)
+const selection = ref<{ rowIndex: number; columnIndex: number } | null>(null)
 
 const offset = ref(0)
 const pageSize = ref(settings.settings.pageSize)
@@ -152,13 +157,163 @@ async function load(resetOffset = false): Promise<void> {
   }
 }
 
+/** Filters carried on the tab, e.g. from following a foreign key into it. */
+function applyTabFilters(): boolean {
+  const incoming = props.tab.filters
+  if (!incoming || incoming.length === 0) return false
+  filters.value = incoming.map((filter) => ({ ...filter }))
+  filterMode.value = 'builder'
+  rawWhere.value = ''
+  // Show them: a table that opens holding three rows should say why.
+  showFilters.value = true
+  return true
+}
+
 onMounted(async () => {
+  // A remount starts with no staged edits, so the tab's badge must not claim
+  // any left over from the last time this table was open.
+  tabs.update<TableTab>(props.tab.id, { pendingEdits: 0 })
   await loadStructure()
   // A primary key gives a stable default order.
   const key = structure.value?.primaryKey ?? []
   sorts.value = key.length ? key.map((column) => ({ column, direction: 'asc' as const })) : []
+  const filtered = applyTabFilters()
   await load()
+  // Arriving by way of a foreign key means the row that was asked for is the
+  // one now on screen; put it straight into the panel.
+  if (filtered) await selectFirstRow()
 })
+
+// Reopening a table reuses its tab, so new filters arrive as a revision bump
+// rather than a fresh mount.
+watch(
+  () => props.tab.filterRevision,
+  async () => {
+    if (!applyTabFilters()) return
+    await load(true)
+    await selectFirstRow()
+  }
+)
+
+// --- the selected row -------------------------------------------------------
+
+const showRowPanel = computed(() => settings.settings.showRowPanel)
+const rowPanelWidth = ref(settings.settings.rowPanelWidth)
+
+/**
+ * Selects the first row once the grid has settled.
+ *
+ * Replacing the columns resets the grid's selection, and that watcher runs on
+ * the flush after `load` resolves — so this has to wait for it, or it would
+ * select a row and then have the reset clear it again.
+ */
+async function selectFirstRow(): Promise<void> {
+  await nextTick()
+  if (allRows.value.length > 0) grid.value?.selectCell(0, 0)
+}
+
+function toggleRowPanel(): void {
+  void settings.update({ showRowPanel: !settings.settings.showRowPanel })
+}
+
+// Dragging the divider emits on every mouse move; only the resting width is
+// worth a write to disk.
+let widthTimer: ReturnType<typeof setTimeout> | null = null
+watch(rowPanelWidth, (width) => {
+  if (widthTimer) clearTimeout(widthTimer)
+  widthTimer = setTimeout(() => void settings.update({ rowPanelWidth: width }), 500)
+})
+
+/** Column index -> the foreign key it participates in. */
+const foreignKeys = computed(() =>
+  foreignKeyTargets(columns.value, structure.value?.foreignKeys ?? [])
+)
+
+/** The same map flattened to labels, which is all the grid needs. */
+const foreignKeyLabels = computed<Record<number, string>>(() =>
+  Object.fromEntries(
+    Object.entries(foreignKeys.value).map(([index, target]) => [index, target.label])
+  )
+)
+
+/** A row's values as they stand, staged edits included. */
+function mergedRow(rowIndex: number): CellValue[] | null {
+  const row = allRows.value[rowIndex]
+  if (!row) return null
+  return columns.value.map((_, index) => {
+    const key = `${rowIndex}:${index}`
+    return key in edits ? edits[key] : (row[index] ?? null)
+  })
+}
+
+const rowFields = computed<RowField[]>(() => {
+  const current = selection.value
+  if (!current) return []
+  const row = allRows.value[current.rowIndex]
+  if (!row) return []
+
+  return columns.value.map((column, index) => {
+    const key = `${current.rowIndex}:${index}`
+    const edited = key in edits
+    return {
+      column,
+      value: edited ? edits[key] : (row[index] ?? null),
+      edited,
+      isPrimaryKey: primaryKey.value.includes(column.name),
+      foreignKey: foreignKeyLabels.value[index]
+    }
+  })
+})
+
+const rowLabel = computed(() => {
+  const current = selection.value
+  if (!current || !allRows.value[current.rowIndex]) return ''
+  if (current.rowIndex >= loadedRows.value.length) {
+    return `New row ${current.rowIndex - loadedRows.value.length + 1}`
+  }
+  const total = totalRows.value ?? allRows.value.length
+  return `Row ${(offset.value + current.rowIndex + 1).toLocaleString()} of ${total.toLocaleString()}`
+})
+
+const rowState = computed<RowState>(() =>
+  selection.value ? (rowStates.value[selection.value.rowIndex] ?? 'normal') : 'normal'
+)
+
+/** Moves the grid's selection, which moves the panel with it. */
+function moveSelection(delta: number): void {
+  const current = selection.value
+  if (!current) return
+  const next = current.rowIndex + delta
+  if (next < 0 || next >= allRows.value.length) return
+  grid.value?.selectCell(next, current.columnIndex)
+}
+
+function editSelectedRow(columnIndex: number, value: CellValue): void {
+  if (!selection.value) return
+  onEdit(selection.value.rowIndex, columnIndex, value)
+}
+
+/**
+ * Opens the row a foreign key points at, in the referenced table's own tab.
+ *
+ * The filters are built from the values as they are displayed — a staged edit
+ * included — because that is the row the arrow appears to point at.
+ */
+function followKey(rowIndex: number, columnIndex: number): void {
+  const target = foreignKeys.value[columnIndex]
+  const row = mergedRow(rowIndex)
+  if (!target || !row) return
+
+  const related = foreignKeyFilters(target, columns.value, row)
+  if (!related) {
+    toasts.info(
+      'That reference cannot be followed',
+      'The value is NULL, or its type has no text form to filter on.'
+    )
+    return
+  }
+  emit('open-related', target.schema, target.table, related)
+}
 
 function onSort(column: string, additive: boolean): void {
   const existing = sorts.value.find((sort) => sort.column === column)
@@ -312,6 +467,15 @@ function goToPage(delta: number): void {
 const menuItems = computed<MenuEntry[]>(() => [
   { label: 'Copy cell', action: 'copy-cell' },
   { label: 'Copy row', action: 'copy-row' },
+  ...(menu.value && foreignKeys.value[menu.value.col]
+    ? [
+        { separator: true, label: '' },
+        {
+          label: `Go to ${foreignKeys.value[menu.value.col].schema}.${foreignKeys.value[menu.value.col].table}`,
+          action: 'follow-key'
+        }
+      ]
+    : []),
   { separator: true, label: '' },
   { label: 'Set NULL', action: 'null', disabled: !editable.value },
   { label: 'Add row', action: 'add', disabled: !editable.value },
@@ -337,6 +501,9 @@ async function onMenuSelect(action: string): Promise<void> {
       break
     case 'copy-row':
       await grid.value?.copySelection(true)
+      break
+    case 'follow-key':
+      followKey(target.row, target.col)
       break
     case 'null':
       onEdit(target.row, target.col, null)
@@ -383,6 +550,14 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
         Filter
         <span v-if="filters.length || rawWhere" class="data__dot"></span>
       </button>
+      <button
+        class="btn btn--sm btn--ghost"
+        :class="{ 'btn--active': showRowPanel }"
+        title="Show the selected row beside the grid (Ctrl+I)"
+        @click="toggleRowPanel"
+      >
+        Row
+      </button>
 
       <div class="data__spacer"></div>
 
@@ -427,22 +602,54 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
     </div>
 
     <div class="data__grid">
-      <DataGrid
-        ref="grid"
-        :columns="columns"
-        :rows="allRows"
-        :row-states="rowStates"
-        :edited-cells="edits"
-        :editable="editable"
-        :loading="loading"
-        :sorts="sorts"
-        :row-offset="offset"
-        :primary-key="primaryKey"
-        empty-message="No rows match"
-        @edit="onEdit"
-        @sort="onSort"
-        @row-context="menu = { x: $event.x, y: $event.y, row: $event.rowIndex, col: $event.columnIndex }"
-      />
+      <SplitPane
+        v-model="rowPanelWidth"
+        direction="horizontal"
+        pane="second"
+        :min="220"
+        :max="640"
+        :collapsed="!showRowPanel"
+      >
+        <template #first>
+          <DataGrid
+            ref="grid"
+            :columns="columns"
+            :rows="allRows"
+            :row-states="rowStates"
+            :edited-cells="edits"
+            :editable="editable"
+            :loading="loading"
+            :sorts="sorts"
+            :row-offset="offset"
+            :primary-key="primaryKey"
+            :foreign-keys="foreignKeyLabels"
+            empty-message="No rows match"
+            @edit="onEdit"
+            @sort="onSort"
+            @selection="selection = $event"
+            @follow-key="followKey($event.rowIndex, $event.columnIndex)"
+            @row-context="menu = { x: $event.x, y: $event.y, row: $event.rowIndex, col: $event.columnIndex }"
+          />
+        </template>
+
+        <template #second>
+          <RowDetailPanel
+            v-if="showRowPanel"
+            :fields="rowFields"
+            :label="rowLabel"
+            :editable="editable"
+            :state="rowState"
+            :selected-index="selection?.columnIndex ?? null"
+            :has-previous="!!selection && selection.rowIndex > 0"
+            :has-next="!!selection && selection.rowIndex < allRows.length - 1"
+            @edit="editSelectedRow"
+            @follow-key="selection && followKey(selection.rowIndex, $event)"
+            @select="selection && grid?.selectCell(selection.rowIndex, $event)"
+            @move="moveSelection"
+            @close="toggleRowPanel"
+          />
+        </template>
+      </SplitPane>
     </div>
 
     <div class="data__foot">

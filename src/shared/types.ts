@@ -495,6 +495,10 @@ export interface AppSettings {
   maxResultRows: number
   autoCommitEdits: boolean
   confirmBeforeApply: boolean
+  /** Show the selected row's fields beside the table grid. */
+  showRowPanel: boolean
+  /** Width of that panel, in pixels. */
+  rowPanelWidth: number
   formatterKeywordCase: 'upper' | 'lower' | 'preserve'
   formatterIndent: number
 }
@@ -507,6 +511,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   maxResultRows: 50000,
   autoCommitEdits: false,
   confirmBeforeApply: true,
+  showRowPanel: true,
+  rowPanelWidth: 320,
   formatterKeywordCase: 'upper',
   formatterIndent: 2
 }

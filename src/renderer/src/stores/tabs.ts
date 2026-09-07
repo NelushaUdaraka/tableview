@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import type { QueryExecutionResult, SchemaObjectType } from '@shared/types'
+import type { QueryExecutionResult, SchemaObjectType, TableFilter } from '@shared/types'
 
 export interface QueryTab {
   id: string
@@ -29,6 +29,13 @@ export interface TableTab {
   view: 'data' | 'structure'
   /** Unsaved grid edits, so switching tabs does not discard them. */
   pendingEdits: number
+  /** Filters the tab opens with — how following a foreign key lands on a row. */
+  filters?: TableFilter[]
+  /**
+   * Bumped every time `filters` is set. Reopening a table reuses its tab, so
+   * the view needs a signal that the filters are new even when the tab is not.
+   */
+  filterRevision: number
 }
 
 export type Tab = QueryTab | TableTab
@@ -82,7 +89,8 @@ export const useTabStore = defineStore('tabs', () => {
     schema: string,
     table: string,
     objectType: SchemaObjectType = 'table',
-    view: 'data' | 'structure' = 'data'
+    view: 'data' | 'structure' = 'data',
+    filters?: TableFilter[]
   ): TableTab {
     const existing = tabs.value.find(
       (tab): tab is TableTab =>
@@ -93,6 +101,10 @@ export const useTabStore = defineStore('tabs', () => {
     )
     if (existing) {
       existing.view = view
+      if (filters) {
+        existing.filters = filters
+        existing.filterRevision += 1
+      }
       activeId.value = existing.id
       return existing
     }
@@ -106,7 +118,9 @@ export const useTabStore = defineStore('tabs', () => {
       table,
       objectType,
       view,
-      pendingEdits: 0
+      pendingEdits: 0,
+      filters,
+      filterRevision: filters ? 1 : 0
     }
     tabs.value = [...tabs.value, tab]
     activeId.value = tab.id

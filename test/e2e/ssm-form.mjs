@@ -1,9 +1,10 @@
 /**
- * Verifies the tunnel picker and the AWS SSM preflight in the real UI.
+ * Verifies the tunnel picker, the bastion instance picker and the AWS SSM
+ * preflight in the real UI.
  *
- * `.tmp/bin` holds stand-ins for `aws` and `session-manager-plugin`, so both
- * the pass and fail states of the prerequisite check can be shown without an
- * AWS account or a real install.
+ * `.tmp/bin` holds stand-ins for `aws` and `session-manager-plugin` (written by
+ * scripts/e2e.sh), so the instance list and both the pass and fail states of
+ * the prerequisite check can be shown without an AWS account or a real install.
  */
 import { spawn } from 'node:child_process'
 import { writeFileSync, mkdirSync } from 'node:fs'
@@ -175,6 +176,63 @@ steps.push({
   blockCleared: await ev(`document.querySelector('.form__group .error-text')?.textContent?.trim() ?? null`)
 })
 await shot('02-credentials-pasted')
+
+// The pasted block named a region, so the field should already hold it — the
+// instance list is per region, and nothing can be fetched without one.
+steps.push({
+  step: 'region from the pasted block',
+  region: await ev(`document.querySelector('input[list="ssm-regions"]')?.value`),
+  fetchEnabled: await ev(`!document.querySelector('.instances__fetch').disabled`)
+})
+
+// Fetch the account's instances and pick the bastion by name, rather than
+// relying on an ID that changes with every deployment.
+await ev(`document.querySelector('.instances__fetch').click()`)
+await waitFor(`document.querySelectorAll('.instances__select option').length > 1`, 'instance list', 40000)
+steps.push({
+  step: 'instances fetched',
+  label: await ev(`document.querySelector('.instances .field__label')?.textContent?.replace(/\\s+/g,' ').trim()`),
+  options: await ev(`[...document.querySelectorAll('.instances__select option')].map(o => o.textContent.trim())`)
+})
+await shot('03-instances-fetched')
+
+await ev(`
+  (() => {
+    const select = document.querySelector('.instances__select')
+    select.value = [...select.options].map(o => o.value).find(v => v.startsWith('i-'))
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    return select.value
+  })()
+`)
+await delay(300)
+steps.push({
+  step: 'bastion picked',
+  instanceId: await ev(`document.querySelector('input[placeholder="i-0123456789abcdef0"]').value`),
+  hint: await ev(`document.querySelector('.instances .field__hint')?.textContent?.replace(/\\s+/g,' ').trim()`),
+  saveDisabled: await ev(`document.querySelector('button[type=submit]').disabled`)
+})
+
+// A region with nothing in it is a common mistake, and must say so rather than
+// leaving the last region's list on screen.
+await setInput('input[list="ssm-regions"]', 'us-east-1')
+await delay(300)
+await ev(`document.querySelector('.instances__fetch').click()`)
+await waitFor(
+  `[...document.querySelectorAll('.instances .field__hint')].some(h => h.textContent.includes('Nothing in this region'))`,
+  'empty region message',
+  40000
+)
+steps.push({
+  step: 'wrong region',
+  options: await ev(`document.querySelectorAll('.instances__select option').length`),
+  hint: await ev(`[...document.querySelectorAll('.instances .field__hint')].map(h => h.textContent.replace(/\\s+/g,' ').trim())`)
+})
+
+// Back to the region the bastion is actually in.
+await setInput('input[list="ssm-regions"]', 'eu-west-2')
+await delay(300)
+await ev(`document.querySelector('.instances__fetch').click()`)
+await waitFor(`document.querySelectorAll('.instances__select option').length > 1`, 'instance list again', 40000)
 
 // Preflight with a bogus CLI path — expect a failure row for the CLI.
 await setInput('input[placeholder="aws (found on PATH)"]', '/nonexistent/aws')

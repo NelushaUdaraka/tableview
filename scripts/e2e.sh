@@ -29,9 +29,31 @@ npx electron-vite build >/dev/null
 # A previous run holding the single-instance lock would make the next launch exit.
 for pid in $(pgrep -x electron 2>/dev/null || true); do kill -9 "$pid" 2>/dev/null || true; done
 
+# The SSM suite runs against stand-ins for the AWS CLI and the Session Manager
+# plugin, so it needs no AWS account. A hand-written stand-in already in
+# .tmp/bin is left alone.
+stub_aws() {
+  mkdir -p "$ROOT/.tmp/bin"
+  if [ ! -e "$ROOT/.tmp/bin/aws" ]; then
+    cat > "$ROOT/.tmp/bin/aws" <<STUB
+#!/usr/bin/env bash
+exec node "$ROOT/test/fixtures/fake-aws.mjs" "\$@"
+STUB
+    chmod +x "$ROOT/.tmp/bin/aws"
+  fi
+  if [ ! -e "$ROOT/.tmp/bin/session-manager-plugin" ]; then
+    cat > "$ROOT/.tmp/bin/session-manager-plugin" <<'STUB'
+#!/usr/bin/env bash
+echo "1.2.707.0"
+STUB
+    chmod +x "$ROOT/.tmp/bin/session-manager-plugin"
+  fi
+}
+
 run() {
   echo
   echo "==> e2e: $1"
+  [ "$1" = "ssm-form" ] && stub_aws
   rm -rf "$ROOT/.tmp/profile-$1"
   node "test/e2e/$1.mjs"
 }

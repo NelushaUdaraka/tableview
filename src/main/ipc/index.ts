@@ -34,6 +34,7 @@ import { ConnectionRegistry } from '../db/registry'
 import { serializeError } from '../db/sqlserver/client'
 import { AppData } from '../storage/appData'
 import { checkSsmPrerequisites } from '../tunnel/ssmPreflight'
+import { listSsmInstances } from '../tunnel/ec2Instances'
 
 export interface IpcContext {
   registry: ConnectionRegistry
@@ -114,6 +115,12 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   handle(CHANNELS.ssmCheck, async (_call, config: SsmConfig, connectionId?: string) =>
     checkSsmPrerequisites(config, resolveCredentialEnv(config, connectionId, appData) ?? {})
+  )
+
+  // The bastion's ID changes with every deployment, so the form offers the
+  // account's instances instead of asking the user to remember one.
+  handle(CHANNELS.ssmInstances, async (_call, config: SsmConfig, connectionId?: string) =>
+    listSsmInstances(config, resolveCredentialEnv(config, connectionId, appData) ?? {})
   )
 
   // -- connection lifecycle -------------------------------------------------

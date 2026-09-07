@@ -7,7 +7,9 @@ import {
   DEFAULT_SSM_CONFIG,
   SavedConnection
 } from '@shared/types'
-import type { SsmPreflight } from '@shared/ipc'
+import type { SsmInstance, SsmPreflight } from '@shared/ipc'
+import { parseAwsCredentials } from '@shared/aws/credentials'
+import { AWS_REGIONS, describeRegion, isRegionLike } from '@shared/aws/regions'
 import { api } from '../lib/api'
 
 const props = defineProps<{ connection: SavedConnection | null; busy?: boolean }>()
@@ -27,6 +29,13 @@ const checkingSsm = ref(false)
 /** Pasted text lives here until Save hands it to the main process. */
 const credentialText = ref('')
 const clearedCredentials = ref(false)
+/** The account's instances, for picking the bastion instead of typing its ID. */
+const instances = ref<SsmInstance[]>([])
+const instancesRegion = ref('')
+const instancesWarning = ref('')
+const instancesError = ref('')
+const instancesLoaded = ref(false)
+const loadingInstances = ref(false)
 
 const COLORS = ['', '#f0a91d', '#58a6ff', '#3fb950', '#f85149', '#bc8cff', '#ff7b72']
 
@@ -60,6 +69,7 @@ watch(
     Object.assign(form, blank())
     credentialText.value = ''
     clearedCredentials.value = false
+    resetInstances()
     passwordTouched.value = false
     sshPasswordTouched.value = false
     sshPassphraseTouched.value = false
@@ -97,12 +107,14 @@ function setTunnelKind(kind: TunnelKind): void {
   form.ssh!.enabled = kind === 'ssh'
   form.ssm!.enabled = kind === 'ssm'
   preflight.value = null
+  resetInstances()
 }
 
 function forgetCredentials(): void {
   clearedCredentials.value = true
   credentialText.value = ''
   preflight.value = null
+  resetInstances()
 }
 
 async function runSsmCheck(): Promise<void> {
@@ -148,6 +160,136 @@ const credentialSavedAt = computed(() => {
 
 const hasCredentials = computed(
   () => Boolean(storedCredentials.value) || credentialText.value.trim().length > 0
+)
+
+/**
+ * The bastion instance picker.
+ *
+ * An instance ID is not a durable setting: every redeploy of the bastion hands
+ * back a different one, so a saved connection quietly points at something that
+ * no longer exists. Once the credentials and the region are in place the form
+ * asks the account what is actually there, and the ID becomes a choice from a
+ * list rather than something to remember.
+ */
+function resetInstances(): void {
+  instances.value = []
+  instancesRegion.value = ''
+  instancesWarning.value = ''
+  instancesError.value = ''
+  instancesLoaded.value = false
+}
+
+async function loadInstances(): Promise<void> {
+  loadingInstances.value = true
+  instancesError.value = ''
+  try {
+    // Send any freshly typed block so the list works before saving.
+    const result = await api.listSsmInstances(
+      { ...form.ssm!, credentialsText: credentialText.value || undefined },
+      form.id
+    )
+    instances.value = result.instances
+    instancesRegion.value = result.region ?? ''
+    instancesWarning.value = result.warning ?? ''
+    instancesLoaded.value = true
+  } catch (error) {
+    resetInstances()
+    instancesError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    loadingInstances.value = false
+  }
+}
+
+/** `web-bastion — i-0123… · running · 10.0.2.11 · SSM Online` */
+function instanceLabel(instance: SsmInstance): string {
+  const parts = [
+    instance.name ? `${instance.name} — ${instance.instanceId}` : instance.instanceId
+  ]
+  if (instance.state !== 'unknown') parts.push(instance.state)
+  if (instance.privateIpAddress) parts.push(instance.privateIpAddress)
+  parts.push(instance.ssmManaged ? `SSM ${instance.ssmPingStatus ?? 'registered'}` : 'not in SSM')
+  return parts.join(' · ')
+}
+
+/** A region carried by the pasted block, which the CLI would use anyway. */
+const pastedRegion = computed(() => {
+  const text = credentialText.value.trim()
+  if (!text) return ''
+  return parseAwsCredentials(text).credentials?.region ?? ''
+})
+
+/** What the lookup will actually run against — the field, then the credentials. */
+const effectiveRegion = computed(
+  () => form.ssm!.region?.trim() || pastedRegion.value || storedCredentials.value?.region || ''
+)
+
+const regionLooksWrong = computed(() => {
+  const region = form.ssm!.region?.trim()
+  return Boolean(region) && !isRegionLike(region!)
+})
+
+const fetchBlockedReason = computed(() => {
+  if (!usesPastedCredentials.value) return ''
+  if (!hasCredentials.value) return 'Paste your AWS credentials first'
+  // Without a profile to fall back on, the region has to be explicit.
+  if (!effectiveRegion.value) return 'Choose the region the bastion runs in'
+  return ''
+})
+
+const selectedInstance = computed(
+  () =>
+    instances.value.find((instance) => instance.instanceId === form.ssm!.instanceId?.trim()) ??
+    null
+)
+
+/** The redeploy case: a saved ID that the region no longer knows about. */
+const instanceIdMissing = computed(
+  () =>
+    instancesLoaded.value &&
+    instances.value.length > 0 &&
+    Boolean(form.ssm!.instanceId?.trim()) &&
+    !selectedInstance.value
+)
+
+/**
+ * What the picker shows.
+ *
+ * Reads back as unset whenever the ID in the field is not one of the fetched
+ * instances — the redeployed case — so the select prompts instead of sitting
+ * blank, and choosing the prompt does not wipe an ID typed by hand.
+ */
+const pickedInstanceId = computed({
+  get: () => (selectedInstance.value ? selectedInstance.value.instanceId : ''),
+  set: (value: string) => {
+    if (value) form.ssm!.instanceId = value
+  }
+})
+
+const selectedInstanceWarning = computed(() => {
+  const instance = selectedInstance.value
+  if (!instance) return ''
+  if (!instance.ssmManaged) {
+    return 'Systems Manager does not know this instance, so a session cannot start on it. Check the SSM agent and the instance profile.'
+  }
+  if (instance.ssmPingStatus && instance.ssmPingStatus !== 'Online') {
+    return `Systems Manager last saw this instance as ${instance.ssmPingStatus} — the agent may be down.`
+  }
+  return ''
+})
+
+// A block for another account, or another region, means another list.
+watch(pastedRegion, (region) => {
+  if (region && !form.ssm!.region?.trim()) form.ssm!.region = region
+})
+watch(
+  () => [
+    form.ssm!.region,
+    form.ssm!.profile,
+    form.ssm!.credentialSource,
+    form.ssm!.awsCliPath,
+    credentialText.value
+  ],
+  () => resetInstances()
 )
 
 const ssmHostLabel = computed(() =>
@@ -345,28 +487,6 @@ async function browseForKey(): Promise<void> {
           port it opens — no separate terminal, and the session closes when you disconnect.
         </p>
 
-        <div class="row">
-          <label class="field" style="flex: 2">
-            <span class="field__label">Bastion instance ID</span>
-            <input
-              v-model="form.ssm!.instanceId"
-              class="input mono"
-              placeholder="i-0123456789abcdef0"
-              spellcheck="false"
-            />
-            <span v-if="ssmError" class="field__hint error-text">{{ ssmError }}</span>
-          </label>
-          <label class="field" style="flex: 1">
-            <span class="field__label">Forward to</span>
-            <select v-model="form.ssm!.mode" class="select">
-              <option value="remote-host">A remote host</option>
-              <option value="instance">The instance itself</option>
-            </select>
-          </label>
-        </div>
-
-        <p class="hint">{{ ssmHostLabel }}</p>
-
         <label class="field">
           <span class="field__label">AWS credentials</span>
           <select v-model="form.ssm!.credentialSource" class="select">
@@ -422,9 +542,19 @@ async function browseForKey(): Promise<void> {
             <input
               v-model="form.ssm!.region"
               class="input"
+              list="ssm-regions"
               placeholder="(profile default)"
               spellcheck="false"
             />
+            <datalist id="ssm-regions">
+              <option v-for="region in AWS_REGIONS" :key="region.code" :value="region.code">
+                {{ region.label }}
+              </option>
+            </datalist>
+            <span v-if="regionLooksWrong" class="field__hint warn-text">
+              That does not look like a region code — expected something like eu-west-2.
+            </span>
+            <span v-else class="field__hint">Instances are listed one region at a time.</span>
           </label>
           <label class="field" style="flex: 1">
             <span class="field__label">Local port</span>
@@ -439,6 +569,88 @@ async function browseForKey(): Promise<void> {
             <span class="field__hint">Blank picks a free one.</span>
           </label>
         </div>
+
+        <div class="row">
+          <label class="field" style="flex: 2">
+            <span class="field__label">Bastion instance ID</span>
+            <input
+              v-model="form.ssm!.instanceId"
+              class="input mono"
+              placeholder="i-0123456789abcdef0"
+              spellcheck="false"
+            />
+            <span v-if="ssmError" class="field__hint error-text">{{ ssmError }}</span>
+          </label>
+          <label class="field" style="flex: 1">
+            <span class="field__label">Forward to</span>
+            <select v-model="form.ssm!.mode" class="select">
+              <option value="remote-host">A remote host</option>
+              <option value="instance">The instance itself</option>
+            </select>
+          </label>
+        </div>
+
+        <!-- Pick the bastion from the account rather than remembering its ID -->
+        <div class="field instances">
+          <span class="field__label">
+            Instances{{ instancesRegion ? ` in ${describeRegion(instancesRegion)}` : '' }}
+            <span v-if="instancesLoaded" class="instances__count">{{ instances.length }} found</span>
+          </span>
+          <div class="instances__row">
+            <select
+              v-model="pickedInstanceId"
+              class="select instances__select"
+              :disabled="!instances.length"
+            >
+              <option value="">
+                {{ instances.length ? 'Pick the bastion…' : 'Fetch to list the instances here' }}
+              </option>
+              <option
+                v-for="instance in instances"
+                :key="instance.instanceId"
+                :value="instance.instanceId"
+              >
+                {{ instanceLabel(instance) }}
+              </option>
+            </select>
+            <button
+              type="button"
+              class="btn btn--sm instances__fetch"
+              :disabled="loadingInstances || Boolean(fetchBlockedReason)"
+              :title="fetchBlockedReason"
+              @click="loadInstances"
+            >
+              <span v-if="loadingInstances" class="spinner"></span>
+              {{ instancesLoaded ? 'Refresh' : 'Fetch instances' }}
+            </button>
+          </div>
+
+          <span v-if="instancesError" class="field__hint error-text">{{ instancesError }}</span>
+          <span v-else-if="fetchBlockedReason" class="field__hint">
+            {{ fetchBlockedReason }} — then fetch the list and pick the bastion by name.
+          </span>
+          <span v-else-if="instanceIdMissing" class="field__hint warn-text">
+            {{ form.ssm!.instanceId }} is not in this region any more — it was probably replaced.
+            Pick the current bastion from the list.
+          </span>
+          <span v-else-if="selectedInstanceWarning" class="field__hint warn-text">
+            {{ selectedInstanceWarning }}
+          </span>
+          <span v-else-if="selectedInstance" class="field__hint">
+            Selected {{ instanceLabel(selectedInstance) }}
+          </span>
+          <span v-else-if="instancesLoaded && !instances.length" class="field__hint">
+            Nothing in this region. Check the region and that the credentials belong to the right
+            account.
+          </span>
+          <span v-else class="field__hint">
+            Instance IDs change whenever the bastion is redeployed — fetch the list and pick it by
+            name instead of remembering the ID.
+          </span>
+          <span v-if="instancesWarning" class="field__hint warn-text">{{ instancesWarning }}</span>
+        </div>
+
+        <p class="hint">{{ ssmHostLabel }}</p>
 
         <label class="field">
           <span class="field__label">AWS CLI path</span>
@@ -792,6 +1004,36 @@ async function browseForKey(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.instances {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+}
+.instances__row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.instances__select {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.instances__fetch {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.instances__count {
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.warn-text {
+  color: var(--warning);
 }
 
 .preflight {

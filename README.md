@@ -19,6 +19,9 @@ TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind
   keepalives, and an ephemeral loopback-only local port
 - **AWS SSM Session Manager** port forwarding — the app runs `aws ssm start-session` for you and
   points the connection at the port it opens, so there is no second terminal to babysit (see below)
+- **Bastion picked from the account, not remembered** — paste credentials, choose a region, and the
+  connection form lists the instances in it with their Name tags and whether Systems Manager can
+  actually reach them
 - Passwords and SSH secrets encrypted at rest — the OS keystore via Electron `safeStorage` where
   available, AES-256-GCM under a `0600` key file otherwise. Secrets never reach the renderer.
 - Test-connection button that reports the server edition and version
@@ -34,10 +37,32 @@ grandchild, which on Windows has to be killed as a process tree or it keeps hold
 - **Forward to the instance itself** — SQL Server runs on the bastion. Uses
   `AWS-StartPortForwardingSession`.
 
-Set the instance ID, and optionally a region, a fixed local port (blank picks a free one) and an
-explicit CLI path. **Check prerequisites** verifies the three things that actually go wrong — the
-AWS CLI, the Session Manager plugin, and whether your credentials are still valid — and
-`aws sts get-caller-identity` confirms which identity you are about to connect as.
+**Picking the bastion.** An instance ID is not a durable setting: a redeploy replaces the bastion
+and the saved ID quietly points at something that no longer exists. So once the credentials are in
+place and a region is chosen, **Fetch instances** lists what is actually there and the ID becomes a
+choice from a list:
+
+```
+prod-bastion — i-0ba5711000fee1dad · running · 10.0.2.11 · SSM Online
+old-bastion  — i-0dead00beef001122 · running · 10.0.2.12 · SSM ConnectionLost
+app-server   — i-0abc123def4567890 · running · 10.0.3.40 · not in SSM
+```
+
+Two calls stand behind it — `ec2 describe-instances` for what exists, with Name tags and state, and
+`ssm describe-instance-information` for what Session Manager can reach, which is what decides
+whether a session can start at all. The reachable ones sort first, `mi-` managed instances that are
+not EC2 are included, and either call being denied by IAM degrades to the other's list with a note
+rather than to nothing. Reopen a saved connection, fetch, and an ID the region no longer knows about
+is called out as replaced.
+
+The list is per region, so the region field is the one that has to be right; it is prefilled from
+the pasted block when that names one. You can still type an ID by hand — the field stays editable,
+and the picker only fills it in.
+
+Set a fixed local port (blank picks a free one) and an explicit CLI path if you need them.
+**Check prerequisites** verifies the three things that actually go wrong — the AWS CLI, the Session
+Manager plugin, and whether your credentials are still valid — and `aws sts get-caller-identity`
+confirms which identity you are about to connect as.
 
 **Credentials.** Two sources, chosen per connection:
 
@@ -61,7 +86,9 @@ denial, an expired SSO session, a bad profile or a busy port each produce a spec
 instead of an exit code.
 
 Requires AWS CLI v2 and the Session Manager plugin on the machine running the app, and
-`ssm:StartSession` permission on the instance and the port-forwarding document.
+`ssm:StartSession` permission on the instance and the port-forwarding document. The instance picker
+additionally uses `ec2:DescribeInstances` and `ssm:DescribeInstanceInformation`; neither is needed to
+connect, and holding only one of them still produces a usable list.
 
 **Schema explorer**
 - Database switcher (system databases hidden by default), schema/table/view/procedure/function tree
@@ -211,9 +238,11 @@ The three suites:
 - **editing** — edits a cell, stages an insert, applies the change set, verifies the rows in the
   database, deletes through the context menu, and drives the filter builder
 - **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block,
-  runs the prerequisite check in both its failing and passing states, saves, reopens the connection
-  to confirm the stored summary appears while the secret never reaches the renderer, and opens a
-  second window. Uses stand-ins for `aws` and `session-manager-plugin`, so it needs no AWS account.
+  fetches the account's instances and picks the bastion from the list (including the empty answer a
+  wrong region gives), runs the prerequisite check in both its failing and passing states, saves,
+  reopens the connection to confirm the stored summary appears while the secret never reaches the
+  renderer, and opens a second window. `scripts/e2e.sh` writes stand-ins for `aws` and
+  `session-manager-plugin` into `.tmp/bin`, so it needs no AWS account.
 
 Screenshots land in `.tmp/`.
 
@@ -227,7 +256,8 @@ src/
 │   ├── db/
 │   │   ├── registry.ts       live client per connection
 │   │   └── sqlserver/        client, config mapping, catalog queries, type mapping
-│   ├── tunnel/               ssh.ts, ssm.ts (AWS Session Manager), shared contract
+│   ├── tunnel/               ssh.ts, ssm.ts (AWS Session Manager), ec2Instances.ts
+│   │                         (the bastion picker's lookup), shared contract
 │   ├── storage/              JSON stores + credential vault
 │   ├── ipc/                  handlers, each wrapped in a result envelope
 │   ├── menu.ts, window.ts    menu bar, window state
@@ -236,6 +266,7 @@ src/
 ├── shared/                   used by both sides
 │   ├── types.ts              the IPC contract
 │   ├── aws/credentials.ts    parses the AWS portal's credential blocks
+│   ├── aws/regions.ts        the region list the connection form offers
 │   ├── sql/                  identifier escaping, T-SQL lexer, query builders
 │   ├── serialize.ts          driver values ⇄ IPC-safe cell values
 │   ├── export.ts             CSV/JSON/SQL/Markdown
@@ -295,8 +326,9 @@ Deliberately out of scope for phase 1, in rough priority order for phase 2:
 - **Expiry is only known when the block says so.** The portal's environment-variable format carries
   no expiry, so the app can tell you the credentials *are* temporary but not when they lapse; it
   reports the failure when they do.
-- **SSM targets are given by instance ID**, not by Name tag — resolving tags would need
-  `ec2:DescribeInstances` and a region-wide lookup.
+- **The bastion is still stored as an instance ID.** The picker resolves Name tags at the moment you
+  fetch, but what the connection saves is the ID it produced, so a redeploy still means fetching the
+  list again and picking the new instance — the form tells you when the saved ID has gone.
 - **The renderer bundle is ~1.7 MB** (CodeMirror and the SQL formatter dominate). Fine for a desktop
   app; worth code-splitting if startup time ever matters.
 - **Query results are capped** at `maxResultRows` (50 000 by default). Rows past the cap are counted

@@ -64,9 +64,7 @@ function onAuxClick(event: MouseEvent, id: string): void {
       </button>
     </div>
 
-    <button class="tabbar__new btn btn--ghost btn--icon" title="New query (Ctrl+T)" @click="emit('new-query')">
-      +
-    </button>
+    <button class="tabbar__new" title="New query (Ctrl+T)" @click="emit('new-query')">+</button>
 
     <ContextMenu
       v-if="menu"
@@ -83,8 +81,8 @@ function onAuxClick(event: MouseEvent, id: string): void {
 .tabbar {
   display: flex;
   align-items: stretch;
-  height: 32px;
-  border-bottom: 1px solid var(--border);
+  height: var(--h-tabstrip);
+  border-bottom: var(--rule) solid var(--border-strong);
   background: var(--bg-app);
   flex: 0 0 auto;
 }
@@ -101,30 +99,31 @@ function onAuxClick(event: MouseEvent, id: string): void {
 .tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  max-width: 200px;
-  min-width: 110px;
-  padding: 0 8px 0 10px;
+  gap: 9px;
+  max-width: 220px;
+  min-width: 132px;
+  padding: 0 10px 0 14px;
   border: none;
-  border-right: 1px solid var(--border);
-  border-bottom: 2px solid transparent;
+  border-right: 1px solid var(--border-subtle);
   background: transparent;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
 }
 .tab:hover {
   background: var(--bg-hover);
 }
+/* The active tab's accent sits on the top edge, so the strip reads as a set of
+   cards standing on the panel rather than underlined labels. */
 .tab--active {
   background: var(--bg-surface);
   color: var(--text-primary);
-  border-bottom-color: var(--accent);
+  box-shadow: inset 0 2px 0 var(--accent);
 }
 .tab__icon {
-  font-size: 10px;
-  opacity: 0.8;
+  font-size: 11px;
+  color: var(--text-muted);
 }
 .tab__title {
   flex: 1;
@@ -132,15 +131,14 @@ function onAuxClick(event: MouseEvent, id: string): void {
   text-align: left;
 }
 .tab__spinner {
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
   border-width: 1.5px;
 }
 .tab__dot {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
-  background: var(--text-muted);
+  background: var(--text-dim);
   flex: 0 0 auto;
 }
 .tab__dot--edit {
@@ -148,25 +146,31 @@ function onAuxClick(event: MouseEvent, id: string): void {
 }
 .tab__close {
   flex: 0 0 auto;
-  width: 15px;
-  height: 15px;
-  line-height: 15px;
+  width: 16px;
   text-align: center;
-  border-radius: 3px;
-  font-size: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
   opacity: 0;
 }
 .tab:hover .tab__close,
 .tab--active .tab__close {
-  opacity: 0.65;
+  opacity: 1;
 }
 .tab__close:hover {
-  opacity: 1;
-  background: var(--bg-active);
+  color: var(--text-primary);
 }
 .tabbar__new {
   flex: 0 0 auto;
-  align-self: center;
-  margin: 0 4px;
+  width: var(--h-tabstrip);
+  border: none;
+  border-left: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+}
+.tabbar__new:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 </style>

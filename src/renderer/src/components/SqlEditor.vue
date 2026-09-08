@@ -14,15 +14,15 @@ import { MSSQL, sql } from '@codemirror/lang-sql'
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete'
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search'
 import {
+  HighlightStyle,
   bracketMatching,
-  defaultHighlightStyle,
   foldGutter,
   foldKeymap,
   indentOnInput,
   syntaxHighlighting
 } from '@codemirror/language'
+import { tags } from '@lezer/highlight'
 import { lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection } from '@codemirror/view'
-import { oneDark } from '@codemirror/theme-one-dark'
 
 const props = withDefaults(
   defineProps<{
@@ -71,24 +71,30 @@ function baseTheme(): ReturnType<typeof EditorView.theme> {
     '.cm-content': {
       fontFamily: props.fontFamily,
       caretColor: 'var(--accent)',
-      userSelect: 'text'
+      userSelect: 'text',
+      padding: '10px 0'
     },
-    '.cm-scroller': { fontFamily: props.fontFamily, overflow: 'auto' },
+    '.cm-scroller': { fontFamily: props.fontFamily, overflow: 'auto', lineHeight: '20px' },
+    '.cm-line': { padding: '0 14px' },
     '.cm-gutters': {
-      backgroundColor: 'var(--bg-raised)',
-      color: 'var(--text-muted)',
+      backgroundColor: 'var(--bg-app)',
+      color: 'var(--text-dim)',
       border: 'none',
-      borderRight: '1px solid var(--border)'
+      borderRight: '1px solid var(--border-subtle)',
+      padding: '10px 0'
     },
+    '.cm-lineNumbers .cm-gutterElement': { padding: '0 12px 0 20px', minWidth: '52px' },
     '.cm-activeLine': { backgroundColor: 'var(--bg-hover)' },
-    '.cm-activeLineGutter': { backgroundColor: 'var(--bg-hover)' },
+    '.cm-activeLineGutter': { backgroundColor: 'var(--bg-hover)', color: 'var(--text-secondary)' },
     '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
       backgroundColor: 'var(--bg-selected)'
     },
     '.cm-cursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
     '.cm-tooltip': {
-      backgroundColor: 'var(--bg-overlay)',
+      backgroundColor: 'var(--bg-surface)',
       border: '1px solid var(--border-strong)',
+      borderRadius: '0',
+      boxShadow: 'var(--shadow-menu)',
       color: 'var(--text-primary)'
     },
     '.cm-tooltip-autocomplete ul li[aria-selected]': {
@@ -106,10 +112,27 @@ function sqlExtension(): ReturnType<typeof sql> {
   })
 }
 
+/**
+ * SQL in the Modernist palette: keywords carry the accent, the values they act
+ * on drop back to the secondary ramp, and everything else is plain ink. There
+ * is no second hue — the system is mono by design.
+ */
+const modernistHighlight = HighlightStyle.define([
+  { tag: [tags.keyword, tags.operatorKeyword, tags.modifier], color: 'var(--accent-bright)' },
+  { tag: [tags.controlKeyword, tags.definitionKeyword], color: 'var(--accent-bright)' },
+  { tag: [tags.function(tags.variableName), tags.standard(tags.name)], color: 'var(--text-primary)', fontWeight: '500' },
+  { tag: [tags.string, tags.special(tags.string)], color: 'var(--text-secondary)' },
+  { tag: [tags.number, tags.bool, tags.null], color: 'var(--text-secondary)' },
+  { tag: [tags.comment, tags.lineComment, tags.blockComment], color: 'var(--text-dim)', fontStyle: 'italic' },
+  { tag: [tags.variableName, tags.propertyName, tags.name], color: 'var(--text-primary)' },
+  { tag: [tags.typeName, tags.className], color: 'var(--text-primary)' },
+  { tag: tags.operator, color: 'var(--text-secondary)' },
+  { tag: [tags.punctuation, tags.separator, tags.bracket], color: 'var(--text-muted)' },
+  { tag: tags.invalid, color: 'var(--danger)' }
+])
+
 function themeExtension(): unknown[] {
-  return props.theme === 'dark'
-    ? [oneDark]
-    : [syntaxHighlighting(defaultHighlightStyle, { fallback: true })]
+  return [syntaxHighlighting(modernistHighlight, { fallback: true })]
 }
 
 onMounted(() => {
@@ -245,11 +268,21 @@ defineExpose({ getSelection, getCursor, focus, insertText, setValue })
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  background: var(--bg-surface);
 }
 :deep(.cm-editor) {
   height: 100%;
 }
 :deep(.cm-editor.cm-focused) {
   outline: none;
+}
+/* Square selections and no rounded autocomplete card. */
+:deep(.cm-tooltip-autocomplete ul li) {
+  border-radius: 0;
+}
+:deep(.cm-panels) {
+  background: var(--bg-app);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
 }
 </style>

@@ -25,7 +25,8 @@ export interface RowField {
 const props = withDefaults(
   defineProps<{
     fields: RowField[]
-    /** `Row 12 of 200`, or empty when nothing is selected. */
+    /** `12 of 200`, or empty when nothing is selected. The word "Row" is the
+     * panel's own kicker, so the label carries only the position. */
     label?: string
     editable?: boolean
     state?: 'normal' | 'inserted' | 'deleted'
@@ -104,8 +105,12 @@ function autoSize(event: Event): void {
 <template>
   <aside class="rowpanel">
     <header class="rowpanel__head">
-      <span class="rowpanel__title truncate">{{ label || 'No row selected' }}</span>
-      <span v-if="state === 'inserted'" class="badge">new</span>
+      <span class="kicker rowpanel__kicker">Row</span>
+      <span class="rowpanel__title mono truncate">
+        <template v-if="label">{{ label }}</template>
+        <span v-else class="dim">none selected</span>
+      </span>
+      <span v-if="state === 'inserted'" class="badge badge--accent">new</span>
       <span v-if="state === 'deleted'" class="badge">deleted</span>
       <div class="rowpanel__spacer"></div>
       <button
@@ -199,42 +204,52 @@ function autoSize(event: Event): void {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  border-left: 1px solid var(--border);
+  border-left: var(--rule) solid var(--border-strong);
   background: var(--bg-surface);
 }
 
 .rowpanel__head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 4px 0 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-raised);
+  gap: 8px;
+  height: var(--h-gridheader);
+  padding: 0 4px 0 14px;
+  border-bottom: var(--rule) solid var(--border-strong);
+  background: var(--bg-app);
   flex: 0 0 auto;
 }
+.rowpanel__kicker {
+  flex: 0 0 auto;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
 .rowpanel__title {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 12px;
   color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 .rowpanel__spacer {
   flex: 1;
 }
 .rowpanel__btn {
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
   border: none;
-  border-radius: 3px;
+  border-radius: 0;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1;
   cursor: pointer;
 }
 .rowpanel__btn:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+.rowpanel__btn:last-child:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-text);
 }
 .rowpanel__btn:disabled {
   opacity: 0.35;
@@ -244,56 +259,61 @@ function autoSize(event: Event): void {
 .rowpanel__empty {
   padding: 16px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .rowpanel__fields {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 6px 0;
 }
 
+/* Each field is a ruled band; state is marked on the leading edge. */
 .rowpanel__field {
-  padding: 5px 10px;
-  border-left: 2px solid transparent;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
 }
 .rowpanel__field--selected {
-  background: var(--bg-hover);
-  border-left-color: var(--border-focus);
+  background: var(--bg-raised);
+  box-shadow: var(--row-staged);
 }
 .rowpanel__field--edited {
-  border-left-color: var(--success);
+  box-shadow: var(--row-staged);
 }
 
 .rowpanel__label {
   display: flex;
   align-items: center;
-  gap: 5px;
-  margin-bottom: 3px;
+  gap: 7px;
+  margin-bottom: 6px;
   min-width: 0;
 }
 .rowpanel__name {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-primary);
 }
 .rowpanel__type {
   flex: 1;
   font-size: 10px;
-  color: var(--text-muted);
+  color: var(--text-dim);
+  text-align: right;
 }
 .rowpanel__fk {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
   padding: 0;
   border: none;
-  border-radius: 3px;
+  border-radius: 0;
   background: transparent;
-  color: var(--info);
+  color: var(--accent);
   cursor: pointer;
 }
 .rowpanel__fk svg {
@@ -301,21 +321,24 @@ function autoSize(event: Event): void {
   height: 11px;
 }
 .rowpanel__fk:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--info) 22%, transparent);
+  background: var(--accent);
+  color: var(--accent-text);
 }
 .rowpanel__fk:disabled {
   opacity: 0.3;
   cursor: not-allowed;
 }
 .rowpanel__null {
-  padding: 0 4px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 0;
   background: transparent;
   color: var(--text-muted);
+  font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   cursor: pointer;
 }
 .rowpanel__null:hover:not(:disabled) {
@@ -330,16 +353,16 @@ function autoSize(event: Event): void {
 .rowpanel__value {
   display: block;
   width: 100%;
-  min-height: 26px;
+  min-height: var(--row-height);
   max-height: 260px;
-  padding: 4px 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  padding: 6px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 0;
   background: var(--bg-input);
   color: var(--text-primary);
   font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 13px;
+  line-height: 17px;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-y: auto;
@@ -348,17 +371,13 @@ function autoSize(event: Event): void {
   user-select: text;
 }
 .rowpanel__value:focus {
-  border-color: var(--border-focus);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--border-focus) 22%, transparent);
+  border-color: var(--accent);
 }
 .rowpanel__value--readonly {
-  background: transparent;
   color: var(--text-secondary);
-  cursor: default;
 }
 .rowpanel__nullmark {
-  color: var(--text-muted);
+  color: var(--text-dim);
   font-style: italic;
-  font-size: 11px;
 }
 </style>

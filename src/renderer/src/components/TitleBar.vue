@@ -195,14 +195,8 @@ onBeforeUnmount(() => {
       <template v-if="!isMac">
         <div class="titlebar__logo" aria-hidden="true">
           <svg viewBox="0 0 16 16">
-            <path
-              d="M8 1.6 13.6 4.8v6.4L8 14.4 2.4 11.2V4.8z"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.3"
-              stroke-linejoin="round"
-            />
-            <path d="M4.6 6.4h6.8M4.6 9.6h6.8" stroke="currentColor" stroke-width="1.1" />
+            <path d="M8 1.2 14 4.6v6.8L8 14.8 2 11.4V4.6z" fill="currentColor" />
+            <path d="M3.4 6.6h9.2M3.4 9.4h9.2" stroke="var(--bg-raised)" stroke-width="1.6" />
           </svg>
         </div>
         <nav ref="menuBar" class="titlebar__menus">
@@ -280,11 +274,11 @@ onBeforeUnmount(() => {
 .titlebar {
   display: flex;
   align-items: stretch;
-  height: 34px;
+  height: var(--h-titlebar);
   flex: 0 0 auto;
   background: var(--bg-raised);
-  border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  border-bottom: var(--rule) solid var(--border-strong);
+  font-size: 13px;
   user-select: none;
   -webkit-app-region: drag;
   position: relative;
@@ -314,12 +308,12 @@ onBeforeUnmount(() => {
 .titlebar__logo {
   display: flex;
   align-items: center;
-  padding: 0 8px 0 10px;
+  padding: 0 12px 0 14px;
   color: var(--accent);
 }
 .titlebar__logo svg {
-  width: 15px;
-  height: 15px;
+  width: 17px;
+  height: 17px;
 }
 
 .titlebar__menus {
@@ -329,32 +323,35 @@ onBeforeUnmount(() => {
   -webkit-app-region: no-drag;
 }
 .titlebar__menu {
-  padding: 0 9px;
+  padding: 0 12px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   cursor: default;
   white-space: nowrap;
 }
 .titlebar__menu:hover {
-  background: var(--bg-hover);
+  background: var(--bg-hover-strong);
   color: var(--text-primary);
 }
+/* The open menu drops to the content ground and takes the accent underline,
+   so the strip reads as continuous with the panel below it. */
 .titlebar__menu--open {
-  background: var(--bg-active);
+  background: var(--bg-app);
   color: var(--text-primary);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .titlebar__dropdown {
   position: absolute;
   top: 100%;
-  min-width: 240px;
-  padding: 4px;
+  min-width: 272px;
+  padding: 4px 0;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--bg-overlay);
-  box-shadow: var(--shadow);
+  border-radius: 0;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-menu);
   z-index: 500;
 }
 .titlebar__item {
@@ -362,18 +359,18 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 24px;
   width: 100%;
-  padding: 5px 10px;
+  padding: 7px 14px;
   border: none;
-  border-radius: 3px;
+  border-radius: 0;
   background: transparent;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 13px;
   text-align: left;
   cursor: default;
 }
 .titlebar__item:hover,
 .titlebar__item--highlight {
-  background: var(--bg-selected);
+  background: var(--bg-hover-strong);
 }
 .titlebar__item-label {
   flex: 1;
@@ -381,13 +378,14 @@ onBeforeUnmount(() => {
 }
 .titlebar__item-key {
   color: var(--text-muted);
+  font-family: var(--font-mono);
   font-size: 11px;
   white-space: nowrap;
 }
 .titlebar__sep {
   height: 1px;
-  margin: 4px 6px;
-  background: var(--border);
+  margin: 4px 0;
+  background: var(--border-strong);
 }
 
 .titlebar__title {
@@ -395,9 +393,11 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   flex: 0 1 auto;
-  padding: 0 12px;
-  color: var(--text-secondary);
-  font-size: 12px;
+  padding: 0 16px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
 }
 
 .titlebar__controls {
@@ -406,7 +406,7 @@ onBeforeUnmount(() => {
   -webkit-app-region: no-drag;
 }
 .titlebar__control {
-  width: 44px;
+  width: 46px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
@@ -418,16 +418,17 @@ onBeforeUnmount(() => {
 .titlebar__control svg {
   width: 10px;
   height: 10px;
-  stroke-width: 1;
+  stroke-width: 1.2;
   fill: none;
   shape-rendering: crispEdges;
 }
 .titlebar__control:hover {
-  background: var(--bg-hover);
+  background: var(--bg-hover-strong);
   color: var(--text-primary);
 }
+/* Close is the one window button that earns the accent. */
 .titlebar__control--close:hover {
-  background: #e81123;
-  color: #ffffff;
+  background: var(--accent);
+  color: var(--accent-text);
 }
 </style>

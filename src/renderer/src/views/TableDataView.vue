@@ -22,6 +22,7 @@ import FilterBuilder from '../components/FilterBuilder.vue'
 import ContextMenu, { type MenuEntry } from '../components/ContextMenu.vue'
 import RowDetailPanel, { type RowField } from '../components/RowDetailPanel.vue'
 import SplitPane from '../components/SplitPane.vue'
+import TableViewSwitch from '../components/TableViewSwitch.vue'
 import { exportRows } from '@shared/export'
 import { foreignKeyFilters, foreignKeyTargets } from '@shared/foreignKeys'
 import { useSettingsStore } from '../stores/settings'
@@ -97,12 +98,20 @@ watch(pendingCount, (count) => {
   tabs.update<TableTab>(props.tab.id, { pendingEdits: count })
 })
 
-const pageInfo = computed(() => {
+const pageRange = computed(() => {
   const from = allRows.value.length === 0 ? 0 : offset.value + 1
   const to = offset.value + loadedRows.value.length
-  const total = totalRows.value === null ? '?' : totalRows.value.toLocaleString()
-  return `${from.toLocaleString()}–${to.toLocaleString()} of ${total}`
+  return `${from.toLocaleString()}–${to.toLocaleString()}`
 })
+
+const pageTotal = computed(() =>
+  totalRows.value === null ? '?' : totalRows.value.toLocaleString()
+)
+
+/** The row count as the command bar states it, beside the table's name. */
+const rowCountLabel = computed(() =>
+  totalRows.value === null ? '' : `${totalRows.value.toLocaleString()} rows`
+)
 
 const canPrevious = computed(() => offset.value > 0)
 const canNext = computed(() =>
@@ -269,10 +278,10 @@ const rowLabel = computed(() => {
   const current = selection.value
   if (!current || !allRows.value[current.rowIndex]) return ''
   if (current.rowIndex >= loadedRows.value.length) {
-    return `New row ${current.rowIndex - loadedRows.value.length + 1}`
+    return `new ${current.rowIndex - loadedRows.value.length + 1}`
   }
   const total = totalRows.value ?? allRows.value.length
-  return `Row ${(offset.value + current.rowIndex + 1).toLocaleString()} of ${total.toLocaleString()}`
+  return `${(offset.value + current.rowIndex + 1).toLocaleString()} of ${total.toLocaleString()}`
 })
 
 const rowState = computed<RowState>(() =>
@@ -541,44 +550,48 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
 <template>
   <div class="data">
     <div class="data__toolbar">
-      <button class="btn btn--sm btn--ghost" :disabled="loading" @click="load()">⟳ Refresh</button>
+      <TableViewSwitch :tab="tab" />
+
+      <span class="data__name mono truncate">
+        {{ tab.schema }}.<strong>{{ tab.table }}</strong>
+      </span>
+      <span v-if="rowCountLabel" class="data__rows mono">{{ rowCountLabel }}</span>
+
+      <div class="data__spacer"></div>
+
+      <button class="btn" :disabled="loading" @click="load()">⟳ Refresh</button>
       <button
-        class="btn btn--sm btn--ghost"
-        :class="{ 'btn--active': showFilters }"
+        class="btn"
+        :class="{ 'btn--armed': showFilters || filters.length > 0 || !!rawWhere }"
         @click="showFilters = !showFilters"
       >
         Filter
         <span v-if="filters.length || rawWhere" class="data__dot"></span>
       </button>
       <button
-        class="btn btn--sm btn--ghost"
-        :class="{ 'btn--active': showRowPanel }"
+        class="btn"
+        :class="{ 'btn--armed': showRowPanel }"
         title="Show the selected row beside the grid (Ctrl+I)"
         @click="toggleRowPanel"
       >
         Row
       </button>
 
-      <div class="data__spacer"></div>
-
       <template v-if="editable">
-        <button class="btn btn--sm btn--ghost" @click="addRow">+ Row</button>
-        <button
-          v-if="pendingCount > 0"
-          class="btn btn--sm"
-          :disabled="applying"
-          @click="discard"
-        >
+        <div class="divider-v"></div>
+        <button class="btn" @click="addRow">+ Row</button>
+        <button v-if="pendingCount > 0" class="btn btn--muted" :disabled="applying" @click="discard">
           Discard
         </button>
         <button
           v-if="pendingCount > 0"
-          class="btn btn--sm btn--primary"
+          class="btn btn--primary"
           :disabled="applying"
           @click="apply"
         >
           <span v-if="applying" class="spinner"></span>
-          Apply {{ pendingCount }}
+          Apply
+          <span class="seg__count">{{ pendingCount }}</span>
         </button>
       </template>
       <span v-else class="badge">read only</span>
@@ -653,17 +666,17 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
     </div>
 
     <div class="data__foot">
-      <button class="btn btn--sm btn--ghost" :disabled="!canPrevious || loading" @click="goToPage(-1)">
+      <button class="btn btn--sm" :disabled="!canPrevious || loading" @click="goToPage(-1)">
         ‹ Prev
       </button>
-      <span class="data__page">{{ pageInfo }}</span>
-      <button class="btn btn--sm btn--ghost" :disabled="!canNext || loading" @click="goToPage(1)">
+      <span class="data__page num">{{ pageRange }} <span class="dim">of</span> {{ pageTotal }}</span>
+      <button class="btn btn--sm" :disabled="!canNext || loading" @click="goToPage(1)">
         Next ›
       </button>
 
       <select
         v-model.number="pageSize"
-        class="select data__pagesize"
+        class="select select--sm data__pagesize"
         @change="load(true)"
       >
         <option :value="50">50</option>
@@ -674,8 +687,9 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       </select>
 
       <div class="data__spacer"></div>
-      <span class="muted">{{ durationMs }} ms</span>
-      <span class="muted mono truncate data__sql" :title="lastSql">
+      <span class="dim mono data__ms">{{ durationMs }} ms</span>
+      <div class="divider-v data__foot-rule"></div>
+      <span class="dim mono truncate data__sql" :title="lastSql">
         {{ lastSql.replace(/\s+/g, ' ') }}
       </span>
     </div>
@@ -698,35 +712,50 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
   height: 100%;
   min-height: 0;
 }
+/* One command bar: the view switch, what you are looking at, and what you can
+   do to it. The Data/Structure strip used to sit above this. */
 .data__toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-raised);
+  gap: 12px;
+  height: var(--h-commandbar);
+  padding: 0 12px;
+  border-bottom: var(--rule) solid var(--border-strong);
+  background: var(--bg-surface);
   flex: 0 0 auto;
+}
+.data__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.data__name strong {
+  font-weight: 700;
+}
+.data__rows {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 .data__spacer {
   flex: 1;
+}
+.data__toolbar .btn {
+  flex: 0 0 auto;
 }
 .data__dot {
   display: inline-block;
   width: 6px;
   height: 6px;
-  margin-left: 5px;
-  border-radius: 50%;
   background: var(--accent);
 }
-.btn--active {
-  background: var(--bg-active);
-}
 .data__warning {
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-strong);
   background: color-mix(in srgb, var(--warning) 16%, transparent);
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
 }
 .data__grid {
   flex: 1;
@@ -735,24 +764,34 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
 .data__foot {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-raised);
+  gap: 12px;
+  height: var(--h-gridheader);
+  padding: 0 12px;
+  border-top: var(--rule) solid var(--border-strong);
+  background: var(--bg-app);
   font-size: 11px;
   flex: 0 0 auto;
 }
 .data__page {
-  font-variant-numeric: tabular-nums;
-  min-width: 150px;
-  text-align: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 .data__pagesize {
-  width: 78px;
-  height: 24px;
+  width: auto;
+  min-width: 72px;
+  padding-right: 24px;
+  font-size: 12px;
+}
+.data__ms {
+  flex: 0 0 auto;
+  font-size: 11px;
+}
+.data__foot-rule {
+  height: 16px;
 }
 .data__sql {
-  max-width: 40%;
-  font-size: 10px;
+  max-width: 44%;
+  font-size: 11px;
 }
 </style>

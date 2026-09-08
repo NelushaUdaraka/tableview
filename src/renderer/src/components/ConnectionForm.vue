@@ -460,22 +460,22 @@ async function browseForKey(): Promise<void> {
     <!-- Tunnel ---------------------------------------------------------- -->
     <section v-show="section === 'tunnel'" class="form__section">
       <div class="field">
-        <span class="field__label">Reach the server through</span>
-        <div class="choices">
+        <span class="field__label">Tunnel</span>
+        <div class="seg">
           <button
             v-for="choice in ([
-              { id: 'none', label: 'Direct', hint: 'Connect straight to the server' },
-              { id: 'ssh', label: 'SSH tunnel', hint: 'Forward through a bastion over SSH' },
+              { id: 'none', label: 'None', hint: 'Connect straight to the server' },
+              { id: 'ssh', label: 'SSH', hint: 'Forward through a bastion over SSH' },
               { id: 'ssm', label: 'AWS SSM', hint: 'Session Manager port forwarding' }
             ] as { id: TunnelKind; label: string; hint: string }[])"
             :key="choice.id"
             type="button"
-            class="choice"
-            :class="{ 'choice--active': tunnelKind === choice.id }"
+            class="seg__opt form__seg-opt"
+            :class="{ 'seg__opt--on': tunnelKind === choice.id }"
+            :title="choice.hint"
             @click="setTunnelKind(choice.id)"
           >
-            <span class="choice__label">{{ choice.label }}</span>
-            <span class="choice__hint">{{ choice.hint }}</span>
+            {{ choice.label }}
           </button>
         </div>
       </div>
@@ -833,12 +833,12 @@ async function browseForKey(): Promise<void> {
     </section>
 
     <footer class="form__foot">
-      <button type="button" class="btn" :disabled="busy" @click="emit('test', payload())">
+      <button type="button" class="btn btn--muted" :disabled="busy" @click="emit('test', payload())">
         <span v-if="busy" class="spinner"></span>
-        Test
+        Test connection
       </button>
       <div style="flex: 1"></div>
-      <button type="button" class="btn" @click="emit('cancel')">Cancel</button>
+      <button type="button" class="btn btn--muted" @click="emit('cancel')">Cancel</button>
       <button type="submit" class="btn btn--primary" :disabled="!canSubmit">Save</button>
     </footer>
   </form>
@@ -851,41 +851,56 @@ async function browseForKey(): Promise<void> {
   height: 100%;
   min-height: 0;
 }
+/* Full-bleed micro-caps tabs, matching the results and sidebar panels. */
 .form__tabs {
   display: flex;
-  gap: 2px;
-  padding: 0 4px;
-  border-bottom: 1px solid var(--border);
+  align-items: stretch;
+  height: var(--h-tabstrip);
+  border-bottom: var(--rule) solid var(--border-strong);
+  background: var(--bg-app);
   flex: 0 0 auto;
 }
 .form__tab {
   position: relative;
-  padding: 8px 14px;
+  padding: 0 18px;
   border: none;
-  border-bottom: 2px solid transparent;
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.form__tab + .form__tab {
+  border-left: 1px solid var(--border-subtle);
+}
+.form__tab:hover {
+  color: var(--text-primary);
 }
 .form__tab--active {
+  background: var(--bg-surface);
   color: var(--text-primary);
-  border-bottom-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 .form__dot {
   display: inline-block;
   width: 6px;
   height: 6px;
-  margin-left: 6px;
-  border-radius: 50%;
-  background: var(--success);
+  margin-left: 8px;
+  background: var(--accent);
+}
+.form__seg-opt {
+  height: 32px;
+  padding: 0 16px;
+  font-size: 13px;
 }
 .form__section {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 16px 2px;
+  gap: 18px;
+  padding: 20px;
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -893,7 +908,7 @@ async function browseForKey(): Promise<void> {
 .form__group {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
   margin: 0;
   padding: 0;
   border: none;
@@ -904,75 +919,47 @@ async function browseForKey(): Promise<void> {
 .form__foot {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: var(--rule) solid var(--border-strong);
+  background: var(--bg-app);
   flex: 0 0 auto;
+}
+.form__foot .btn {
+  height: var(--h-control-lg);
 }
 .row {
   display: flex;
-  gap: 10px;
+  gap: 16px;
   align-items: flex-end;
 }
 .hint {
   margin: 0;
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--text-dim);
+  line-height: 1.55;
 }
 .hint code {
   font-family: var(--font-mono);
   font-size: 11px;
-}
-.choices {
-  display: flex;
-  gap: 8px;
-}
-.choice {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 9px 11px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--bg-input);
   color: var(--text-secondary);
-  cursor: pointer;
-  text-align: left;
-  transition: border-color var(--transition), background var(--transition);
-}
-.choice:hover {
-  border-color: var(--text-muted);
-}
-.choice--active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--text-primary);
-}
-.choice__label {
-  font-weight: 600;
-  font-size: 12px;
-}
-.choice__hint {
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
+/* --- credentials and instances: ruled boxes on the input ground ----------- */
 .creds {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-raised);
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-app);
 }
 .creds__current {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 7px 9px;
-  border-radius: var(--radius-sm);
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--border-strong);
   background: var(--bg-input);
 }
 .creds__mark {
@@ -989,11 +976,14 @@ async function browseForKey(): Promise<void> {
   min-width: 0;
 }
 .creds__key {
+  font-family: var(--font-mono);
   font-size: 12px;
+  color: var(--text-secondary);
 }
 .creds__arn {
+  font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--text-dim);
   margin-top: 2px;
 }
 .creds__box {
@@ -1007,30 +997,30 @@ async function browseForKey(): Promise<void> {
 }
 
 .instances {
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-raised);
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-app);
 }
 .instances__row {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
 }
 .instances__select {
   flex: 1;
   min-width: 0;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
 }
 .instances__fetch {
   flex: 0 0 auto;
   white-space: nowrap;
 }
 .instances__count {
-  margin-left: 6px;
-  color: var(--text-muted);
+  margin-left: 8px;
+  color: var(--text-dim);
   font-weight: 400;
+  letter-spacing: 0;
 }
 .warn-text {
   color: var(--warning);
@@ -1039,22 +1029,21 @@ async function browseForKey(): Promise<void> {
 .preflight {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   align-items: flex-start;
 }
 .preflight__results {
   width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
   background: var(--bg-input);
 }
 .preflight__row {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 10px;
   font-size: 11px;
-  line-height: 1.7;
+  line-height: 1.8;
   min-width: 0;
 }
 .preflight__mark {
@@ -1074,21 +1063,22 @@ async function browseForKey(): Promise<void> {
 .preflight__detail {
   flex: 1;
   min-width: 0;
-  color: var(--text-muted);
+  color: var(--text-dim);
   font-family: var(--font-mono);
 }
 
+/* Square swatches — nothing in this system is round. */
 .swatches {
   display: flex;
-  gap: 5px;
-  height: 30px;
+  gap: 6px;
+  height: var(--h-field);
   align-items: center;
 }
 .swatch {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border: 2px solid transparent;
-  border-radius: 50%;
+  border-radius: 0;
   cursor: pointer;
   padding: 0;
 }
@@ -1097,6 +1087,7 @@ async function browseForKey(): Promise<void> {
   border-color: var(--border-strong);
 }
 .swatch--active {
-  border-color: var(--text-primary);
+  outline: 2px solid var(--text-primary);
+  outline-offset: 1px;
 }
 </style>

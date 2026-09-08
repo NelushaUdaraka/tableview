@@ -138,13 +138,21 @@ function durationLabel(ms: number): string {
       </div>
 
       <div class="results__meta">
-        <span v-if="running" class="results__running"><span class="spinner"></span> Running…</span>
+        <span v-if="running" class="results__cell results__running">
+          <span class="spinner"></span> Running…
+        </span>
         <template v-else-if="result">
-          <span v-if="active?.truncated" class="results__warn" title="Row cap reached">
+          <span
+            v-if="active?.truncated"
+            class="results__cell results__warn"
+            title="Row cap reached"
+          >
             showing {{ active.rows.length }} of {{ active.rowCount }}
           </span>
-          <span v-if="rowsAffected.length">{{ totalAffected }} affected</span>
-          <span>{{ durationLabel(result.totalDurationMs) }}</span>
+          <span v-if="rowsAffected.length" class="results__cell">{{ totalAffected }} affected</span>
+          <span class="results__cell results__cell--strong">
+            {{ durationLabel(result.totalDurationMs) }}
+          </span>
         </template>
       </div>
     </div>
@@ -214,13 +222,11 @@ function durationLabel(ms: number): string {
 }
 .results__bar {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: space-between;
-  gap: 12px;
-  height: 30px;
-  padding: 0 10px 0 0;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-raised);
+  height: var(--h-tabstrip);
+  border-bottom: var(--rule) solid var(--border-strong);
+  background: var(--bg-app);
   flex: 0 0 auto;
 }
 .results__tabs {
@@ -231,42 +237,60 @@ function durationLabel(ms: number): string {
 .results__tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 12px;
+  gap: 8px;
+  padding: 0 16px;
   border: none;
-  border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--text-muted);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   cursor: pointer;
   white-space: nowrap;
 }
-.results__tab--active {
+.results__tab + .results__tab {
+  border-left: 1px solid var(--border-subtle);
+}
+.results__tab:hover {
   color: var(--text-primary);
-  border-bottom-color: var(--accent);
+}
+.results__tab--active {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 .results__tab--error {
   color: var(--danger);
 }
 .results__tab-count {
+  padding: 1px 6px;
+  border-radius: 0;
+  background: var(--bg-raised);
   font-size: 10px;
-  padding: 0 5px;
-  border-radius: 8px;
-  background: var(--bg-active);
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
+/* The run's numbers get ruled cells of their own, like the status bar. */
 .results__meta {
   display: flex;
-  gap: 12px;
-  align-items: center;
-  font-size: 11px;
-  color: var(--text-muted);
+  align-items: stretch;
   white-space: nowrap;
 }
-.results__running {
+.results__cell {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+  padding: 0 12px;
+  border-left: 1px solid var(--border-strong);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.results__cell--strong {
+  padding: 0 14px;
+  color: var(--text-secondary);
 }
 .results__warn {
   color: var(--warning);
@@ -279,41 +303,42 @@ function durationLabel(ms: number): string {
 .messages {
   height: 100%;
   overflow: auto;
-  padding: 10px;
 }
 .message {
-  padding: 8px 10px;
-  margin-bottom: 6px;
-  border-left: 3px solid var(--border-strong);
-  border-radius: 3px;
-  background: var(--bg-raised);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  box-shadow: inset 3px 0 0 var(--border-strong);
+  background: transparent;
   font-family: var(--font-mono);
   font-size: 12px;
 }
 .message--error {
-  border-left-color: var(--danger);
+  box-shadow: inset 3px 0 0 var(--danger);
 }
 .message__title {
   font-weight: 700;
   color: var(--danger);
-  margin-bottom: 3px;
+  margin-bottom: 4px;
 }
 .message__text {
   white-space: pre-wrap;
   word-break: break-word;
+  color: var(--text-secondary);
 }
 .message__meta {
   margin-top: 4px;
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--text-dim);
 }
 kbd {
-  padding: 1px 5px;
+  padding: 3px 8px;
   border: 1px solid var(--border-strong);
-  border-bottom-width: 2px;
-  border-radius: 3px;
-  background: var(--bg-raised);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
 }
 </style>

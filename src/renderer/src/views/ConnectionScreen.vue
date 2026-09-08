@@ -123,13 +123,15 @@ async function onMenuSelect(action: string): Promise<void> {
   else if (action === 'delete') await remove(connection)
 }
 
-function subtitle(connection: SavedConnection): string {
-  const parts = [`${connection.host}:${connection.port}`]
-  if (connection.database) parts.push(connection.database)
-  // Say how the connection gets there — it is the detail people scan for.
-  if (connection.ssm?.enabled) parts.push(`via SSM ${connection.ssm.instanceId || '(no instance)'}`)
-  else if (connection.ssh?.enabled) parts.push(`via ${connection.ssh.host}`)
-  return parts.join(' · ')
+function endpoint(connection: SavedConnection): string {
+  return `${connection.host}:${connection.port}`
+}
+
+/** How the connection gets there — the detail people scan for. */
+function route(connection: SavedConnection): string {
+  if (connection.ssm?.enabled) return `via SSM ${connection.ssm.instanceId || '(no instance)'}`
+  if (connection.ssh?.enabled) return `via ${connection.ssh.host}`
+  return 'direct'
 }
 
 function transportBadge(connection: SavedConnection): string | null {
@@ -156,33 +158,35 @@ function relativeTime(iso?: string): string {
     <header class="screen__head">
       <div class="brand">
         <svg class="brand__mark" viewBox="0 0 48 48" aria-hidden="true">
-          <rect x="1" y="1" width="46" height="46" rx="11" fill="var(--bg-raised)" />
-          <path
-            d="M15 12h18l9 12-9 12H15L6 24z"
-            fill="var(--accent)"
-          />
-          <path d="M8.5 20h31M6.5 24h35M8.5 28h31" stroke="var(--bg-app)" stroke-width="3" />
+          <path d="M15 6h18l9 18-9 18H15L6 24z" fill="currentColor" />
+          <path d="M7 19h34M5 24h38M7 29h34" stroke="var(--bg-surface)" stroke-width="3.4" />
         </svg>
-        <div>
+        <div class="brand__text">
           <h1 class="brand__title">Beekeeper Clone</h1>
-          <p class="brand__sub">SQL Server client</p>
+          <p class="brand__sub">
+            SQL Server client · {{ connections.saved.length }} saved
+            {{ connections.saved.length === 1 ? 'connection' : 'connections' }}
+          </p>
         </div>
       </div>
       <div class="screen__actions">
-        <button class="btn btn--ghost btn--icon" title="Toggle theme" @click="settings.toggleTheme()">
+        <button class="screen__theme" title="Toggle theme" @click="settings.toggleTheme()">
           {{ settings.resolvedTheme === 'dark' ? '☀' : '☾' }}
         </button>
-        <button class="btn btn--primary" @click="startNew">New connection</button>
+        <button class="btn btn--lg btn--primary" @click="startNew">New connection</button>
       </div>
     </header>
 
     <div class="screen__body">
-      <input
-        v-model="search"
-        class="input screen__search"
-        placeholder="Search connections…"
-        spellcheck="false"
-      />
+      <div class="screen__search">
+        <span class="screen__search-glyph">⌕</span>
+        <input
+          v-model="search"
+          class="screen__search-input"
+          placeholder="Search connections…"
+          spellcheck="false"
+        />
+      </div>
 
       <div v-if="filtered.length === 0" class="empty-state">
         <div class="empty-state__title">
@@ -196,60 +200,95 @@ function relativeTime(iso?: string): string {
         </button>
       </div>
 
-      <ul v-else class="list">
-        <li
-          v-for="connection in filtered"
-          :key="connection.id"
-          class="card"
-          :class="{ 'card--busy': connections.connectingId === connection.id }"
-          @dblclick="open(connection)"
-          @contextmenu.prevent="menu = { x: $event.clientX, y: $event.clientY, connection }"
-        >
-          <span
-            class="card__stripe"
-            :style="{ background: connection.color || 'var(--border-strong)' }"
-          ></span>
-          <div class="card__main">
-            <div class="card__title truncate">{{ connection.name }}</div>
-            <div class="card__sub truncate mono">{{ subtitle(connection) }}</div>
+      <div v-else class="table">
+        <div class="table__head">
+          <div></div>
+          <div class="table__cell table__cell--wide">Name</div>
+          <div class="table__cell table__cell--wide">Endpoint</div>
+          <div class="table__cell">Transport</div>
+          <div class="table__cell">Auth</div>
+          <div class="table__cell table__cell--right">Last opened</div>
+          <div></div>
+        </div>
+
+        <div class="table__body">
+          <div
+            v-for="connection in filtered"
+            :key="connection.id"
+            class="row"
+            :class="{ 'row--busy': connections.connectingId === connection.id }"
+            @dblclick="open(connection)"
+            @contextmenu.prevent="menu = { x: $event.clientX, y: $event.clientY, connection }"
+          >
+            <span
+              class="row__stripe"
+              :style="{ background: connection.color || 'var(--text-muted)' }"
+            ></span>
+
+            <div class="row__cell row__cell--wide">
+              <div class="row__name truncate">{{ connection.name }}</div>
+              <div class="row__sub mono truncate">{{ connection.database || 'master' }}</div>
+            </div>
+
+            <div class="row__cell row__cell--wide">
+              <div class="row__endpoint mono truncate">{{ endpoint(connection) }}</div>
+              <div class="row__sub mono truncate">{{ route(connection) }}</div>
+            </div>
+
+            <div class="row__cell">
+              <span v-if="transportBadge(connection)" class="badge badge--accent">
+                {{ transportBadge(connection) }}
+              </span>
+            </div>
+
+            <div class="row__cell">
+              <span class="badge">{{ connection.authType === 'windows' ? 'NTLM' : 'SQL' }}</span>
+            </div>
+
+            <div class="row__cell row__cell--right row__time mono">
+              {{ relativeTime(connection.lastUsedAt) }}
+            </div>
+
+            <div class="row__buttons">
+              <button class="btn btn--sm btn--muted" @click.stop="startEdit(connection)">
+                Edit
+              </button>
+              <button
+                class="btn btn--sm btn--primary"
+                :disabled="connections.connectingId === connection.id"
+                @click.stop="open(connection)"
+              >
+                <span v-if="connections.connectingId === connection.id" class="spinner"></span>
+                Connect
+              </button>
+            </div>
           </div>
-          <div class="card__meta">
-            <span v-if="transportBadge(connection)" class="badge">
-              {{ transportBadge(connection) }}
-            </span>
-            <span class="badge">{{ connection.authType === 'windows' ? 'NTLM' : 'SQL' }}</span>
-            <span class="card__time">{{ relativeTime(connection.lastUsedAt) }}</span>
-          </div>
-          <div class="card__buttons">
-            <button class="btn btn--sm" @click.stop="startEdit(connection)">Edit</button>
-            <button
-              class="btn btn--sm btn--primary"
-              :disabled="connections.connectingId === connection.id"
-              @click.stop="open(connection)"
-            >
-              <span v-if="connections.connectingId === connection.id" class="spinner"></span>
-              Connect
-            </button>
-          </div>
-        </li>
-      </ul>
+        </div>
+      </div>
     </div>
 
     <footer class="screen__foot muted">
-      <span v-if="settings.appInfo">
-        v{{ settings.appInfo.version }} · Electron {{ settings.appInfo.electronVersion }} ·
-        {{
-          settings.appInfo.secretsAreOsBacked
-            ? 'secrets in the OS keystore'
-            : 'secrets encrypted with a local key file'
-        }}
-      </span>
+      <template v-if="settings.appInfo">
+        <span>v{{ settings.appInfo.version }}</span>
+        <span class="screen__foot-sep">/</span>
+        <span>Electron {{ settings.appInfo.electronVersion }}</span>
+        <span class="screen__foot-sep">/</span>
+        <span>
+          {{
+            settings.appInfo.secretsAreOsBacked
+              ? 'secrets in the OS keystore'
+              : 'secrets encrypted with a local key file'
+          }}
+        </span>
+      </template>
     </footer>
 
     <BaseModal
       v-if="showForm"
-      :title="editing ? 'Edit connection' : 'New connection'"
-      width="680px"
+      :kicker="editing ? 'Edit connection' : 'New connection'"
+      :title="editing?.name || 'Untitled connection'"
+      width="720px"
+      flush
       @close="showForm = false"
     >
       <ConnectionForm
@@ -304,7 +343,9 @@ function relativeTime(iso?: string): string {
 </template>
 
 <style scoped>
+/* The seven tracks the header and every row share. */
 .screen {
+  --conn-cols: 6px minmax(0, 1.5fr) minmax(0, 2fr) 92px 92px 116px 168px;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -312,119 +353,218 @@ function relativeTime(iso?: string): string {
 }
 .screen__head {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  padding: 18px 24px;
-  border-bottom: 1px solid var(--border);
+  gap: 32px;
+  padding: 28px 32px 22px;
+  border-bottom: var(--rule) solid var(--border-strong);
+  background: var(--bg-surface);
+  flex: 0 0 auto;
 }
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 18px;
+  min-width: 0;
 }
 .brand__mark {
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
   flex: 0 0 auto;
+  color: var(--accent);
+}
+.brand__text {
+  min-width: 0;
 }
 .brand__title {
   margin: 0;
-  font-size: 17px;
-  font-weight: 700;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
 }
 .brand__sub {
-  margin: 1px 0 0;
-  font-size: 12px;
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
   color: var(--text-muted);
 }
 .screen__actions {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
+  flex: 0 0 auto;
 }
+.screen__theme {
+  width: var(--h-field);
+  height: var(--h-field);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 15px;
+  cursor: pointer;
+}
+.screen__theme:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.screen__head .btn--primary {
+  height: var(--h-field);
+  font-size: 14px;
+}
+
 .screen__body {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 20px 24px;
-  overflow: auto;
-  max-width: 940px;
-  width: 100%;
-  margin: 0 auto;
+  padding: 24px 32px;
+  overflow: hidden;
 }
 .screen__search {
-  flex: 0 0 auto;
-}
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.card {
-  position: relative;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 11px 14px 11px 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-surface);
-  cursor: pointer;
-  overflow: hidden;
-  transition: border-color var(--transition), background var(--transition);
+  gap: 10px;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
+  max-width: 420px;
+  flex: 0 0 auto;
 }
-.card:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-raised);
+.screen__search:focus-within {
+  border-color: var(--accent);
 }
-.card--busy {
-  opacity: 0.75;
+.screen__search-glyph {
+  font-size: 13px;
+  color: var(--text-muted);
 }
-.card__stripe {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-}
-.card__main {
+.screen__search-input {
   flex: 1;
   min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+  user-select: text;
 }
-.card__title {
-  font-weight: 600;
-}
-.card__sub {
-  font-size: 11px;
+.screen__search-input::placeholder {
   color: var(--text-muted);
-  margin-top: 2px;
 }
-.card__meta {
+
+/* --- the connection table -------------------------------------------------- */
+.table {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
-.card__time {
-  font-size: 11px;
+.table__head {
+  display: grid;
+  grid-template-columns: var(--conn-cols);
+  align-items: center;
+  height: 34px;
+  margin-top: 20px;
+  border-bottom: var(--rule) solid var(--border-strong);
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   color: var(--text-muted);
-  min-width: 74px;
+}
+.table__cell {
+  padding: 0 8px;
+}
+.table__cell--wide {
+  padding: 0 14px;
+}
+.table__cell--right {
   text-align: right;
 }
-.card__buttons {
+.table__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: var(--conn-cols);
+  align-items: center;
+  height: 60px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.row:hover {
+  background: var(--bg-hover);
+}
+.row--busy {
+  opacity: 0.75;
+}
+/* The colour tag runs the full height of the row's leading edge. */
+.row__stripe {
+  align-self: stretch;
+}
+.row__cell {
+  padding: 0 8px;
+  min-width: 0;
+}
+.row__cell--wide {
+  padding: 0 14px;
+}
+.row__cell--right {
+  text-align: right;
+}
+.row__name {
+  font-size: 15px;
+  font-weight: 600;
+}
+.row__endpoint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.row__sub {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.row__time {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.row__buttons {
   display: flex;
-  gap: 6px;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 0 4px 0 8px;
+}
+.row__buttons .btn {
+  height: 30px;
+}
+
+.screen__foot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: var(--h-statusbar);
+  padding: 0 32px;
+  border-top: var(--rule) solid var(--border-strong);
+  background: var(--bg-raised);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
   flex: 0 0 auto;
 }
-.screen__foot {
-  padding: 8px 24px;
-  border-top: 1px solid var(--border);
-  font-size: 11px;
-  text-align: center;
+.screen__foot-sep {
+  color: var(--border-strong);
 }
 </style>

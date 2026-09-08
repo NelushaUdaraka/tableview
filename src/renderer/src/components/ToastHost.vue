@@ -25,39 +25,39 @@ const toasts = useToastStore()
 .toasts {
   position: fixed;
   right: 16px;
-  bottom: 34px;
+  bottom: calc(var(--h-statusbar) + 12px);
   display: flex;
   flex-direction: column;
   gap: 8px;
   max-width: 420px;
   z-index: 200;
 }
+/* The state is marked on the leading edge, like every other staged thing. */
 .toast {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 10px 10px 10px 12px;
+  gap: 10px;
+  padding: 11px 14px;
   border: 1px solid var(--border-strong);
-  border-left-width: 3px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-overlay);
-  box-shadow: var(--shadow);
+  border-radius: 0;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-menu);
 }
 .toast--success {
-  border-left-color: var(--success);
+  box-shadow: inset 3px 0 0 var(--success), var(--shadow-menu);
 }
 .toast--error {
-  border-left-color: var(--danger);
+  box-shadow: inset 3px 0 0 var(--danger), var(--shadow-menu);
 }
 .toast--info {
-  border-left-color: var(--info);
+  box-shadow: inset 3px 0 0 var(--accent), var(--shadow-menu);
 }
 .toast__message {
   font-weight: 600;
-  font-size: 12px;
+  font-size: 13px;
 }
 .toast__detail {
-  margin-top: 4px;
+  margin-top: 5px;
   font-size: 12px;
   color: var(--text-secondary);
   font-family: var(--font-mono);

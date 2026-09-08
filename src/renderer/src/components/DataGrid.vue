@@ -239,6 +239,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  endRowDrag()
   resizeObserver?.disconnect()
   document.removeEventListener('mousemove', onResizeMove)
   document.removeEventListener('mouseup', onResizeEnd)
@@ -361,6 +362,90 @@ function onCellMouseDown(row: number, col: number, event: MouseEvent): void {
     return
   }
   selectCell(row, col, { extend: event.shiftKey, toggle: event.ctrlKey || event.metaKey })
+
+  // Holding the button and moving sweeps a range out of the rows. Not for
+  // Ctrl, which is picking rows out one at a time and would fight a sweep.
+  if (event.button === 0 && !event.ctrlKey && !event.metaKey) beginRowDrag()
+}
+
+// --- dragging a range out of the rows --------------------------------------
+
+/** How close to an edge the pointer gets before the grid scrolls itself. */
+const AUTO_SCROLL_EDGE = 28
+const AUTO_SCROLL_MS = 16
+
+const dragging = ref(false)
+let pointerY = 0
+let autoScroll: ReturnType<typeof setInterval> | null = null
+
+function beginRowDrag(): void {
+  dragging.value = true
+  document.addEventListener('mousemove', onDragMove)
+  document.addEventListener('mouseup', endRowDrag)
+}
+
+function endRowDrag(): void {
+  dragging.value = false
+  stopAutoScroll()
+  document.removeEventListener('mousemove', onDragMove)
+  document.removeEventListener('mouseup', endRowDrag)
+}
+
+function onDragMove(event: MouseEvent): void {
+  pointerY = event.clientY
+  extendDragTo(pointerY)
+  updateAutoScroll(pointerY)
+}
+
+/**
+ * The row under a screen position.
+ *
+ * Worked out from the scroll offset rather than from what the pointer is over:
+ * the rows are virtualised, so past the edge of the viewport there is nothing
+ * under the pointer to ask.
+ */
+function rowAtClientY(clientY: number): number | null {
+  if (!viewport.value || props.rows.length === 0) return null
+  const rect = viewport.value.getBoundingClientRect()
+  const offset = clientY - rect.top + viewport.value.scrollTop
+  const index = Math.floor(offset / ROW_HEIGHT)
+  return Math.max(0, Math.min(props.rows.length - 1, index))
+}
+
+function extendDragTo(clientY: number): void {
+  const row = rowAtClientY(clientY)
+  if (row === null || anchorRow.value === null) return
+  setSelectedRows(rowRange(anchorRow.value, row))
+}
+
+/** Keeps scrolling while the pointer is held past an edge, as a list does. */
+function updateAutoScroll(clientY: number): void {
+  if (!viewport.value) return
+  const rect = viewport.value.getBoundingClientRect()
+  const above = rect.top + AUTO_SCROLL_EDGE - clientY
+  const below = clientY - (rect.bottom - AUTO_SCROLL_EDGE)
+  const step = above > 0 ? -Math.max(4, above / 2) : below > 0 ? Math.max(4, below / 2) : 0
+
+  if (step === 0) return stopAutoScroll()
+  if (autoScroll) return
+
+  autoScroll = setInterval(() => {
+    if (!viewport.value || !dragging.value) return stopAutoScroll()
+    const rectNow = viewport.value.getBoundingClientRect()
+    const up = rectNow.top + AUTO_SCROLL_EDGE - pointerY
+    const down = pointerY - (rectNow.bottom - AUTO_SCROLL_EDGE)
+    const amount = up > 0 ? -Math.max(4, up / 2) : down > 0 ? Math.max(4, down / 2) : 0
+    if (amount === 0) return stopAutoScroll()
+
+    viewport.value.scrollTop += amount
+    scrollTop.value = viewport.value.scrollTop
+    extendDragTo(pointerY)
+  }, AUTO_SCROLL_MS)
+}
+
+function stopAutoScroll(): void {
+  if (autoScroll) clearInterval(autoScroll)
+  autoScroll = null
 }
 
 function isRowSelected(row: number): boolean {
@@ -600,7 +685,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="grid">
+  <div class="grid" :class="{ 'grid--dragging': dragging }">
     <div ref="header" class="grid__header" role="row">
       <div class="grid__header-track" :style="{ gridTemplateColumns: gridTemplate }">
         <div class="grid__corner"></div>
@@ -749,6 +834,11 @@ defineExpose({
   height: 100%;
   min-height: 0;
   background: var(--bg-surface);
+}
+/* Sweeping over cells would otherwise highlight their text as it went. */
+.grid--dragging {
+  user-select: none;
+  cursor: default;
 }
 
 .grid__header {

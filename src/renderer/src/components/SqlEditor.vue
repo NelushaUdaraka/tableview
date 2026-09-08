@@ -61,47 +61,65 @@ const schemaCompartment = new Compartment()
 const styleCompartment = new Compartment()
 
 function baseTheme(): ReturnType<typeof EditorView.theme> {
-  return EditorView.theme({
-    '&': {
-      height: '100%',
-      fontSize: `${props.fontSize}px`,
-      backgroundColor: 'var(--bg-surface)',
-      color: 'var(--text-primary)'
+  return EditorView.theme(
+    {
+      '&': {
+        height: '100%',
+        fontSize: `${props.fontSize}px`,
+        backgroundColor: 'var(--bg-surface)',
+        color: 'var(--text-primary)'
+      },
+      '.cm-content': {
+        fontFamily: props.fontFamily,
+        caretColor: 'var(--accent)',
+        userSelect: 'text',
+        padding: '10px 0'
+      },
+      '.cm-scroller': { fontFamily: props.fontFamily, overflow: 'auto', lineHeight: '20px' },
+      '.cm-line': { padding: '0 14px' },
+      '.cm-gutters': {
+        backgroundColor: 'var(--bg-app)',
+        color: 'var(--text-dim)',
+        border: 'none',
+        borderRight: '1px solid var(--border-subtle)',
+        padding: '10px 0'
+      },
+      '.cm-lineNumbers .cm-gutterElement': { padding: '0 12px 0 20px', minWidth: '52px' },
+      '.cm-activeLine': { backgroundColor: 'var(--editor-active-line)' },
+      '.cm-activeLineGutter': {
+        backgroundColor: 'var(--editor-active-line)',
+        color: 'var(--text-secondary)'
+      },
+      // The selection has to read on top of the active line, which is already
+      // --bg-hover — so it gets the accent wash the rest of the app uses, and a
+      // fainter one when the editor does not have focus.
+      //
+      // The focused rule spells out the whole path on purpose: CodeMirror's own
+      // is `&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground`,
+      // and a shorter override loses to it on specificity however late it lands.
+      '.cm-selectionBackground, ::selection': { backgroundColor: 'var(--selection-idle)' },
+      '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground': {
+        backgroundColor: 'var(--selection)'
+      },
+      '&.cm-focused ::selection': { backgroundColor: 'var(--selection)' },
+      // Other occurrences of the selected word: present, but not mistakable for
+      // the selection itself.
+      '.cm-selectionMatch': { backgroundColor: 'var(--bg-hover-strong)' },
+      '.cm-cursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
+      '.cm-tooltip': {
+        backgroundColor: 'var(--bg-surface)',
+        border: '1px solid var(--border-strong)',
+        borderRadius: '0',
+        boxShadow: 'var(--shadow-menu)',
+        color: 'var(--text-primary)'
+      },
+      '.cm-tooltip-autocomplete ul li[aria-selected]': {
+        backgroundColor: 'var(--bg-selected)',
+        color: 'var(--text-primary)'
+      }
     },
-    '.cm-content': {
-      fontFamily: props.fontFamily,
-      caretColor: 'var(--accent)',
-      userSelect: 'text',
-      padding: '10px 0'
-    },
-    '.cm-scroller': { fontFamily: props.fontFamily, overflow: 'auto', lineHeight: '20px' },
-    '.cm-line': { padding: '0 14px' },
-    '.cm-gutters': {
-      backgroundColor: 'var(--bg-app)',
-      color: 'var(--text-dim)',
-      border: 'none',
-      borderRight: '1px solid var(--border-subtle)',
-      padding: '10px 0'
-    },
-    '.cm-lineNumbers .cm-gutterElement': { padding: '0 12px 0 20px', minWidth: '52px' },
-    '.cm-activeLine': { backgroundColor: 'var(--bg-hover)' },
-    '.cm-activeLineGutter': { backgroundColor: 'var(--bg-hover)', color: 'var(--text-secondary)' },
-    '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
-      backgroundColor: 'var(--bg-selected)'
-    },
-    '.cm-cursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
-    '.cm-tooltip': {
-      backgroundColor: 'var(--bg-surface)',
-      border: '1px solid var(--border-strong)',
-      borderRadius: '0',
-      boxShadow: 'var(--shadow-menu)',
-      color: 'var(--text-primary)'
-    },
-    '.cm-tooltip-autocomplete ul li[aria-selected]': {
-      backgroundColor: 'var(--bg-selected)',
-      color: 'var(--text-primary)'
-    }
-  })
+    { dark: props.theme === 'dark' }
+  )
 }
 
 function sqlExtension(): ReturnType<typeof sql> {
@@ -217,7 +235,13 @@ watch(
 watch(
   () => props.theme,
   () => {
-    view?.dispatch({ effects: themeCompartment.reconfigure(themeExtension() as never) })
+    // The base theme carries the dark flag now, so it is rebuilt with the rest.
+    view?.dispatch({
+      effects: [
+        themeCompartment.reconfigure(themeExtension() as never),
+        styleCompartment.reconfigure(baseTheme())
+      ]
+    })
   }
 )
 

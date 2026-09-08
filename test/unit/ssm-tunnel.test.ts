@@ -16,9 +16,14 @@ import {
   buildSsmCommand,
   classifySsmFailure,
   classifySsmRuntimeFailure,
-  describeSsmDestination
+  describeSsmDestination,
+  isExpiredCredentialsFailure
 } from '../../src/main/tunnel/ssm'
-import { DEFAULT_SSM_CONFIG, type SsmConfig } from '../../src/shared/types'
+import {
+  DEFAULT_SSM_CONFIG,
+  SSM_CREDENTIALS_EXPIRED,
+  type SsmConfig
+} from '../../src/shared/types'
 import { findFreePort } from '../../src/main/tunnel/types'
 
 const FAKE_CLI = join(__dirname, '../fixtures/fake-aws.mjs')
@@ -171,6 +176,19 @@ describe('classifySsmFailure', () => {
 
   it.each(cases)('turns %j into actionable advice', (output, expected) => {
     expect(classifySsmFailure(output, 254)).toMatch(expected)
+  })
+
+  it('recognises every wording the CLI uses for credentials that ran out', () => {
+    for (const output of [
+      'The security token included in the request is expired',
+      'ExpiredToken: The provided token has expired',
+      'Error loading SSO Token: sso session associated',
+      'The SSO session associated with this profile has expired'
+    ]) {
+      expect(isExpiredCredentialsFailure(output)).toBe(true)
+    }
+    expect(isExpiredCredentialsFailure('An error occurred (AccessDeniedException)')).toBe(false)
+    expect(isExpiredCredentialsFailure('bind: address already in use')).toBe(false)
   })
 
   it('mentions SSO when the session has expired', () => {
@@ -381,6 +399,21 @@ describe('SsmTunnel against a stand-in CLI', () => {
   ])('reports the %s failure in plain language', async (scenario, expected) => {
     const tunnel = makeTunnel({}, scenario)
     await expect(tunnel.open()).rejects.toThrow(expected)
+  })
+
+  it('tags an expiry so the UI can offer a paste box', async () => {
+    const tunnel = makeTunnel({}, 'expired')
+    await expect(tunnel.open()).rejects.toMatchObject({
+      name: 'SsmTunnelError',
+      code: SSM_CREDENTIALS_EXPIRED
+    })
+  })
+
+  it('leaves other failures untagged', async () => {
+    const tunnel = makeTunnel({}, 'access-denied')
+    const error = await tunnel.open().catch((caught: unknown) => caught as SsmTunnelError)
+    expect(error).toBeInstanceOf(SsmTunnelError)
+    expect((error as SsmTunnelError).code).toBeUndefined()
   })
 
   it('keeps the raw CLI output for the details pane', async () => {

@@ -13,7 +13,7 @@
  *     AWS-StartPortForwardingSession.
  */
 import { ChildProcess, spawn } from 'node:child_process'
-import type { SsmConfig } from '../../shared/types'
+import { SSM_CREDENTIALS_EXPIRED, type SsmConfig } from '../../shared/types'
 import { isLoopbackHost } from '../../shared/hosts'
 import { Tunnel, TunnelHandle, TunnelTarget, findFreePort, waitForPort } from './types'
 
@@ -24,11 +24,26 @@ export class SsmTunnelError extends Error {
   constructor(
     message: string,
     /** What the AWS CLI actually printed, for the details pane. */
-    readonly detail?: string
+    readonly detail?: string,
+    /** Set when the failure is one the UI can offer to fix, e.g. expiry. */
+    readonly code?: string
   ) {
     super(message)
     this.name = 'SsmTunnelError'
   }
+}
+
+/**
+ * Credentials that have run out, in any of the ways the CLI says so.
+ *
+ * Callers tag the failure with a code from this rather than re-matching the
+ * message, so the wording stays free to change.
+ */
+const EXPIRED_CREDENTIALS =
+  /expired|token has expired|refresh.*credentials|sso session associated|error loading sso token/i
+
+export function isExpiredCredentialsFailure(output: string): boolean {
+  return EXPIRED_CREDENTIALS.test(output)
 }
 
 export interface SsmCommand {
@@ -181,7 +196,7 @@ export function classifySsmFailure(
   if (/accessdenied|not authorized|user.*is not authorized/.test(text)) {
     return 'Access denied by IAM. The identity needs ssm:StartSession on the instance and on the port-forwarding document.'
   }
-  if (/expired|token has expired|refresh.*credentials|sso session associated/.test(text)) {
+  if (isExpiredCredentialsFailure(text)) {
     return 'Your AWS credentials have expired. Refresh them (for SSO: aws sso login --profile <name>) and try again.'
   }
   if (/unable to locate credentials|no credentials/.test(text)) {
@@ -328,7 +343,13 @@ export class SsmTunnel implements Tunnel {
     } catch (error) {
       await this.close()
       const message = error instanceof Error ? error.message : String(error)
-      throw new SsmTunnelError(message, this.output.trim() || undefined)
+      throw new SsmTunnelError(
+        message,
+        this.output.trim() || undefined,
+        isExpiredCredentialsFailure(`${message}\n${this.output}`)
+          ? SSM_CREDENTIALS_EXPIRED
+          : undefined
+      )
     }
 
     return {

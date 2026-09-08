@@ -30,6 +30,8 @@ import { useSettingsStore } from '../stores/settings'
 import { useSchemaStore } from '../stores/schema'
 import { useTabStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
+import { useConnectionStore } from '../stores/connections'
+import { useCredentialsStore } from '../stores/credentials'
 import type { TableTab } from '../stores/tabs'
 import { api } from '../lib/api'
 
@@ -43,6 +45,8 @@ const settings = useSettingsStore()
 const schemaStore = useSchemaStore()
 const tabs = useTabStore()
 const toasts = useToastStore()
+const connections = useConnectionStore()
+const credentials = useCredentialsStore()
 
 const structure = ref<TableStructure | null>(null)
 const columns = shallowRef<ColumnMeta[]>([])
@@ -213,7 +217,11 @@ async function load(resetOffset = false): Promise<void> {
     lastSql.value = response.sql
     discard()
   } catch (error) {
-    toasts.fromError('Could not load the table', error)
+    // A session that ran out mid-browse is fixable in place; retry this load.
+    const connection = connections.saved.find((entry) => entry.id === props.tab.connectionId)
+    if (!credentials.offerRefresh(connection, error, () => load(resetOffset))) {
+      toasts.fromError('Could not load the table', error)
+    }
   } finally {
     loading.value = false
   }

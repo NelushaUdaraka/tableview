@@ -54,6 +54,26 @@ import { DriverColumn, declarationOf, isReadOnlyType, jsKindOf, renderDriverType
 
 const DEFAULT_MAX_ROWS = 50000
 
+/**
+ * How long to let a tunnel explain itself after the driver has given up.
+ *
+ * The two race: the driver's socket closes the instant a forward fails, while
+ * the transport's own diagnosis arrives on a child process's pipe. Losing that
+ * race costs the user the actual reason, so it is worth a short wait on a
+ * connection that has already failed.
+ */
+const FORWARD_ERROR_GRACE_MS = 1500
+
+/**
+ * Driver errors that mean the socket went away rather than the server refusing
+ * something. Only these may be reinterpreted as a tunnel failure — a login
+ * rejection travels the same path and must reach the user unchanged.
+ */
+function isTransportFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /socket hang up|connection lost|econnreset|epipe|read econnreset/i.test(message)
+}
+
 export function serializeError(error: unknown): SerializedError {
   if (error instanceof Error) {
     const anyError = error as Error & Record<string, unknown>
@@ -151,12 +171,31 @@ export class SqlServerClient implements DbClient {
     } catch (error) {
       // A refused port-forward reaches the driver only as a closed socket, so
       // prefer the tunnel's own error when there is one.
-      const forwardError = this.tunnel?.lastForwardError
+      const tunnel = this.tunnel
       const via = this.config.ssm?.enabled ? 'SSM session' : 'SSH tunnel'
+      const dropped = Boolean(tunnel) && isTransportFailure(error)
+      // Give the transport a moment to say why, but only when the driver's
+      // failure is the shape a broken forward produces.
+      const forwardError = dropped
+        ? ((await tunnel!.waitForForwardError?.(FORWARD_ERROR_GRACE_MS)) ??
+          tunnel!.lastForwardError)
+        : (tunnel?.lastForwardError ?? null)
+      const hint = tunnel?.droppedConnectionHint
       await this.teardownTunnel()
+
       if (forwardError) {
         throw new Error(
           `Could not reach ${this.config.host}:${this.config.port} through the ${via} — ${forwardError.message}`
+        )
+      }
+      // The forward stayed silent: some topologies accept the local socket
+      // before anything has been dialled at the far end, so the drop is all
+      // there is to go on. Say that, rather than passing on "socket hang up".
+      if (dropped) {
+        throw new Error(
+          `Could not reach ${this.config.host}:${this.config.port} through the ${via} — the local port accepted the connection and it was dropped immediately (${
+            error instanceof Error ? error.message : String(error)
+          }).${hint ? ` ${hint}` : ''}`
         )
       }
       throw error

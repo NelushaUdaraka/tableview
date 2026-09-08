@@ -295,7 +295,7 @@ watch(
 const ssmHostLabel = computed(() =>
   form.ssm!.mode === 'remote-host'
     ? 'The Server above is resolved from the bastion, so use the address the instance can reach (an RDS endpoint, say).'
-    : 'Forwards to the port above on the bastion itself, for SQL Server running on that instance.'
+    : 'Forwards to the port above on the bastion itself — only right when SQL Server runs on that instance. For a database elsewhere (an RDS endpoint, say) pick "A remote host", or the session opens and then drops every connection.'
 )
 const usesSshPassword = computed(() => form.ssh!.enabled && form.ssh!.authMode === 'password')
 const usesSshKey = computed(() => form.ssh!.enabled && form.ssh!.authMode === 'privateKey')

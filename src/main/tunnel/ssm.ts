@@ -101,12 +101,63 @@ export function buildSsmCommand(
 }
 
 /**
+ * The plugin's own announcement that the local listener is bound.
+ *
+ * Trusting it beats probing the port: `AWS-StartPortForwardingSession` carries
+ * one client at a time, and a probe that connects and hangs up tears the far
+ * side down for the connection that follows.
+ */
+const READY_BANNER = /port \d+ opened for sessionid|waiting for connections/i
+
+/**
+ * Session Manager opens the local port before anything is dialled at the far
+ * end, so an unreachable destination only shows up once traffic flows: the
+ * plugin accepts the socket, fails to reach the target, and closes it again.
+ * These are the phrases it and the agent use when that happens.
+ */
+const DESTINATION_UNREACHABLE =
+  /connection to destination port failed|unable to dial connection to (?:port|server)|failed to establish connection to destination/i
+
+/**
+ * What to do about a destination the session could not reach.
+ *
+ * The two topologies fail for entirely different reasons, so the advice names
+ * the one actually in use rather than listing both.
+ */
+export function describeSsmDestination(config: SsmConfig, target: TunnelTarget): string {
+  const instance = config.instanceId?.trim() || 'the bastion'
+  if (config.mode === 'remote-host') {
+    return `The session reached ${instance}, but it could not reach ${target.host}:${target.port} from there. Check that the database's security group allows the bastion, that the name resolves from it, and that the server is listening on that port.`
+  }
+  return `The session reached ${instance}, but nothing is listening on port ${target.port} of the instance itself. "Forward to" is set to the instance, so that port was dialled on the bastion — if SQL Server actually runs elsewhere (an RDS endpoint, say), set "Forward to" to a remote host and put its address in Server.`
+}
+
+/**
+ * Classifies a failure the CLI reports while the session is still running.
+ *
+ * The exit-time classifier never sees these: the session survives a destination
+ * it cannot reach, so the process stays alive and only the forwarded socket
+ * dies. Left unclassified, the driver's "socket hang up" is all the user gets.
+ */
+export function classifySsmRuntimeFailure(
+  output: string,
+  destinationAdvice: string
+): string | null {
+  return DESTINATION_UNREACHABLE.test(output) ? destinationAdvice : null
+}
+
+/**
  * Turns the CLI's output into something a user can act on.
  *
  * These messages are the whole point of the feature — an unclassified
  * "command failed with exit code 254" sends people back to the terminal.
  */
-export function classifySsmFailure(output: string, exitCode: number | null): string {
+export function classifySsmFailure(
+  output: string,
+  exitCode: number | null,
+  /** Advice for a destination the session could not reach, when known. */
+  destinationAdvice?: string
+): string {
   const text = output.toLowerCase()
 
   if (/sessionmanagerplugin is not found|session-manager-plugin.*not found/.test(text)) {
@@ -139,6 +190,12 @@ export function classifySsmFailure(output: string, exitCode: number | null): str
   if (/profile.*not found|the config profile.*could not be found/.test(text)) {
     return 'That AWS profile does not exist in your AWS config.'
   }
+  if (DESTINATION_UNREACHABLE.test(text)) {
+    return (
+      destinationAdvice ??
+      'The session started, but the port could not be reached at the far end. Check that the server is listening and that the bastion can reach it.'
+    )
+  }
 
   const trimmed = output.trim().split('\n').filter(Boolean).slice(-3).join(' ')
   return trimmed
@@ -169,6 +226,29 @@ export class SsmTunnel implements Tunnel {
     return this.forwardError
   }
 
+  /**
+   * The driver and the CLI report the same failure over different channels, and
+   * the socket closes first. Poll briefly so the CLI's explanation wins the race
+   * instead of a bare "socket hang up".
+   */
+  async waitForForwardError(timeoutMs: number): Promise<Error | null> {
+    const deadline = Date.now() + timeoutMs
+    while (!this.forwardError && !this.closed && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    return this.forwardError
+  }
+
+  /**
+   * Session Manager binds the local port before dialling anything, so a dead
+   * destination is indistinguishable from a healthy session until the first
+   * byte moves. That makes this the likeliest reading of a dropped connection
+   * the CLI said nothing about.
+   */
+  get droppedConnectionHint(): string {
+    return describeSsmDestination(this.config, this.target)
+  }
+
   /** Everything the CLI printed, for surfacing in the UI on failure. */
   get cliOutput(): string {
     return this.output
@@ -195,9 +275,18 @@ export class SsmTunnel implements Tunnel {
     this.child = child
 
     const record = (chunk: Buffer): void => {
-      this.output += chunk.toString()
+      const text = chunk.toString()
+      this.output += text
       // Keep the buffer bounded; the tail is what matters for diagnostics.
       if (this.output.length > 64_000) this.output = this.output.slice(-32_000)
+
+      // A session that cannot reach its destination keeps running and says so
+      // here rather than exiting, so the exit handler alone would miss it.
+      // Classify per chunk: the accumulated buffer would re-match forever.
+      if (!this.forwardError && !this.closed) {
+        const runtime = classifySsmRuntimeFailure(text, this.droppedConnectionHint)
+        if (runtime) this.forwardError = new Error(runtime)
+      }
     }
     child.stdout?.on('data', record)
     child.stderr?.on('data', record)
@@ -209,7 +298,9 @@ export class SsmTunnel implements Tunnel {
     child.once('exit', (code, signal) => {
       this.exited = { code, signal }
       if (!this.closed && !this.forwardError) {
-        this.forwardError = new Error(classifySsmFailure(this.output, code))
+        this.forwardError = new Error(
+          classifySsmFailure(this.output, code, this.droppedConnectionHint)
+        )
       }
     })
 
@@ -220,7 +311,13 @@ export class SsmTunnel implements Tunnel {
         this.config.startTimeoutMs ?? 30000,
         // Stop waiting the moment the CLI gives up, instead of burning the
         // whole timeout on a process that has already failed.
-        () => (this.exited ? classifySsmFailure(this.output, this.exited.code) : null)
+        () =>
+          this.exited
+            ? classifySsmFailure(this.output, this.exited.code, this.droppedConnectionHint)
+            : null,
+        // The plugin says when the listener is up; take its word for it rather
+        // than spending a connection on a session that carries one at a time.
+        () => READY_BANNER.test(this.output)
       )
     } catch (error) {
       await this.close()

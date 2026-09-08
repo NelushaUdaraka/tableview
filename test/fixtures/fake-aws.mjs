@@ -145,6 +145,27 @@ switch (scenario) {
     // Never opens the port; exercises the start timeout.
     setInterval(() => {}, 1000)
     break
+  case 'destination-refused':
+    // The local port opens and the session stays up, but nothing is listening
+    // at the far end — so each accepted connection is closed again. This is
+    // what an unreachable RDS endpoint or a bastion without SQL Server does.
+    startForwarder({ onConnection: 'refuse' })
+    break
+  case 'dies-on-connect':
+    // The session terminates the moment traffic flows, which races the driver:
+    // the socket closes first and the reason arrives afterwards.
+    startForwarder({ onConnection: 'die' })
+    break
+  case 'silent-drop':
+    // Accepts and drops without a word, which is all some sessions do — the
+    // driver's socket error is then the only evidence there is.
+    startForwarder({ onConnection: 'drop' })
+    break
+  case 'count-connections':
+    // Answers with how many clients it has accepted, so a test can prove the
+    // readiness check did not spend one of them.
+    startForwarder({ onConnection: 'count' })
+    break
   default:
     startForwarder()
 }
@@ -203,17 +224,48 @@ function parameterValue(name) {
   return parsed[name]?.[0]
 }
 
-function startForwarder() {
+function startForwarder({ onConnection = 'forward' } = {}) {
   const localPort = Number(parameterValue('localPortNumber'))
   const sessionId = 'fake-session-0123456789'
+  let accepted = 0
 
   const server = net.createServer((socket) => {
+    accepted += 1
+    socket.on('error', () => socket.destroy())
+
+    if (onConnection === 'count') {
+      socket.end(`connection ${accepted}`)
+      return
+    }
+    if (onConnection === 'drop') {
+      socket.destroy()
+      return
+    }
+
+    // The plugin's own wording when the agent cannot reach the destination.
+    if (onConnection === 'refuse') {
+      process.stdout.write('\nConnection to destination port failed, check SSM Agent logs.\n')
+      socket.destroy()
+      return
+    }
+    // Same failure, but the session gives up with it — the message lands on
+    // the pipe just after the socket has already gone.
+    if (onConnection === 'die') {
+      socket.destroy()
+      setTimeout(() => {
+        process.stderr.write(
+          'Unable to dial connection to port 1433: dial tcp 127.0.0.1:1433: connect: connection refused\n'
+        )
+        process.exit(255)
+      }, 150)
+      return
+    }
+
     if (!upstreamPort) {
       socket.end()
       return
     }
     const upstream = net.connect({ host: '127.0.0.1', port: upstreamPort })
-    socket.on('error', () => socket.destroy())
     upstream.on('error', () => socket.destroy())
     socket.pipe(upstream).pipe(socket)
   })

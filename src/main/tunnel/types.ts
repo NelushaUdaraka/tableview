@@ -27,6 +27,28 @@ export interface Tunnel {
    * instead when it is set.
    */
   readonly lastForwardError: Error | null
+  /**
+   * Waits for `lastForwardError` to appear, up to `timeoutMs`.
+   *
+   * A transport that reports through a child process is inherently racy: the
+   * driver's socket closes the instant the forward fails, but the explanation
+   * arrives on a pipe a few milliseconds later. Without this the driver wins the
+   * race and the user is told "socket hang up" instead of why.
+   *
+   * Optional: a transport that sets the error synchronously has nothing to wait
+   * for, and callers fall back to reading `lastForwardError` directly.
+   */
+  waitForForwardError?(timeoutMs: number): Promise<Error | null>
+  /**
+   * What a connection that opened and then closed immediately most likely means
+   * for this transport, when the transport itself reported nothing.
+   *
+   * Some forwards accept the local socket before anything has been dialled at
+   * the far end, so a dead destination looks exactly like a healthy tunnel until
+   * traffic flows. Callers use this only for driver errors that indicate the
+   * socket dropped, never for a failure the server itself reported.
+   */
+  readonly droppedConnectionHint?: string
 }
 
 /** Asks the OS for a free loopback port by binding to port 0 and releasing it. */
@@ -48,12 +70,21 @@ export async function findFreePort(): Promise<number> {
   })
 }
 
-/** Resolves once something is listening on the port, or rejects on timeout. */
+/**
+ * Resolves once something is listening on the port, or rejects on timeout.
+ *
+ * `isReady` lets a transport that announces its own listener short-circuit the
+ * probe. That matters for more than speed: probing costs a real TCP
+ * connect-and-hang-up, and a forward that carries one client at a time can be
+ * left in a torn-down state by it — the connection that follows is then
+ * accepted and dropped, which the driver reports as a bare socket hang up.
+ */
 export async function waitForPort(
   port: number,
   host = '127.0.0.1',
   timeoutMs = 30000,
-  isAborted: () => string | null = () => null
+  isAborted: () => string | null = () => null,
+  isReady: () => boolean = () => false
 ): Promise<void> {
   const net = await import('node:net')
   const deadline = Date.now() + timeoutMs
@@ -61,6 +92,7 @@ export async function waitForPort(
   while (Date.now() < deadline) {
     const aborted = isAborted()
     if (aborted) throw new Error(aborted)
+    if (isReady()) return
 
     const connected = await new Promise<boolean>((resolve) => {
       const socket = net.connect({ host, port })

@@ -85,6 +85,21 @@ Failures are translated rather than passed through: a missing plugin, `TargetNot
 denial, an expired SSO session, a bad profile or a busy port each produce a specific instruction
 instead of an exit code.
 
+**A destination the session cannot reach** is the one failure that does not announce itself at
+startup. Session Manager binds the local port before anything is dialled at the far end, so a
+bastion without SQL Server on it, or an RDS endpoint its security group will not let it reach, looks
+like a healthy session until the first byte moves — and then the driver reports nothing but
+`Connection lost - socket hang up`. So the CLI's output is watched for the whole life of the session,
+not just at exit (`Connection to destination port failed`, `Unable to dial connection to port`), the
+message is given a moment to arrive after the driver has already given up, and the advice names the
+topology in use: the remote host and its security group, or the "Forward to" setting when the port
+was dialled on the bastion itself. A drop the CLI never explains says so plainly rather than passing
+on the driver's wording.
+
+Readiness comes from the plugin's own `Waiting for connections` banner rather than a probe
+connection, because `AWS-StartPortForwardingSession` carries one client at a time and a probe that
+connects and hangs up can leave the far side torn down for the connection that follows.
+
 Requires AWS CLI v2 and the Session Manager plugin on the machine running the app, and
 `ssm:StartSession` permission on the instance and the port-forwarding document. The instance picker
 additionally uses `ec2:DescribeInstances` and `ssm:DescribeInstanceInformation`; neither is needed to

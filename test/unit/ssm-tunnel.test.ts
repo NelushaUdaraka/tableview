@@ -14,7 +14,9 @@ import {
   SsmTunnel,
   SsmTunnelError,
   buildSsmCommand,
-  classifySsmFailure
+  classifySsmFailure,
+  classifySsmRuntimeFailure,
+  describeSsmDestination
 } from '../../src/main/tunnel/ssm'
 import { DEFAULT_SSM_CONFIG, type SsmConfig } from '../../src/shared/types'
 import { findFreePort } from '../../src/main/tunnel/types'
@@ -185,6 +187,47 @@ describe('classifySsmFailure', () => {
 
   it('still says something useful when the CLI printed nothing', () => {
     expect(classifySsmFailure('   ', 1)).toMatch(/exited with code 1/)
+  })
+
+  it('passes on the destination advice when the far end was unreachable', () => {
+    const output = 'Unable to dial connection to port 1433: connect: connection refused'
+    expect(classifySsmFailure(output, 255, 'Check the security group.')).toBe(
+      'Check the security group.'
+    )
+    // …and still says something without it.
+    expect(classifySsmFailure(output, 255)).toMatch(/could not be reached at the far end/)
+  })
+})
+
+describe('destination diagnosis', () => {
+  const target = { host: 'db.internal', port: 1433 }
+
+  it('names the remote host when the bastion is only relaying', () => {
+    const advice = describeSsmDestination(config({ mode: 'remote-host' }), target)
+    expect(advice).toContain('db.internal:1433')
+    expect(advice).toMatch(/security group/)
+  })
+
+  it('points at the "Forward to" setting when forwarding to the instance itself', () => {
+    const advice = describeSsmDestination(config({ mode: 'instance' }), target)
+    expect(advice).toContain('i-0123456789abcdef0')
+    expect(advice).toMatch(/nothing is listening on port 1433/)
+    // The likeliest fix: the database is not on the bastion at all.
+    expect(advice).toMatch(/Forward to/)
+    expect(advice).toMatch(/remote host/)
+  })
+
+  it('only fires on the phrases the plugin and agent actually use', () => {
+    expect(
+      classifySsmRuntimeFailure(
+        '\nConnection to destination port failed, check SSM Agent logs.\n',
+        'advice'
+      )
+    ).toBe('advice')
+    expect(
+      classifySsmRuntimeFailure('Unable to dial connection to server: dial tcp', 'advice')
+    ).toBe('advice')
+    expect(classifySsmRuntimeFailure('Waiting for connections...', 'advice')).toBeNull()
   })
 })
 
@@ -369,5 +412,90 @@ describe('SsmTunnel against a stand-in CLI', () => {
   it('times out when the session never opens the port', async () => {
     const tunnel = makeTunnel({ startTimeoutMs: 1500 }, 'hang')
     await expect(tunnel.open()).rejects.toThrow(/Timed out waiting for the local port/)
+  })
+
+  /**
+   * Session Manager binds the local port before anything is dialled at the far
+   * end, so a destination that is not listening looks like a healthy session
+   * until traffic flows — and then the driver only sees "socket hang up".
+   */
+  describe('a destination the session cannot reach', () => {
+    /** Connects, waits for the far end to drop us, and reports nothing useful. */
+    async function connectAndLoseIt(port: number): Promise<void> {
+      await new Promise<void>((resolve) => {
+        const socket = net.connect({ host: '127.0.0.1', port })
+        socket.once('close', () => resolve())
+        socket.once('error', () => resolve())
+        socket.setTimeout(3000, () => {
+          socket.destroy()
+          resolve()
+        })
+      })
+    }
+
+    it('reports what the session said, while the session is still running', async () => {
+      const tunnel = makeTunnel({ mode: 'instance' }, 'destination-refused')
+      const handle = await tunnel.open()
+
+      // The tunnel opened cleanly: the failure only shows on the first byte.
+      expect(tunnel.lastForwardError).toBeNull()
+      await connectAndLoseIt(handle.localPort)
+
+      const error = await tunnel.waitForForwardError(3000)
+      expect(error?.message).toMatch(/nothing is listening on port 1433/)
+      expect(error?.message).toMatch(/Forward to/)
+    })
+
+    it('names the remote host instead when the bastion is relaying', async () => {
+      const tunnel = makeTunnel({ mode: 'remote-host' }, 'destination-refused')
+      const handle = await tunnel.open()
+      await connectAndLoseIt(handle.localPort)
+
+      const error = await tunnel.waitForForwardError(3000)
+      expect(error?.message).toContain('db.internal:1433')
+    })
+
+    it('waits out the race when the session dies just after the socket does', async () => {
+      const tunnel = makeTunnel({ mode: 'remote-host' }, 'dies-on-connect')
+      const handle = await tunnel.open()
+      await connectAndLoseIt(handle.localPort)
+
+      // Reading it straight away is exactly the race the grace period covers.
+      const error = await tunnel.waitForForwardError(3000)
+      expect(error?.message).toContain('db.internal:1433')
+    })
+
+    it('stays quiet on a healthy session', async () => {
+      const tunnel = makeTunnel()
+      const handle = await tunnel.open()
+
+      // A round trip that works, closed from this end: nothing to report.
+      await new Promise<void>((resolve, reject) => {
+        const socket = net.connect({ host: '127.0.0.1', port: handle.localPort }, () =>
+          socket.write('SELECT 1')
+        )
+        socket.on('data', () => socket.end())
+        socket.on('close', () => resolve())
+        socket.on('error', reject)
+      })
+      expect(await tunnel.waitForForwardError(300)).toBeNull()
+    })
+  })
+
+  it('takes the plugin at its word rather than spending a connection to probe', async () => {
+    // AWS-StartPortForwardingSession carries one client at a time, so a probe
+    // that connects and hangs up can cost the connection that follows.
+    const tunnel = makeTunnel({ mode: 'instance' }, 'count-connections')
+    const handle = await tunnel.open()
+
+    const connections = await new Promise<string>((resolve, reject) => {
+      const socket = net.connect({ host: '127.0.0.1', port: handle.localPort })
+      socket.on('data', (data) => {
+        resolve(data.toString())
+        socket.end()
+      })
+      socket.on('error', reject)
+    })
+    expect(connections).toBe('connection 1')
   })
 })

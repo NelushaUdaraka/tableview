@@ -167,7 +167,23 @@ export const useTabStore = defineStore('tabs', () => {
     activeId.value = tabs.value[next].id
   }
 
+  /**
+   * Applies a patch to one tab, leaving the state untouched when it changes
+   * nothing.
+   *
+   * Every write replaces the tab object, and anything computed from that object
+   * recomputes as a result. A write that changes no value would still invalidate
+   * those computeds — enough for a watcher that writes back here to retrigger
+   * itself indefinitely, which production builds have no recursion guard to
+   * stop. Comparing first makes a no-op cost nothing.
+   */
   function update<T extends Tab>(id: string, patch: Partial<T>): void {
+    const current = tabs.value.find((tab) => tab.id === id) as T | undefined
+    if (!current) return
+    const changed = (Object.keys(patch) as (keyof T)[]).some(
+      (key) => current[key] !== patch[key]
+    )
+    if (!changed) return
     tabs.value = tabs.value.map((tab) => (tab.id === id ? ({ ...tab, ...patch } as Tab) : tab))
   }
 

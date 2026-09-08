@@ -95,11 +95,40 @@ function setNull(index: number): void {
   emit('edit', index, null)
 }
 
-function autoSize(event: Event): void {
-  const input = event.target as HTMLTextAreaElement
+/**
+ * How tall one field may grow before it scrolls inside itself.
+ *
+ * The panel is a column of fields, so an unbounded one would push every other
+ * field out of view; this is the point where showing more of one value costs
+ * more than it gives.
+ */
+const MAX_FIELD_HEIGHT = 420
+const MIN_FIELD_HEIGHT = 26
+
+function size(input: HTMLTextAreaElement): void {
   input.style.height = 'auto'
-  input.style.height = `${Math.min(260, Math.max(26, input.scrollHeight + 2))}px`
+  input.style.height = `${Math.min(MAX_FIELD_HEIGHT, Math.max(MIN_FIELD_HEIGHT, input.scrollHeight + 2))}px`
 }
+
+function autoSize(event: Event): void {
+  size(event.target as HTMLTextAreaElement)
+}
+
+/**
+ * Sizes every editable field to its content.
+ *
+ * The textareas are uncontrolled and start at one row, so without this a long
+ * value — the whole reason this panel exists — would sit in a 26px slot until
+ * the user typed into it. Runs whenever the row or its values change.
+ */
+function sizeAll(): void {
+  const inputs = list.value?.querySelectorAll<HTMLTextAreaElement>('textarea.rowpanel__value')
+  for (const input of inputs ?? []) size(input)
+}
+
+// `fields` is rebuilt whenever the row or a staged edit changes, so its
+// identity is signal enough — a deep traversal would only cost more.
+watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
 </script>
 
 <template>
@@ -354,7 +383,8 @@ function autoSize(event: Event): void {
   display: block;
   width: 100%;
   min-height: var(--row-height);
-  max-height: 260px;
+  /* Matches MAX_FIELD_HEIGHT, which sizes the editable fields in script. */
+  max-height: 420px;
   padding: 6px 9px;
   border: 1px solid var(--border-strong);
   border-radius: 0;

@@ -927,6 +927,10 @@ async function browseForKey(): Promise<void> {
   margin: 0;
   padding: 0;
   border: none;
+  /* A fieldset defaults to min-width: min-content and will not shrink past it,
+     so one long unbreakable value — an SSO role ARN, say — widens the dialog
+     and puts a scrollbar under it instead of being truncated. */
+  min-width: 0;
 }
 .form__group:disabled {
   opacity: 0.45;
@@ -946,7 +950,9 @@ async function browseForKey(): Promise<void> {
 .row {
   display: flex;
   gap: 16px;
-  align-items: flex-end;
+  /* Top-aligned, so a hint or an error under one field extends downwards
+     instead of pushing its neighbour's control out of line. */
+  align-items: flex-start;
 }
 .hint {
   margin: 0;

@@ -170,11 +170,17 @@ function onCursor(offset: number): void {
   tabs.update<QueryTab>(props.tab.id, { cursor: offset })
 }
 
-// The status bar reads this, so it has to be pushed rather than computed there.
+/**
+ * The status bar reads this, so it has to be pushed rather than computed there.
+ *
+ * Watch the line number, not the statement: `statementAt` builds a fresh object
+ * every call, and writing to the store replaces the tab object this computed
+ * reads from — so watching the object would re-fire on its own write, forever.
+ */
 watch(
-  currentStatement,
-  (statement) => {
-    tabs.update<QueryTab>(props.tab.id, { statementLine: statement?.startLine ?? null })
+  () => currentStatement.value?.startLine ?? null,
+  (line) => {
+    tabs.update<QueryTab>(props.tab.id, { statementLine: line })
   },
   { immediate: true }
 )

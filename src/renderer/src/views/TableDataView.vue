@@ -620,7 +620,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
         direction="horizontal"
         pane="second"
         :min="220"
-        :max="640"
+        :max="960"
         :collapsed="!showRowPanel"
       >
         <template #first>

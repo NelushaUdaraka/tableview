@@ -62,6 +62,7 @@ const emit = defineEmits<{
   (event: 'delete-rows', rowIndexes: number[]): void
   (event: 'row-context', payload: { rowIndex: number; columnIndex: number; x: number; y: number }): void
   (event: 'selection', payload: { rowIndex: number; columnIndex: number } | null): void
+  (event: 'rows-selected', rowIndexes: number[]): void
   (event: 'follow-key', payload: { rowIndex: number; columnIndex: number }): void
   (event: 'revert-cell', rowIndex: number, columnIndex: number): void
 }>()
@@ -79,6 +80,14 @@ const scrollTop = ref(0)
 const viewportHeight = ref(600)
 const widths = ref<number[]>([])
 const selected = ref<{ row: number; col: number } | null>(null)
+/**
+ * Rows picked out for an action, which is a different thing from the focused
+ * cell: the cell says where typing goes, this says what Delete, Copy and the
+ * context menu act on. It always contains the focused row.
+ */
+const selectedRows = ref<Set<number>>(new Set())
+/** Where a Shift range measures from — the last row picked without Shift. */
+const anchorRow = ref<number | null>(null)
 const editing = ref<{ row: number; col: number } | null>(null)
 const editValue = ref('')
 const editInput = ref<HTMLTextAreaElement | null>(null)
@@ -184,9 +193,11 @@ watch(
     measureColumns()
     selected.value = null
     editing.value = null
+    anchorRow.value = null
     // A new shape means the old selection is meaningless; say so, or a row
     // inspector would keep showing a row that is no longer there.
     emit('selection', null)
+    setSelectedRows([])
   },
   { immediate: true, deep: false }
 )
@@ -297,9 +308,63 @@ function isEdited(rowIndex: number, columnIndex: number): boolean {
   return cellKey(rowIndex, columnIndex) in props.editedCells
 }
 
-function selectCell(row: number, col: number): void {
+function setSelectedRows(rows: Iterable<number>): void {
+  selectedRows.value = new Set(rows)
+  emit('rows-selected', [...selectedRows.value].sort((a, b) => a - b))
+}
+
+/** Every row between two, inclusive, whichever way round they are given. */
+function rowRange(from: number, to: number): number[] {
+  const [start, end] = from <= to ? [from, to] : [to, from]
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index)
+}
+
+/**
+ * Moves the focus, and takes the row selection with it.
+ *
+ * `extend` grows the selection from the anchor, `toggle` adds or removes one
+ * row, and neither collapses it to the row that was clicked — the three
+ * gestures a list has had since long before this grid.
+ */
+function selectCell(
+  row: number,
+  col: number,
+  modifiers: { extend?: boolean; toggle?: boolean } = {}
+): void {
   selected.value = { row, col }
   emit('selection', { rowIndex: row, columnIndex: col })
+
+  if (modifiers.extend && anchorRow.value !== null) {
+    setSelectedRows(rowRange(anchorRow.value, row))
+    return
+  }
+  if (modifiers.toggle) {
+    const next = new Set(selectedRows.value)
+    // Never leave the focused row out of its own selection.
+    if (next.has(row) && next.size > 1) next.delete(row)
+    else next.add(row)
+    anchorRow.value = row
+    setSelectedRows(next)
+    return
+  }
+  anchorRow.value = row
+  setSelectedRows([row])
+}
+
+/** The click handler, so the template does not have to read the event. */
+function onCellMouseDown(row: number, col: number, event: MouseEvent): void {
+  // A right-click inside the selection keeps it; outside, it collapses to the
+  // row under the pointer, which is what every file manager does.
+  if (event.button === 2 && selectedRows.value.has(row)) {
+    selected.value = { row, col }
+    emit('selection', { rowIndex: row, columnIndex: col })
+    return
+  }
+  selectCell(row, col, { extend: event.shiftKey, toggle: event.ctrlKey || event.metaKey })
+}
+
+function isRowSelected(row: number): boolean {
+  return selectedRows.value.has(row)
 }
 
 function sortIndicator(column: ColumnMeta): string {
@@ -386,11 +451,11 @@ function onCellKeydown(event: KeyboardEvent): void {
   switch (event.key) {
     case 'ArrowDown':
       event.preventDefault()
-      moveTo(Math.min(lastRow, row + 1), col)
+      moveTo(Math.min(lastRow, row + 1), col, event.shiftKey)
       break
     case 'ArrowUp':
       event.preventDefault()
-      moveTo(Math.max(0, row - 1), col)
+      moveTo(Math.max(0, row - 1), col, event.shiftKey)
       break
     case 'ArrowLeft':
       event.preventDefault()
@@ -424,8 +489,11 @@ function onCellKeydown(event: KeyboardEvent): void {
       beginEdit(row, col)
       break
     case 'Delete':
-      if (props.editable) {
-        event.preventDefault()
+      if (!props.editable) break
+      event.preventDefault()
+      if (event.ctrlKey || event.metaKey) {
+        emit('delete-rows', [...selectedRows.value].sort((a, b) => a - b))
+      } else {
         setNull()
       }
       break
@@ -433,6 +501,20 @@ function onCellKeydown(event: KeyboardEvent): void {
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault()
         void copySelection(event.shiftKey)
+      }
+      break
+    case 'a':
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault()
+        anchorRow.value = 0
+        setSelectedRows(rowRange(0, lastRow))
+      }
+      break
+    case 'Backspace':
+      // Delete on its own nulls a cell, so deleting rows takes the modifier.
+      if ((event.ctrlKey || event.metaKey) && props.editable) {
+        event.preventDefault()
+        emit('delete-rows', [...selectedRows.value].sort((a, b) => a - b))
       }
       break
     default:
@@ -450,8 +532,8 @@ function onCellKeydown(event: KeyboardEvent): void {
   }
 }
 
-function moveTo(row: number, col: number): void {
-  selectCell(row, col)
+function moveTo(row: number, col: number, extend = false): void {
+  selectCell(row, col, { extend })
   scrollRowIntoView(row)
 }
 
@@ -465,14 +547,24 @@ function scrollRowIntoView(row: number): void {
   }
 }
 
+/** One row as the grid shows it, tab separated. */
+function rowAsText(row: number): string {
+  return props.columns.map((_, index) => displayValue(row, index) ?? '').join('\t')
+}
+
 async function copySelection(wholeRow: boolean): Promise<void> {
   if (!selected.value) return
   const { row, col } = selected.value
-  const text = wholeRow
-    ? props.columns
-        .map((_, index) => displayValue(row, index) ?? '')
-        .join('\t')
-    : (displayValue(row, col) ?? '')
+
+  // Several rows picked out is an explicit request for all of them, whether
+  // or not the caller asked for the whole row.
+  const rows = [...selectedRows.value].sort((a, b) => a - b)
+  const text =
+    rows.length > 1
+      ? rows.map(rowAsText).join('\n')
+      : wholeRow
+        ? rowAsText(row)
+        : (displayValue(row, col) ?? '')
   await api.copyToClipboard(text)
 }
 
@@ -489,11 +581,22 @@ function followKey(row: number, col: number): void {
 
 function onCellContextMenu(row: number, col: number, event: MouseEvent): void {
   event.preventDefault()
-  selectCell(row, col)
+  // mousedown has already settled the selection; only a keyboard-driven menu
+  // arrives here without one.
+  if (!selectedRows.value.has(row)) selectCell(row, col)
   emit('row-context', { rowIndex: row, columnIndex: col, x: event.clientX, y: event.clientY })
 }
 
-defineExpose({ selectCell, beginEdit, copySelection, focus: () => viewport.value?.focus() })
+defineExpose({
+  selectCell: (row: number, col: number) => selectCell(row, col),
+  beginEdit,
+  copySelection,
+  selectRows: (rows: number[]) => {
+    anchorRow.value = rows[0] ?? null
+    setSelectedRows(rows)
+  },
+  focus: () => viewport.value?.focus()
+})
 </script>
 
 <template>
@@ -551,13 +654,14 @@ defineExpose({ selectCell, beginEdit, copySelection, focus: () => viewport.value
             row.index % 2 === 1 ? 'grid__row--odd' : '',
             row.state === 'inserted' ? 'grid__row--inserted' : '',
             row.state === 'deleted' ? 'grid__row--deleted' : '',
-            editing?.row === row.index ? 'grid__row--editing' : ''
+            editing?.row === row.index ? 'grid__row--editing' : '',
+            isRowSelected(row.index) ? 'grid__row--selected' : ''
           ]"
           :style="{ transform: `translateY(${row.top}px)`, gridTemplateColumns: gridTemplate }"
         >
           <div
             class="grid__rownum"
-            @mousedown="selectCell(row.index, 0)"
+            @mousedown="onCellMouseDown(row.index, 0, $event)"
             @contextmenu="onCellContextMenu(row.index, 0, $event)"
           >
             {{ rowOffset + row.index + 1 }}
@@ -573,7 +677,7 @@ defineExpose({ selectCell, beginEdit, copySelection, focus: () => viewport.value
               displayValue(row.index, colIndex) === null ? 'grid__cell--null' : '',
               editing?.row === row.index && editing?.col === colIndex ? 'grid__cell--editing' : ''
             ]"
-            @mousedown="selectCell(row.index, colIndex)"
+            @mousedown="onCellMouseDown(row.index, colIndex, $event)"
             @dblclick="beginEdit(row.index, colIndex)"
             @contextmenu="onCellContextMenu(row.index, colIndex, $event)"
           >
@@ -769,6 +873,15 @@ defineExpose({ selectCell, beginEdit, copySelection, focus: () => viewport.value
 /* The open editor overflows its cell, so its row has to paint over the rest. */
 .grid__row--editing {
   z-index: 5;
+}
+/* Picked-out rows carry the accent wash the rest of the app selects with, and
+   a solid leading edge so a run of them reads as one block. */
+.grid__row--selected {
+  background: var(--selection-idle);
+}
+.grid__row--selected .grid__rownum {
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--text-primary);
 }
 
 .grid__rownum {

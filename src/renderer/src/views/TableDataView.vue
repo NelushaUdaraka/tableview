@@ -26,6 +26,7 @@ import RowDetailPanel, { type RowField } from '../components/RowDetailPanel.vue'
 import SplitPane from '../components/SplitPane.vue'
 import TableViewSwitch from '../components/TableViewSwitch.vue'
 import { exportRows } from '@shared/export'
+import { reindexStagedEdits } from '../lib/stagedRows'
 import { foreignKeyFilterValue, foreignKeyFilters, foreignKeyTargets } from '@shared/foreignKeys'
 import { useSettingsStore } from '../stores/settings'
 import { useSchemaStore } from '../stores/schema'
@@ -70,6 +71,9 @@ const filters = ref<TableFilter[]>([])
 const filterMode = ref<'builder' | 'raw'>('builder')
 const rawWhere = ref('')
 const showFilters = ref(false)
+
+/** Rows the grid has picked out; the focused row when nothing else is. */
+const selectedRows = ref<number[]>([])
 
 /** Staged changes. */
 const edits = reactive<Record<string, CellValue>>({})
@@ -445,33 +449,50 @@ function isServerGenerated(columnName: string): boolean {
  * into would go up empty. Identity and computed columns are left out, so the
  * server assigns them.
  */
-function duplicateRow(rowIndex: number): void {
+function duplicateRows(rowIndexes: number[]): void {
   if (!editable.value) return
-  const source = mergedRow(rowIndex)
-  if (!source) return
+  for (const rowIndex of [...rowIndexes].sort((a, b) => a - b)) {
+    const source = mergedRow(rowIndex)
+    if (!source) continue
 
-  const newIndex = loadedRows.value.length + newRows.value.length
-  newRows.value = [
-    ...newRows.value,
-    columns.value.map((column, index) =>
-      isServerGenerated(column.name) ? null : (source[index] ?? null)
-    )
-  ]
-  columns.value.forEach((column, index) => {
-    if (isServerGenerated(column.name)) return
-    edits[`${newIndex}:${index}`] = source[index] ?? null
-  })
-}
-
-/** Drops every staged edit on one row, leaving other rows staged. */
-function revertRow(rowIndex: number): void {
-  for (const key of Object.keys(edits)) {
-    if (Number(key.split(':')[0]) === rowIndex) delete edits[key]
+    const newIndex = loadedRows.value.length + newRows.value.length
+    newRows.value = [
+      ...newRows.value,
+      columns.value.map((column, index) =>
+        isServerGenerated(column.name) ? null : (source[index] ?? null)
+      )
+    ]
+    columns.value.forEach((column, index) => {
+      if (isServerGenerated(column.name)) return
+      edits[`${newIndex}:${index}`] = source[index] ?? null
+    })
   }
 }
 
-function rowHasEdits(rowIndex: number): boolean {
-  return Object.keys(edits).some((key) => Number(key.split(':')[0]) === rowIndex)
+/** Drops every staged edit on these rows, leaving other rows staged. */
+function revertRows(rowIndexes: number[]): void {
+  const targets = new Set(rowIndexes)
+  for (const key of Object.keys(edits)) {
+    if (targets.has(Number(key.split(':')[0]))) delete edits[key]
+  }
+}
+
+function rowsHaveEdits(rowIndexes: number[]): boolean {
+  const targets = new Set(rowIndexes)
+  return Object.keys(edits).some((key) => targets.has(Number(key.split(':')[0])))
+}
+
+/**
+ * The rows an action applies to.
+ *
+ * The grid keeps the row that was right-clicked inside its selection, so this
+ * is the selection whenever there is one — and the clicked row on its own for
+ * anything that arrives without one.
+ */
+function targetRows(clicked: number): number[] {
+  return selectedRows.value.includes(clicked) && selectedRows.value.length > 0
+    ? [...selectedRows.value]
+    : [clicked]
 }
 
 /**
@@ -512,21 +533,57 @@ function clearFilters(): void {
   })
 }
 
-function deleteSelected(rowIndex: number): void {
-  if (!editable.value) return
-  if (rowIndex >= loadedRows.value.length) {
-    // Dropping a staged insert just removes it.
-    const newIndex = rowIndex - loadedRows.value.length
-    newRows.value = newRows.value.filter((_, index) => index !== newIndex)
-    for (const key of Object.keys(edits)) {
-      if (Number(key.split(':')[0]) === rowIndex) delete edits[key]
+/**
+ * Marks stored rows for deletion, and drops staged inserts outright.
+ *
+ * Marking is a toggle over the whole set: rows that are all marked already
+ * unmark together, so the same menu entry undoes what it just did.
+ */
+function deleteRows(rowIndexes: number[]): void {
+  if (!editable.value || rowIndexes.length === 0) return
+  const loadedCount = loadedRows.value.length
+  const stored = rowIndexes.filter((index) => index < loadedCount)
+  const staged = rowIndexes.filter((index) => index >= loadedCount)
+
+  if (stored.length > 0) {
+    const next = new Set(deletedRows.value)
+    const undo = stored.every((index) => next.has(index))
+    for (const index of stored) {
+      if (undo) next.delete(index)
+      else next.add(index)
     }
-    return
+    deletedRows.value = next
   }
-  const next = new Set(deletedRows.value)
-  if (next.has(rowIndex)) next.delete(rowIndex)
-  else next.add(rowIndex)
-  deletedRows.value = next
+
+  if (staged.length > 0) dropStagedRows(staged.map((index) => index - loadedCount))
+}
+
+/**
+ * Removes staged inserts, carrying the surviving ones' edits with them.
+ *
+ * Edits are keyed by absolute row index, so dropping a staged row shifts every
+ * staged row after it — and their values would land on their neighbours unless
+ * the keys move too.
+ */
+function dropStagedRows(newIndexes: number[]): void {
+  const loadedCount = loadedRows.value.length
+  const dropped = new Set(newIndexes)
+  const survivors = newRows.value
+    .map((row, newIndex) => ({ row, newIndex }))
+    .filter((entry) => !dropped.has(entry.newIndex))
+
+  const next = reindexStagedEdits(
+    { ...edits },
+    loadedCount,
+    survivors.map((entry) => entry.newIndex)
+  )
+  for (const key of Object.keys(edits)) delete edits[key]
+  Object.assign(edits, next)
+  newRows.value = survivors.map((entry) => entry.row)
+}
+
+function deleteSelected(rowIndex: number): void {
+  deleteRows([rowIndex])
 }
 
 /** The values that identify a stored row, taken from its unedited state. */
@@ -645,15 +702,21 @@ const COPY_FORMATS: { label: string; format: ExportFormat }[] = [
 const menuItems = computed<MenuEntry[]>(() => {
   const target = menu.value
   const key = target ? foreignKeys.value[target.col] : undefined
-  const isNew = target ? target.row >= loadedRows.value.length : false
-  const deleted = target ? deletedRows.value.has(target.row) : false
   const column = target ? columns.value[target.col] : undefined
+  const rows = target ? targetRows(target.row) : []
+
+  // Everything below reads to whoever right-clicked: one row, or the block
+  // they picked out.
+  const many = rows.length > 1
+  const these = many ? `${rows.length} rows` : 'row'
+  const isNew = rows.length > 0 && rows.every((index) => index >= loadedRows.value.length)
+  const deleted = rows.length > 0 && rows.every((index) => deletedRows.value.has(index))
 
   return [
     { label: 'Copy cell', action: 'copy-cell', hint: 'Ctrl+C' },
-    { label: 'Copy row', action: 'copy-row', hint: 'Ctrl+Shift+C' },
+    { label: many ? `Copy ${these}` : 'Copy row', action: 'copy-row', hint: 'Ctrl+Shift+C' },
     {
-      label: 'Copy row as',
+      label: many ? `Copy ${these} as` : 'Copy row as',
       items: COPY_FORMATS.map(({ label, format }) => ({ label, action: `copy-row-${format}` }))
     },
     {
@@ -681,24 +744,30 @@ const menuItems = computed<MenuEntry[]>(() => {
     { label: 'Edit cell', action: 'edit-cell', hint: 'Enter', disabled: !editable.value },
     { label: 'Set to NULL', action: 'null', hint: 'Delete', disabled: !editable.value },
     {
-      label: 'Undo edits in this row',
+      label: many ? `Undo edits in these ${these}` : 'Undo edits in this row',
       action: 'revert-row',
-      disabled: !target || !rowHasEdits(target.row)
+      disabled: !rowsHaveEdits(rows)
     },
 
     { separator: true, label: '' },
-    { label: 'Duplicate row', action: 'duplicate', disabled: !editable.value },
+    { label: many ? `Duplicate ${these}` : 'Duplicate row', action: 'duplicate', disabled: !editable.value },
     { label: 'Add row', action: 'add', disabled: !editable.value },
     {
       // A staged insert is dropped outright; a stored row is marked and can be
       // unmarked, so the label has to say which of the two this is.
-      label: isNew ? 'Remove staged row' : deleted ? 'Undo delete row' : 'Delete row',
+      label: isNew
+        ? `Remove staged ${these}`
+        : deleted
+          ? `Undo delete ${these}`
+          : `Delete ${these}`,
       action: 'delete',
+      hint: 'Ctrl+Delete',
       danger: !deleted,
       disabled: !editable.value
     },
 
     { separator: true, label: '' },
+    { label: 'Select all rows', action: 'select-all', hint: 'Ctrl+A' },
     {
       label: showRowPanel.value ? 'Hide row panel' : 'Show row in panel',
       action: 'toggle-panel',
@@ -730,16 +799,19 @@ async function onMenuSelect(action: string): Promise<void> {
       addRow()
       break
     case 'delete':
-      deleteSelected(target.row)
+      deleteRows(targetRows(target.row))
       break
     case 'edit-cell':
       grid.value?.beginEdit(target.row, target.col)
       break
     case 'duplicate':
-      duplicateRow(target.row)
+      duplicateRows(targetRows(target.row))
       break
     case 'revert-row':
-      revertRow(target.row)
+      revertRows(targetRows(target.row))
+      break
+    case 'select-all':
+      grid.value?.selectRows(allRows.value.map((_, index) => index))
       break
     case 'filter-eq':
       filterByCell(target.row, target.col, false)
@@ -762,7 +834,9 @@ async function onMenuSelect(action: string): Promise<void> {
     default: {
       // copy-row-<format> and copy-all-<format> differ only in what they copy.
       const copy = /^copy-(row|all)-(.+)$/.exec(action)
-      if (copy) await copyAs(copy[2] as ExportFormat, copy[1] === 'row' ? target.row : null)
+      if (copy) {
+        await copyAs(copy[2] as ExportFormat, copy[1] === 'row' ? targetRows(target.row) : null)
+      }
       break
     }
   }
@@ -771,14 +845,12 @@ async function onMenuSelect(action: string): Promise<void> {
 /**
  * Puts rows on the clipboard in one of the export formats.
  *
- * `rowIndex` picks a single row, with its staged edits applied — what is on
- * screen is what gets copied; null takes the whole page.
+ * `rowIndexes` picks rows, with their staged edits applied — what is on screen
+ * is what gets copied; null takes the whole page.
  */
-async function copyAs(format: ExportFormat, rowIndex: number | null): Promise<void> {
-  const rows =
-    rowIndex === null
-      ? allRows.value.map((_, index) => mergedRow(index) ?? [])
-      : [mergedRow(rowIndex) ?? []]
+async function copyAs(format: ExportFormat, rowIndexes: number[] | null): Promise<void> {
+  const indexes = rowIndexes ?? allRows.value.map((_, index) => index)
+  const rows = indexes.map((index) => mergedRow(index) ?? [])
 
   const text = exportRows(columns.value, rows, {
     format,
@@ -897,6 +969,8 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
             @revert-cell="revertCell"
             @sort="onSort"
             @selection="selection = $event"
+            @rows-selected="selectedRows = $event"
+            @delete-rows="deleteRows"
             @follow-key="followKey($event.rowIndex, $event.columnIndex)"
             @row-context="menu = { x: $event.x, y: $event.y, row: $event.rowIndex, col: $event.columnIndex }"
           />

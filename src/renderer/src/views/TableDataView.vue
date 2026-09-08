@@ -7,7 +7,7 @@
  * key; a table without one falls back to matching on every column, which the
  * banner warns about because it can match more rows than intended.
  */
-import { computed, nextTick, onMounted, reactive, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import type {
   CellValue,
   ColumnMeta,
@@ -17,6 +17,7 @@ import type {
   TableSort,
   TableStructure
 } from '@shared/types'
+import BaseModal from '../components/BaseModal.vue'
 import DataGrid, { type RowState } from '../components/DataGrid.vue'
 import FilterBuilder from '../components/FilterBuilder.vue'
 import ContextMenu, { type MenuEntry } from '../components/ContextMenu.vue'
@@ -126,6 +127,58 @@ function discard(): void {
   newRows.value = []
 }
 
+/** Drops one staged cell edit, leaving the rest of the row staged. */
+function revertCell(rowIndex: number, columnIndex: number): void {
+  delete edits[`${rowIndex}:${columnIndex}`]
+}
+
+type PendingChoice = 'apply' | 'discard' | 'cancel'
+
+/**
+ * Asks what to do with staged edits that are about to be lost.
+ *
+ * Reloading the table replaces the rows the edits are keyed against, so they
+ * cannot survive it — but silently dropping them is how a page of retyped
+ * values disappears on a stray Refresh.
+ */
+const pendingPrompt = ref<{ resolve: (choice: PendingChoice) => void } | null>(null)
+
+function askAboutPendingEdits(): Promise<PendingChoice> {
+  return new Promise((resolve) => {
+    pendingPrompt.value = { resolve }
+  })
+}
+
+function answerPendingPrompt(choice: PendingChoice): void {
+  const prompt = pendingPrompt.value
+  pendingPrompt.value = null
+  prompt?.resolve(choice)
+}
+
+/** Runs `action` once the staged edits have been applied or dropped. */
+async function withPendingEdits(action: () => void | Promise<void>): Promise<void> {
+  if (pendingCount.value > 0) {
+    const choice = await askAboutPendingEdits()
+    if (choice === 'cancel') return
+    if (choice === 'apply') {
+      if (!(await apply())) return
+    } else {
+      discard()
+    }
+  }
+  await action()
+}
+
+/** The tab store asks this before leaving or closing this table's tab. */
+async function confirmLeave(): Promise<boolean> {
+  if (pendingCount.value === 0) return true
+  const choice = await askAboutPendingEdits()
+  if (choice === 'cancel') return false
+  if (choice === 'apply') return apply()
+  discard()
+  return true
+}
+
 async function loadStructure(): Promise<void> {
   try {
     structure.value = await schemaStore.getStructure(
@@ -166,6 +219,12 @@ async function load(resetOffset = false): Promise<void> {
   }
 }
 
+onBeforeUnmount(() => {
+  tabs.setLeaveGuard(null)
+  // A dialog left waiting would keep its caller pending forever.
+  if (pendingPrompt.value) answerPendingPrompt('cancel')
+})
+
 /** Filters carried on the tab, e.g. from following a foreign key into it. */
 function applyTabFilters(): boolean {
   const incoming = props.tab.filters
@@ -182,6 +241,9 @@ onMounted(async () => {
   // A remount starts with no staged edits, so the tab's badge must not claim
   // any left over from the last time this table was open.
   tabs.update<TableTab>(props.tab.id, { pendingEdits: 0 })
+  // Leaving this tab unmounts the view and takes the staged edits with it, so
+  // the store asks here first.
+  tabs.setLeaveGuard(confirmLeave)
   await loadStructure()
   // A primary key gives a stable default order.
   const key = structure.value?.primaryKey ?? []
@@ -198,9 +260,11 @@ onMounted(async () => {
 watch(
   () => props.tab.filterRevision,
   async () => {
-    if (!applyTabFilters()) return
-    await load(true)
-    await selectFirstRow()
+    await withPendingEdits(async () => {
+      if (!applyTabFilters()) return
+      await load(true)
+      await selectFirstRow()
+    })
   }
 )
 
@@ -342,7 +406,7 @@ function onSort(column: string, additive: boolean): void {
           ? []
           : [{ column, direction: 'asc' }]
   }
-  void load(true)
+  void withPendingEdits(() => load(true))
 }
 
 function onEdit(rowIndex: number, columnIndex: number, value: CellValue): void {
@@ -434,8 +498,9 @@ function buildChangeSet(): TableChangeSet {
   }
 }
 
-async function apply(): Promise<void> {
-  if (pendingCount.value === 0) return
+/** Resolves true when the staged changes reached the server. */
+async function apply(): Promise<boolean> {
+  if (pendingCount.value === 0) return true
   const changeSet = buildChangeSet()
 
   if (settings.settings.confirmBeforeApply) {
@@ -449,7 +514,9 @@ async function apply(): Promise<void> {
     const warning = hasPrimaryKey.value
       ? ''
       : '\n\nThis table has no primary key, so rows are matched on every column. More than one row may be affected.'
-    if (!confirm(`Apply ${summary} to ${props.tab.schema}.${props.tab.table}?${warning}`)) return
+    if (!confirm(`Apply ${summary} to ${props.tab.schema}.${props.tab.table}?${warning}`)) {
+      return false
+    }
   }
 
   applying.value = true
@@ -460,17 +527,20 @@ async function apply(): Promise<void> {
       `${applied.inserted} inserted, ${applied.updated} updated, ${applied.deleted} deleted`
     )
     await load()
+    return true
   } catch (error) {
     toasts.fromError('Could not apply the changes — nothing was committed', error)
+    return false
   } finally {
     applying.value = false
   }
 }
 
 function goToPage(delta: number): void {
-  const next = offset.value + delta * pageSize.value
-  offset.value = Math.max(0, next)
-  void load()
+  void withPendingEdits(() => {
+    offset.value = Math.max(0, offset.value + delta * pageSize.value)
+    return load()
+  })
 }
 
 const menuItems = computed<MenuEntry[]>(() => [
@@ -536,7 +606,7 @@ async function onMenuSelect(action: string): Promise<void> {
 }
 
 defineExpose({
-  refresh: () => load(),
+  refresh: () => withPendingEdits(() => load()),
   focusFilter: () => {
     showFilters.value = true
   },
@@ -559,7 +629,9 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
 
       <div class="data__spacer"></div>
 
-      <button class="btn" :disabled="loading" @click="load()">⟳ Refresh</button>
+      <button class="btn" :disabled="loading" @click="withPendingEdits(() => load())">
+        ⟳ Refresh
+      </button>
       <button
         class="btn"
         :class="{ 'btn--armed': showFilters || filters.length > 0 || !!rawWhere }"
@@ -606,7 +678,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       @update:filters="filters = $event"
       @update:mode="filterMode = $event"
       @update:raw-where="rawWhere = $event"
-      @apply="load(true)"
+      @apply="withPendingEdits(() => load(true))"
     />
 
     <div v-if="editable && !hasPrimaryKey" class="data__warning">
@@ -638,6 +710,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
             :foreign-keys="foreignKeyLabels"
             empty-message="No rows match"
             @edit="onEdit"
+            @revert-cell="revertCell"
             @sort="onSort"
             @selection="selection = $event"
             @follow-key="followKey($event.rowIndex, $event.columnIndex)"
@@ -677,7 +750,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       <select
         v-model.number="pageSize"
         class="select select--sm data__pagesize"
-        @change="load(true)"
+        @change="withPendingEdits(() => load(true))"
       >
         <option :value="50">50</option>
         <option :value="100">100</option>
@@ -702,10 +775,45 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       @select="onMenuSelect"
       @close="menu = null"
     />
+
+    <!-- Reloading rekeys every staged edit, so this is the last chance to keep them. -->
+    <BaseModal
+      v-if="pendingPrompt"
+      kicker="Unsaved changes"
+      title="This table has staged edits"
+      :subtitle="`${tab.schema}.${tab.table}`"
+      width="480px"
+      @close="answerPendingPrompt('cancel')"
+    >
+      <p class="prompt__text">
+        {{ pendingCount }} staged {{ pendingCount === 1 ? 'change has' : 'changes have' }} not been
+        written to the database. Reloading the table would discard
+        {{ pendingCount === 1 ? 'it' : 'them' }}.
+      </p>
+
+      <template #footer>
+        <button class="btn" @click="answerPendingPrompt('cancel')">Cancel</button>
+        <div class="prompt__spacer"></div>
+        <button class="btn btn--danger" @click="answerPendingPrompt('discard')">Discard</button>
+        <button class="btn btn--primary" @click="answerPendingPrompt('apply')">
+          Apply and continue
+        </button>
+      </template>
+    </BaseModal>
   </div>
 </template>
 
 <style scoped>
+.prompt__text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.prompt__spacer {
+  flex: 1;
+}
+
 .data {
   display: flex;
   flex-direction: column;

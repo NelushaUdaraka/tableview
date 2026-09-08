@@ -45,9 +45,30 @@ export type Tab = QueryTab | TableTab
 let counter = 0
 const newId = (): string => `tab-${++counter}`
 
+/**
+ * Asked before the active tab is left or closed; `false` cancels the move.
+ *
+ * Only the active tab is mounted, so only it can be holding work that leaving
+ * would throw away — the view that owns that work registers this and answers
+ * for it. Nothing is registered by default, and then every move goes through.
+ */
+export type LeaveGuard = () => Promise<boolean>
+
 export const useTabStore = defineStore('tabs', () => {
   const tabs = ref<Tab[]>([])
   const activeId = ref<string | null>(null)
+  let leaveGuard: LeaveGuard | null = null
+
+  /** Registered by the active view on mount, cleared on unmount. */
+  function setLeaveGuard(guard: LeaveGuard | null): void {
+    leaveGuard = guard
+  }
+
+  /** Runs `move` unless the tab being left asks to stay. */
+  async function leaving(move: () => void): Promise<void> {
+    if (leaveGuard && !(await leaveGuard())) return
+    move()
+  }
 
   const active = computed(() => tabs.value.find((tab) => tab.id === activeId.value) ?? null)
   const activeQueryTab = computed<QueryTab | null>(() =>
@@ -57,7 +78,11 @@ export const useTabStore = defineStore('tabs', () => {
     active.value?.kind === 'table' ? active.value : null
   )
 
-  function openQuery(connectionId: string, sql = '', title = 'Query'): QueryTab {
+  async function openQuery(connectionId: string, sql = '', title = 'Query'): Promise<void> {
+    await leaving(() => openQueryNow(connectionId, sql, title))
+  }
+
+  function openQueryNow(connectionId: string, sql: string, title: string): void {
     const existingUntitled = tabs.value.find(
       (tab): tab is QueryTab =>
         tab.kind === 'query' && tab.connectionId === connectionId && !tab.dirty && tab.sql === ''
@@ -65,7 +90,7 @@ export const useTabStore = defineStore('tabs', () => {
     // Reuse a blank tab rather than piling up empties.
     if (existingUntitled && sql === '') {
       activeId.value = existingUntitled.id
-      return existingUntitled
+      return
     }
 
     const tab: QueryTab = {
@@ -84,17 +109,27 @@ export const useTabStore = defineStore('tabs', () => {
     }
     tabs.value = [...tabs.value, tab]
     activeId.value = tab.id
-    return tab
   }
 
-  function openTable(
+  async function openTable(
     connectionId: string,
     schema: string,
     table: string,
     objectType: SchemaObjectType = 'table',
     view: 'data' | 'structure' = 'data',
     filters?: TableFilter[]
-  ): TableTab {
+  ): Promise<void> {
+    await leaving(() => openTableNow(connectionId, schema, table, objectType, view, filters))
+  }
+
+  function openTableNow(
+    connectionId: string,
+    schema: string,
+    table: string,
+    objectType: SchemaObjectType,
+    view: 'data' | 'structure',
+    filters?: TableFilter[]
+  ): void {
     const existing = tabs.value.find(
       (tab): tab is TableTab =>
         tab.kind === 'table' &&
@@ -109,7 +144,7 @@ export const useTabStore = defineStore('tabs', () => {
         existing.filterRevision += 1
       }
       activeId.value = existing.id
-      return existing
+      return
     }
 
     const tab: TableTab = {
@@ -127,10 +162,14 @@ export const useTabStore = defineStore('tabs', () => {
     }
     tabs.value = [...tabs.value, tab]
     activeId.value = tab.id
-    return tab
   }
 
-  function close(id: string): void {
+  async function close(id: string): Promise<void> {
+    if (id === activeId.value) return leaving(() => closeNow(id))
+    closeNow(id)
+  }
+
+  function closeNow(id: string): void {
     const index = tabs.value.findIndex((tab) => tab.id === id)
     if (index < 0) return
     const next = tabs.value.filter((tab) => tab.id !== id)
@@ -140,14 +179,23 @@ export const useTabStore = defineStore('tabs', () => {
     }
   }
 
-  function closeOthers(id: string): void {
+  async function closeOthers(id: string): Promise<void> {
+    // Only a move away from the active tab needs asking about.
+    if (activeId.value !== null && activeId.value !== id) {
+      return leaving(() => {
+        tabs.value = tabs.value.filter((tab) => tab.id === id)
+        activeId.value = id
+      })
+    }
     tabs.value = tabs.value.filter((tab) => tab.id === id)
     activeId.value = id
   }
 
-  function closeAll(): void {
-    tabs.value = []
-    activeId.value = null
+  async function closeAll(): Promise<void> {
+    await leaving(() => {
+      tabs.value = []
+      activeId.value = null
+    })
   }
 
   function closeForConnection(connectionId: string): void {
@@ -156,15 +204,18 @@ export const useTabStore = defineStore('tabs', () => {
     if (!next.some((tab) => tab.id === activeId.value)) activeId.value = next[0]?.id ?? null
   }
 
-  function select(id: string): void {
-    activeId.value = id
+  async function select(id: string): Promise<void> {
+    if (id === activeId.value) return
+    await leaving(() => {
+      activeId.value = id
+    })
   }
 
-  function cycle(delta: number): void {
+  async function cycle(delta: number): Promise<void> {
     if (tabs.value.length === 0) return
     const index = tabs.value.findIndex((tab) => tab.id === activeId.value)
     const next = (index + delta + tabs.value.length) % tabs.value.length
-    activeId.value = tabs.value[next].id
+    await select(tabs.value[next].id)
   }
 
   /**
@@ -201,6 +252,7 @@ export const useTabStore = defineStore('tabs', () => {
     closeForConnection,
     select,
     cycle,
-    update
+    update,
+    setLeaveGuard
   }
 })

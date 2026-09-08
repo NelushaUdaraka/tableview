@@ -63,6 +63,7 @@ const emit = defineEmits<{
   (event: 'row-context', payload: { rowIndex: number; columnIndex: number; x: number; y: number }): void
   (event: 'selection', payload: { rowIndex: number; columnIndex: number } | null): void
   (event: 'follow-key', payload: { rowIndex: number; columnIndex: number }): void
+  (event: 'revert-cell', rowIndex: number, columnIndex: number): void
 }>()
 
 const ROW_HEIGHT = 30
@@ -73,6 +74,7 @@ const MAX_AUTO_WIDTH = 420
 const MAX_EDITOR_HEIGHT = 220
 
 const viewport = ref<HTMLElement | null>(null)
+const header = ref<HTMLElement | null>(null)
 const scrollTop = ref(0)
 const viewportHeight = ref(600)
 const widths = ref<number[]>([])
@@ -200,9 +202,18 @@ const gridTemplate = computed(
   () => `48px ${widths.value.map((width) => `${width}px`).join(' ')}`
 )
 
+/** Row-number gutter plus every column, which is how wide a row really is. */
+const totalWidth = computed(
+  () => 48 + widths.value.reduce((sum, width) => sum + width, 0)
+)
+
 function onScroll(): void {
   if (!viewport.value) return
   scrollTop.value = viewport.value.scrollTop
+  // The header sits outside the scrolling viewport so it stays put vertically;
+  //;horizontally it has to be moved by hand or the columns part company with
+  // their values.
+  if (header.value) header.value.scrollLeft = viewport.value.scrollLeft
 }
 
 let resizeObserver: ResizeObserver | null = null
@@ -487,29 +498,27 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
 
 <template>
   <div class="grid">
-    <div
-      class="grid__header"
-      :style="{ gridTemplateColumns: gridTemplate }"
-      role="row"
-    >
-      <div class="grid__corner"></div>
-      <div
-        v-for="(column, index) in columns"
-        :key="`${column.name}-${index}`"
-        class="grid__th"
-        :title="`${column.name} — ${column.dataType}${column.nullable ? '' : ' NOT NULL'}`"
-        @click="emit('sort', column.name, $event.shiftKey)"
-      >
-        <span class="grid__th-name truncate">{{ column.name }}</span>
-        <span v-if="primaryKey.includes(column.name)" class="grid__th-key" title="Primary key">PK</span>
-        <span class="grid__th-type truncate">{{ column.dataType }}</span>
-        <span v-if="sortIndicator(column)" class="grid__th-sort">{{ sortIndicator(column) }}</span>
-        <span
-          class="grid__resizer"
-          @mousedown="onResizeStart(index, $event)"
-          @dblclick.stop="autoFit(index)"
-          @click.stop
-        ></span>
+    <div ref="header" class="grid__header" role="row">
+      <div class="grid__header-track" :style="{ gridTemplateColumns: gridTemplate }">
+        <div class="grid__corner"></div>
+        <div
+          v-for="(column, index) in columns"
+          :key="`${column.name}-${index}`"
+          class="grid__th"
+          :title="`${column.name} — ${column.dataType}${column.nullable ? '' : ' NOT NULL'}`"
+          @click="emit('sort', column.name, $event.shiftKey)"
+        >
+          <span class="grid__th-name truncate">{{ column.name }}</span>
+          <span v-if="primaryKey.includes(column.name)" class="grid__th-key" title="Primary key">PK</span>
+          <span class="grid__th-type truncate">{{ column.dataType }}</span>
+          <span v-if="sortIndicator(column)" class="grid__th-sort">{{ sortIndicator(column) }}</span>
+          <span
+            class="grid__resizer"
+            @mousedown="onResizeStart(index, $event)"
+            @dblclick.stop="autoFit(index)"
+            @click.stop
+          ></span>
+        </div>
       </div>
     </div>
 
@@ -529,7 +538,11 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
         <div class="empty-state__title">{{ emptyMessage }}</div>
       </div>
 
-      <div v-else class="grid__canvas" :style="{ height: `${totalHeight}px` }">
+      <div
+        v-else
+        class="grid__canvas"
+        :style="{ height: `${totalHeight}px`, width: `${totalWidth}px` }"
+      >
         <div
           v-for="row in visibleRows"
           :key="row.index"
@@ -582,6 +595,24 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
               <span v-if="displayValue(row.index, colIndex) === null" class="grid__null">NULL</span>
               <span v-else class="truncate">{{ displayValue(row.index, colIndex) }}</span>
               <button
+                v-if="isEdited(row.index, colIndex)"
+                class="grid__revert"
+                title="Undo this edit"
+                @mousedown.stop
+                @click.stop="emit('revert-cell', row.index, colIndex)"
+              >
+                <svg viewBox="0 0 12 12" aria-hidden="true">
+                  <path
+                    d="M4.6 2.6 2 5.2l2.6 2.6M2.4 5.2h4.3a2.9 2.9 0 0 1 0 5.8H4.1"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.4"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+              <button
                 v-if="canFollowKey(row.index, colIndex)"
                 class="grid__fk"
                 :title="`Open ${foreignKeys[colIndex]} = ${displayValue(row.index, colIndex)}`"
@@ -617,12 +648,20 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
 }
 
 .grid__header {
-  display: grid;
   height: var(--h-gridheader);
   border-bottom: var(--rule) solid var(--border-strong);
   background: var(--bg-app);
+  /* Scrolled in step with the viewport rather than by the user, so the bar
+     itself never shows one. */
   overflow: hidden;
   flex: 0 0 auto;
+}
+.grid__header-track {
+  display: grid;
+  height: 100%;
+  /* Never narrower than the bar, so a table that fits still fills it. */
+  min-width: 100%;
+  width: max-content;
 }
 
 .grid__corner {
@@ -698,6 +737,9 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
 
 .grid__canvas {
   position: relative;
+  /* Rows are absolutely positioned inside this, so its width is what decides
+     how far the viewport scrolls and how far a row's background reaches. */
+  min-width: 100%;
 }
 
 .grid__row {
@@ -783,6 +825,41 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
 }
 
 /* --- foreign key arrow --------------------------------------------------- */
+/* The undo affordance on a staged cell: always visible, because it is the
+   only sign that this value is not the one in the database yet. */
+.grid__revert {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--warning);
+  cursor: pointer;
+}
+.grid__revert svg {
+  width: 11px;
+  height: 11px;
+}
+.grid__revert:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+/* A right-aligned value keeps its edge; the control sits after it. */
+.grid__cell--number .grid__revert,
+.grid__cell--bytes .grid__revert {
+  margin-left: 6px;
+}
+/* With both, the foreign-key arrow gives up the auto margin. */
+.grid__revert + .grid__fk {
+  margin-left: 6px;
+}
+
 .grid__fk {
   display: flex;
   align-items: center;

@@ -85,6 +85,16 @@ const isView = computed(() => props.tab.objectType === 'view')
 const primaryKey = computed(() => structure.value?.primaryKey ?? [])
 const hasPrimaryKey = computed(() => primaryKey.value.length > 0)
 const editable = computed(() => !isView.value)
+/**
+ * Whether to warn that edits will match on every column.
+ *
+ * Only once the structure has actually arrived: it is null while the table
+ * opens, which reads as "no primary key" and flashed the warning on every
+ * table for as long as the lookup took.
+ */
+const warnNoPrimaryKey = computed(
+  () => Boolean(structure.value) && editable.value && !hasPrimaryKey.value
+)
 
 const allRows = computed(() => [...loadedRows.value, ...newRows.value])
 
@@ -937,7 +947,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       @apply="withPendingEdits(() => load(true))"
     />
 
-    <div v-if="editable && !hasPrimaryKey" class="data__warning">
+    <div v-if="warnNoPrimaryKey" class="data__warning">
       This table has no primary key. Edits match rows on every column, so a duplicate row would be
       changed more than once.
     </div>

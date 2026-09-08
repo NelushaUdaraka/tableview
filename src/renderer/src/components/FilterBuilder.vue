@@ -83,26 +83,24 @@ function placeholderFor(operator: FilterOperator): string {
 <template>
   <div class="filters">
     <div class="filters__head">
-      <div class="filters__modes">
+      <div class="seg seg--caps">
         <button
-          class="filters__mode"
-          :class="{ 'filters__mode--active': mode === 'builder' }"
+          class="seg__opt filters__mode"
+          :class="{ 'seg__opt--on': mode === 'builder' }"
           @click="emit('update:mode', 'builder')"
         >
           Filters
         </button>
         <button
-          class="filters__mode"
-          :class="{ 'filters__mode--active': mode === 'raw' }"
+          class="seg__opt filters__mode"
+          :class="{ 'seg__opt--on': mode === 'raw' }"
           @click="emit('update:mode', 'raw')"
         >
           Raw WHERE
         </button>
       </div>
       <div class="filters__spacer"></div>
-      <button v-if="mode === 'builder'" class="btn btn--sm btn--ghost" @click="add">
-        + Add filter
-      </button>
+      <button v-if="mode === 'builder'" class="btn btn--sm" @click="add">+ Add filter</button>
       <button class="btn btn--sm btn--primary" :disabled="!canApply" @click="emit('apply')">
         Apply
       </button>
@@ -133,7 +131,7 @@ function placeholderFor(operator: FilterOperator): string {
           <option value="AND">AND</option>
           <option value="OR">OR</option>
         </select>
-        <span v-else class="filters__conj filters__conj--fixed">WHERE</span>
+        <span v-else class="filters__conj filters__conj--fixed caps">Where</span>
 
         <select
           class="select filters__column"
@@ -174,9 +172,7 @@ function placeholderFor(operator: FilterOperator): string {
           @keydown.enter="emit('apply')"
         />
 
-        <button class="btn btn--ghost btn--icon btn--sm" title="Remove" @click="remove(index)">
-          ✕
-        </button>
+        <button class="filters__remove" title="Remove" @click="remove(index)">✕</button>
       </div>
     </div>
 
@@ -186,35 +182,17 @@ function placeholderFor(operator: FilterOperator): string {
 
 <style scoped>
 .filters {
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-raised);
+  padding: 12px;
+  border-bottom: var(--rule) solid var(--border-strong);
+  background: var(--bg-app);
 }
 .filters__head {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-.filters__modes {
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-input);
+  gap: 10px;
 }
 .filters__mode {
-  padding: 3px 10px;
-  border: none;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.filters__mode--active {
-  background: var(--bg-overlay);
-  color: var(--text-primary);
+  height: var(--h-control-sm);
 }
 .filters__spacer {
   flex: 1;
@@ -222,49 +200,73 @@ function placeholderFor(operator: FilterOperator): string {
 .filters__list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 8px;
+  margin-top: 12px;
 }
 .filters__row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .filters__conj {
-  width: 78px;
-  flex: 0 0 78px;
-  height: 26px;
+  width: 76px;
+  flex: 0 0 76px;
+  height: 30px;
+  font-size: 11px;
+  font-weight: 700;
 }
 .filters__conj--fixed {
   display: flex;
   align-items: center;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-muted);
+  height: 30px;
 }
 .filters__column {
-  flex: 0 0 180px;
-  height: 26px;
+  flex: 0 0 190px;
+  height: 30px;
+  font-size: 12px;
 }
 .filters__op {
-  flex: 0 0 120px;
-  height: 26px;
+  flex: 0 0 130px;
+  height: 30px;
+  font-size: 12px;
 }
 .filters__value {
   flex: 1;
   min-width: 80px;
-  height: 26px;
+  height: 30px;
+  font-size: 12px;
+}
+/* Square, and it takes the accent on hover — removing is the destructive act here. */
+.filters__remove {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.filters__remove:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
 }
 .filters__raw {
-  margin-top: 8px;
+  margin-top: 12px;
+}
+.filters__raw .input {
+  height: 30px;
+  font-size: 12px;
 }
 .filters__hint,
 .filters__empty {
-  margin: 6px 0 0;
-  font-size: 11px;
-  color: var(--text-muted);
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
 }
 .filters__hint code {
   font-family: var(--font-mono);
+  color: var(--text-secondary);
 }
 </style>

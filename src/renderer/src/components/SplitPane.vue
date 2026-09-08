@@ -126,9 +126,10 @@ onBeforeUnmount(onMouseUp)
 .split__pane--flex {
   flex: 1;
 }
+/* The divider is one of the system's rules, so it is 2px and it stays put. */
 .split__divider {
-  flex: 0 0 4px;
-  background: var(--border);
+  flex: 0 0 var(--rule);
+  background: var(--border-strong);
   transition: background var(--transition);
 }
 .split--horizontal > .split__divider {
@@ -139,6 +140,6 @@ onBeforeUnmount(onMouseUp)
 }
 .split__divider:hover,
 .split__divider--active {
-  background: var(--border-focus);
+  background: var(--accent);
 }
 </style>

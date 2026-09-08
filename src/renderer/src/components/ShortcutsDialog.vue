@@ -58,50 +58,61 @@ const GROUPS = [
 </script>
 
 <template>
-  <BaseModal title="Keyboard shortcuts" width="640px" @close="$emit('close')">
+  <BaseModal kicker="Help" title="Keyboard shortcuts" width="560px" flush @close="$emit('close')">
     <div class="shortcuts">
       <section v-for="group in GROUPS" :key="group.title">
         <h3 class="shortcuts__title">{{ group.title }}</h3>
         <div v-for="[keys, description] in group.items" :key="keys" class="shortcuts__row">
+          <span class="shortcuts__label">{{ description }}</span>
           <kbd>{{ keys }}</kbd>
-          <span>{{ description }}</span>
         </div>
       </section>
     </div>
+    <template #footer>
+      <button class="btn btn--primary" @click="$emit('close')">Close</button>
+    </template>
   </BaseModal>
 </template>
 
 <style scoped>
+/* One ruled list: the label reads first, the keys sit at the right edge. */
 .shortcuts {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 22px 28px;
+  max-height: 340px;
+  overflow-y: auto;
 }
 .shortcuts__title {
-  margin: 0 0 8px;
-  font-size: 11px;
+  margin: 0;
+  padding: 12px 20px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-app);
+  font-family: var(--font-mono);
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--accent);
 }
 .shortcuts__row {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 6px;
-  font-size: 12px;
+  align-items: center;
+  gap: 16px;
+  padding: 9px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.shortcuts__label {
+  flex: 1;
+  font-size: 13px;
 }
 kbd {
   flex: 0 0 auto;
-  min-width: 118px;
-  padding: 2px 6px;
+  padding: 3px 8px;
   border: 1px solid var(--border-strong);
-  border-bottom-width: 2px;
-  border-radius: 3px;
-  background: var(--bg-raised);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: 11px;
-  text-align: center;
+  font-weight: 700;
+  letter-spacing: 0.06em;
 }
 </style>

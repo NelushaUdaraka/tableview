@@ -36,7 +36,7 @@ const sidebar = ref<InstanceType<typeof AppSidebar> | null>(null)
 const queryView = ref<InstanceType<typeof QueryView> | null>(null)
 const tableView = ref<InstanceType<typeof TableView> | null>(null)
 
-const sidebarWidth = ref(260)
+const sidebarWidth = ref(280)
 const sidebarCollapsed = ref(false)
 const showSettings = ref(false)
 const showShortcuts = ref(false)

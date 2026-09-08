@@ -16,6 +16,8 @@ export interface QueryTab {
   executionId: string | null
   activeResultIndex: number
   dirty: boolean
+  /** Line the statement under the cursor starts on, reported by the status bar. */
+  statementLine: number | null
 }
 
 export interface TableTab {
@@ -77,7 +79,8 @@ export const useTabStore = defineStore('tabs', () => {
       running: false,
       executionId: null,
       activeResultIndex: 0,
-      dirty: false
+      dirty: false,
+      statementLine: null
     }
     tabs.value = [...tabs.value, tab]
     activeId.value = tab.id

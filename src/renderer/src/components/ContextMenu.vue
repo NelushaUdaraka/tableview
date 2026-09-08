@@ -68,28 +68,28 @@ const style = computed(() => ({ left: `${position.value.x}px`, top: `${position.
 <style scoped>
 .menu {
   position: fixed;
-  min-width: 190px;
-  padding: 4px;
+  min-width: 210px;
+  padding: 4px 0;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--bg-overlay);
-  box-shadow: var(--shadow);
+  border-radius: 0;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-menu);
   z-index: 300;
 }
 .menu__item {
   display: block;
   width: 100%;
-  padding: 5px 10px;
+  padding: 7px 14px;
   border: none;
-  border-radius: 3px;
+  border-radius: 0;
   background: transparent;
   color: var(--text-primary);
   text-align: left;
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
 }
 .menu__item:hover:not(:disabled) {
-  background: var(--bg-selected);
+  background: var(--bg-hover-strong);
 }
 .menu__item:disabled {
   opacity: 0.4;
@@ -100,7 +100,7 @@ const style = computed(() => ({ left: `${position.value.x}px`, top: `${position.
 }
 .menu__sep {
   height: 1px;
-  margin: 4px 6px;
-  background: var(--border);
+  margin: 4px 0;
+  background: var(--border-strong);
 }
 </style>

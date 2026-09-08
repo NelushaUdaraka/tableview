@@ -5,6 +5,7 @@ import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
 import { useConnectionStore } from '../stores/connections'
 import { useLibraryStore } from '../stores/library'
 import { useSchemaStore } from '../stores/schema'
+import { useTabStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
 import { api } from '../lib/api'
 
@@ -18,6 +19,7 @@ const emit = defineEmits<{
 const connections = useConnectionStore()
 const schema = useSchemaStore()
 const library = useLibraryStore()
+const tabs = useTabStore()
 const toasts = useToastStore()
 
 type Panel = 'objects' | 'history' | 'saved'
@@ -69,6 +71,17 @@ async function switchDatabase(name: string): Promise<void> {
 }
 
 const currentDatabase = computed(() => connections.activeStatus?.currentDatabase ?? '')
+const connectionState = computed(() => connections.activeStatus?.state ?? 'disconnected')
+
+/** The object the active tab is showing, so the tree can mark it. */
+const activeObject = computed(() => {
+  const tab = tabs.active
+  return tab?.kind === 'table' ? `${tab.schema}.${tab.table}` : ''
+})
+
+function isActive(schemaName: string, name: string): boolean {
+  return activeObject.value === `${schemaName}.${name}`
+}
 
 const objectMenuItems: MenuEntry[] = [
   { label: 'Open data', action: 'data' },
@@ -182,26 +195,45 @@ defineExpose({ focusFilter, refresh })
 
 <template>
   <aside class="sidebar">
+    <!-- Identity lives here as well as in the status bar: the connection names
+         itself at the top of the tree it owns. -->
+    <div class="sidebar__conn">
+      <div class="kicker sidebar__conn-kicker">Connection</div>
+      <div class="sidebar__conn-name">
+        <span class="sidebar__dot" :class="`sidebar__dot--${connectionState}`"></span>
+        <span class="truncate">{{ connections.active?.name ?? 'No connection' }}</span>
+      </div>
+    </div>
+
     <div class="sidebar__db">
-      <select
-        class="select"
-        :value="currentDatabase"
-        title="Active database"
-        @change="switchDatabase(($event.target as HTMLSelectElement).value)"
-      >
-        <option v-if="!currentDatabase" value="">(no database)</option>
-        <option v-for="db in schema.visibleDatabases" :key="db.name" :value="db.name">
-          {{ db.name }}
-        </option>
-      </select>
+      <div class="sidebar__db-field">
+        <div class="caps">Database</div>
+        <div class="sidebar__db-value">
+          <span class="mono truncate">{{ currentDatabase || '(no database)' }}</span>
+          <span class="sidebar__db-caret">▾</span>
+        </div>
+        <!-- The native select carries the behaviour; the block above carries the
+             look, so the control keeps its platform dropdown. -->
+        <select
+          class="sidebar__db-select"
+          :value="currentDatabase"
+          title="Active database"
+          @change="switchDatabase(($event.target as HTMLSelectElement).value)"
+        >
+          <option v-if="!currentDatabase" value="">(no database)</option>
+          <option v-for="db in schema.visibleDatabases" :key="db.name" :value="db.name">
+            {{ db.name }}
+          </option>
+        </select>
+      </div>
       <button
-        class="btn btn--ghost btn--icon"
+        class="sidebar__db-btn"
         :title="schema.showSystemDatabases ? 'Hide system databases' : 'Show system databases'"
         @click="schema.showSystemDatabases = !schema.showSystemDatabases"
       >
         {{ schema.showSystemDatabases ? '◉' : '○' }}
       </button>
-      <button class="btn btn--ghost btn--icon" title="Refresh (F5)" @click="refresh">⟳</button>
+      <button class="sidebar__db-btn" title="Refresh (F5)" @click="refresh">⟳</button>
     </div>
 
     <nav class="sidebar__tabs">
@@ -219,13 +251,17 @@ defineExpose({ focusFilter, refresh })
     <!-- Schema tree ---------------------------------------------------- -->
     <template v-if="panel === 'objects'">
       <div class="sidebar__filter">
-        <input
-          ref="filterInput"
-          v-model="schema.filter"
-          class="input"
-          placeholder="Filter tables… (Ctrl+F)"
-          spellcheck="false"
-        />
+        <div class="search">
+          <span class="search__glyph">⌕</span>
+          <input
+            ref="filterInput"
+            v-model="schema.filter"
+            class="search__input"
+            placeholder="Filter tables…"
+            spellcheck="false"
+          />
+          <span class="search__hint mono">CTRL F</span>
+        </div>
       </div>
 
       <div class="sidebar__scroll">
@@ -235,11 +271,12 @@ defineExpose({ focusFilter, refresh })
 
         <template v-else>
           <section v-if="pinnedObjects.length" class="group">
-            <div class="group__head">Pinned</div>
+            <div class="group__head group__head--pinned">Pinned</div>
             <button
               v-for="object in pinnedObjects"
               :key="`pin-${object.schema}.${object.name}`"
-              class="item"
+              class="item item--flush"
+              :class="{ 'item--active': isActive(object.schema, object.name) }"
               @click="emit('open-table', object.schema, object.name, object.type)"
               @contextmenu.prevent="openMenu($event, object.schema, object.name, object.type)"
             >
@@ -262,6 +299,7 @@ defineExpose({ focusFilter, refresh })
                 v-for="object in [...group.tables, ...group.views]"
                 :key="`${object.schema}.${object.name}`"
                 class="item"
+                :class="{ 'item--active': isActive(object.schema, object.name) }"
                 @click="emit('open-table', object.schema, object.name, object.type)"
                 @contextmenu.prevent="openMenu($event, object.schema, object.name, object.type)"
               >
@@ -296,13 +334,16 @@ defineExpose({ focusFilter, refresh })
     <!-- History --------------------------------------------------------- -->
     <template v-else-if="panel === 'history'">
       <div class="sidebar__filter">
-        <input
-          v-model="library.historySearch"
-          class="input"
-          placeholder="Search history…"
-          spellcheck="false"
-          @input="library.loadHistory()"
-        />
+        <div class="search">
+          <span class="search__glyph">⌕</span>
+          <input
+            v-model="library.historySearch"
+            class="search__input"
+            placeholder="Search history…"
+            spellcheck="false"
+            @input="library.loadHistory()"
+          />
+        </div>
       </div>
       <div class="sidebar__scroll">
         <button
@@ -314,16 +355,16 @@ defineExpose({ focusFilter, refresh })
           @click="emit('open-sql', entry.sql, 'History')"
         >
           <div class="history__sql mono truncate">{{ entry.sql.replace(/\s+/g, ' ').trim() }}</div>
-          <div class="history__meta">
+          <div class="history__meta mono">
             <span>{{ new Date(entry.runAt).toLocaleString() }}</span>
-            <span>{{ entry.success ? `${entry.rowCount} rows` : 'failed' }}</span>
+            <span class="history__rows">{{ entry.success ? `${entry.rowCount} rows` : 'failed' }}</span>
             <span>{{ entry.durationMs }}ms</span>
           </div>
         </button>
         <div v-if="library.history.length === 0" class="sidebar__empty muted">No history yet</div>
       </div>
       <div class="sidebar__foot">
-        <button class="btn btn--sm btn--ghost" @click="library.clearHistory()">Clear history</button>
+        <button class="btn btn--muted" @click="library.clearHistory()">Clear history</button>
       </div>
     </template>
 
@@ -335,11 +376,7 @@ defineExpose({ focusFilter, refresh })
             <div class="saved__name truncate">{{ query.name }}</div>
             <div class="saved__sql mono truncate">{{ query.sql.replace(/\s+/g, ' ').trim() }}</div>
           </button>
-          <button
-            class="btn btn--ghost btn--icon btn--sm"
-            title="Delete"
-            @click="library.deleteSavedQuery(query.id)"
-          >
+          <button class="saved__del" title="Delete" @click="library.deleteSavedQuery(query.id)">
             ✕
           </button>
         </div>
@@ -367,46 +404,168 @@ defineExpose({ focusFilter, refresh })
   height: 100%;
   min-height: 0;
   background: var(--bg-surface);
-  border-right: 1px solid var(--border);
+  border-right: var(--rule) solid var(--border-strong);
 }
-.sidebar__db {
+
+/* --- connection + database header ---------------------------------------- */
+.sidebar__conn {
+  padding: 12px 14px 11px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.sidebar__conn-kicker {
+  margin-bottom: 3px;
+}
+.sidebar__conn-name {
   display: flex;
-  gap: 4px;
   align-items: center;
-  padding: 8px;
-  border-bottom: 1px solid var(--border);
-}
-.sidebar__db .select {
-  flex: 1;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
   min-width: 0;
 }
+.sidebar__dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  background: var(--text-muted);
+}
+.sidebar__dot--connected {
+  background: var(--success);
+}
+.sidebar__dot--connecting {
+  background: var(--warning);
+}
+.sidebar__dot--error {
+  background: var(--danger);
+}
+
+.sidebar__db {
+  display: flex;
+  align-items: stretch;
+  border-bottom: var(--rule) solid var(--border-strong);
+}
+.sidebar__db-field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  padding: 9px 14px;
+}
+.sidebar__db-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 1px;
+  font-size: 13px;
+}
+.sidebar__db-caret {
+  font-size: 9px;
+  color: var(--text-muted);
+}
+/* Transparent, but still the real control — it takes every click on the block. */
+.sidebar__db-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  opacity: 0;
+  cursor: pointer;
+}
+.sidebar__db-btn {
+  width: 40px;
+  flex: 0 0 auto;
+  border: none;
+  border-left: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+}
+.sidebar__db-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* --- panel tabs ----------------------------------------------------------- */
 .sidebar__tabs {
   display: flex;
-  border-bottom: 1px solid var(--border);
+  align-items: stretch;
+  height: 36px;
+  border-bottom: var(--rule) solid var(--border-strong);
 }
 .sidebar__tab {
   flex: 1;
-  padding: 7px 4px;
+  padding: 0 12px;
   border: none;
-  border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: left;
   cursor: pointer;
+}
+.sidebar__tab + .sidebar__tab {
+  border-left: 1px solid var(--border-subtle);
+}
+.sidebar__tab:hover {
+  color: var(--text-primary);
 }
 .sidebar__tab--active {
   color: var(--text-primary);
-  border-bottom-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
+
+/* --- filter --------------------------------------------------------------- */
 .sidebar__filter {
-  padding: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
 }
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
+}
+.search:focus-within {
+  border-color: var(--accent);
+}
+.search__glyph {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.search__input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  user-select: text;
+}
+.search__input::placeholder {
+  color: var(--text-muted);
+}
+.search__hint {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
 .sidebar__scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding-bottom: 8px;
 }
 .sidebar__loading,
 .sidebar__empty {
@@ -414,69 +573,87 @@ defineExpose({ focusFilter, refresh })
   align-items: center;
   gap: 8px;
   padding: 14px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 .sidebar__foot {
-  padding: 6px 8px;
-  border-top: 1px solid var(--border);
+  padding: 10px 12px;
+  border-top: var(--rule) solid var(--border-strong);
 }
 
+/* --- the tree ------------------------------------------------------------- */
+/* Group headings sit on the recessed ground, ruled top and bottom, so each
+   schema reads as a band rather than an indented label. */
 .group__head {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
   width: 100%;
-  padding: 5px 8px;
+  height: 26px;
+  padding: 0 14px;
   border: none;
-  background: transparent;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-app);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   cursor: pointer;
   text-align: left;
 }
-.group__head:hover {
-  background: var(--bg-hover);
+.group__head--pinned {
+  border-top: none;
+  color: var(--accent);
+  cursor: default;
 }
 .group__chevron {
-  width: 10px;
-  font-size: 9px;
+  width: 8px;
+  font-size: 8px;
 }
 .group__count {
   margin-left: auto;
-  font-weight: 500;
-  color: var(--text-muted);
+  font-weight: 700;
+  color: var(--text-dim);
 }
 
 .item {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 10px;
   width: 100%;
-  padding: 3px 8px 3px 22px;
+  height: 28px;
+  padding: 0 14px 0 26px;
   border: none;
   background: transparent;
   color: var(--text-primary);
-  font-size: 12px;
   cursor: pointer;
   text-align: left;
+}
+.item--flush {
+  padding-left: 14px;
 }
 .item:hover {
   background: var(--bg-hover);
 }
+/* The object the active tab is showing, marked on its leading edge. */
+.item--active {
+  background: var(--bg-raised);
+  box-shadow: var(--row-staged);
+}
 .item__icon {
   flex: 0 0 auto;
+  width: 11px;
   color: var(--text-muted);
   font-size: 11px;
 }
 .item__icon--view {
-  color: var(--info);
+  color: var(--text-muted);
 }
 .item__icon--routine {
-  color: var(--accent);
+  color: var(--text-muted);
 }
 .item__icon--pin {
   color: var(--accent);
@@ -484,39 +661,49 @@ defineExpose({ focusFilter, refresh })
 .item__name {
   flex: 1;
   min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 .item__count {
+  font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--text-muted);
+  color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
 
 .history {
   display: block;
   width: 100%;
-  padding: 7px 10px;
+  padding: 9px 14px;
   border: none;
   border-bottom: 1px solid var(--border);
   background: transparent;
-  color: var(--text-primary);
+  color: var(--text-secondary);
   text-align: left;
   cursor: pointer;
 }
 .history:hover {
   background: var(--bg-hover);
 }
+.history--failed {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
 .history--failed .history__sql {
   color: var(--danger);
 }
 .history__sql {
   font-size: 11px;
+  line-height: 1.4;
 }
 .history__meta {
   display: flex;
-  gap: 8px;
-  margin-top: 3px;
+  gap: 10px;
+  margin-top: 5px;
   font-size: 10px;
-  color: var(--text-muted);
+  color: var(--text-dim);
+}
+.history__rows {
+  margin-left: auto;
 }
 
 .saved {
@@ -527,7 +714,7 @@ defineExpose({ focusFilter, refresh })
 .saved__open {
   flex: 1;
   min-width: 0;
-  padding: 7px 10px;
+  padding: 9px 14px;
   border: none;
   background: transparent;
   color: var(--text-primary);
@@ -538,12 +725,27 @@ defineExpose({ focusFilter, refresh })
   background: var(--bg-hover);
 }
 .saved__name {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
 }
 .saved__sql {
   font-size: 10px;
-  color: var(--text-muted);
+  color: var(--text-dim);
   margin-top: 2px;
+}
+.saved__del {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  margin-right: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.saved__del:hover {
+  background: var(--accent);
+  color: var(--accent-text);
 }
 </style>

@@ -1,84 +1,154 @@
-/* Design tokens. The dark palette is the default; `data-theme="light"` on
-   <html> swaps the surface and text ramps and leaves the accents alone. */
+/* Design tokens — the Modernist system.
+
+   Modernist is flat and architectural: zero corner radius, 2px rules doing the
+   organising, Archivo throughout, and a single red accent spent only where an
+   action or a staged change lives. The system ships on a light ground; the dark
+   palette below is that ground inverted through its own neutral ramp, and is the
+   default here. `data-theme="light"` swaps back to the system's native ground.
+
+   Fonts are vendored under assets/fonts — the renderer's CSP is `font-src 'self'`,
+   so nothing is fetched at runtime. Archivo and JetBrains Mono are both OFL-1.1. */
+
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/archivo-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../assets/fonts/archivo-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('../assets/fonts/archivo-800.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/jetbrains-mono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../assets/fonts/jetbrains-mono-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../assets/fonts/jetbrains-mono-700.woff2') format('woff2');
+}
+
 :root {
-  --bg-app: #16181d;
-  --bg-surface: #1c1f26;
-  --bg-raised: #232730;
-  --bg-overlay: #272c36;
-  --bg-input: #14161a;
-  --bg-hover: rgba(255, 255, 255, 0.06);
-  --bg-active: rgba(255, 255, 255, 0.1);
-  --bg-selected: rgba(88, 166, 255, 0.16);
+  /* Surfaces. `app` is the recessed chrome ground (tab strip, grid header,
+     dialog header and footer bars); `surface` is the content ground. */
+  --bg-app: #1a1918;
+  --bg-surface: #201e1d;
+  --bg-raised: #2d2b2b;
+  --bg-input: #151413;
+  --bg-hover: #2d2b2b;
+  --bg-hover-strong: #3a3736;
+  --bg-active: #3a3736;
+  --bg-selected: #2d2b2b;
 
-  --text-primary: #e6e9ef;
-  --text-secondary: #a8b0bd;
-  --text-muted: #6f7787;
-  --text-inverse: #16181d;
+  --text-primary: #f3f2f2;
+  --text-secondary: #bab6b6;
+  --text-muted: #7d7979;
+  --text-dim: #605d5d;
 
-  --border: #2c313b;
-  --border-strong: #3a414e;
-  --border-focus: #58a6ff;
+  /* Three rule weights, in ascending strength: `border` separates data rows,
+     `border-subtle` divides chrome, `border-strong` draws controls and the 2px
+     rules that carry the layout. */
+  --border: #2d2b2b;
+  --border-subtle: #3a3736;
+  --border-strong: #444141;
+  --rule: 2px;
 
-  --accent: #f0a91d;
-  --accent-hover: #ffbc38;
-  --accent-text: #16181d;
-  --info: #58a6ff;
+  --accent: #ec3013;
+  --accent-hover: #dd2b0f;
+  --accent-bright: #ff9783;
+  --accent-text: #ffffff;
   --success: #3fb950;
   --warning: #d29922;
   --danger: #f85149;
 
-  --row-even: transparent;
-  --row-odd: rgba(255, 255, 255, 0.022);
-  --cell-edited: rgba(63, 185, 80, 0.18);
-  --cell-inserted: rgba(88, 166, 255, 0.14);
-  --cell-deleted: rgba(248, 81, 73, 0.16);
+  --row-odd: rgba(255, 255, 255, 0.018);
+  --cell-edited: inset 0 -3px 0 var(--accent);
+  --row-staged: inset 3px 0 0 var(--accent);
+  --bg-inserted: rgba(255, 86, 60, 0.1);
 
-  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-    sans-serif;
+  --font-ui: 'Archivo', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Mono', 'SF Mono', Consolas, 'Liberation Mono', Menlo,
     monospace;
   --font-size: 13px;
 
-  --radius: 6px;
-  --radius-sm: 4px;
-  --row-height: 26px;
-  --shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  /* Nothing is rounded — `--radius` is 0 on purpose. */
+  --radius: 0px;
+  --radius-sm: 0px;
+
+  /* Density — one step roomier than the shipping UI. */
+  --row-height: 30px;
+  --h-titlebar: 40px;
+  --h-tabstrip: 38px;
+  --h-commandbar: 44px;
+  --h-statusbar: 30px;
+  --h-gridheader: 36px;
+  --h-control: 28px;
+  --h-control-sm: 26px;
+  --h-control-lg: 34px;
+  --h-field: 36px;
+
+  --shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  --shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.55);
   --transition: 120ms ease;
 }
 
+/* The system's native ground: ink on #f3f2f2, same single red. */
 :root[data-theme='light'] {
-  --bg-app: #f4f5f7;
-  --bg-surface: #ffffff;
-  --bg-raised: #f7f8fa;
-  --bg-overlay: #ffffff;
+  --bg-app: #eae7e7;
+  --bg-surface: #f3f2f2;
+  --bg-raised: #d7d3d3;
   --bg-input: #ffffff;
-  --bg-hover: rgba(0, 0, 0, 0.045);
-  --bg-active: rgba(0, 0, 0, 0.08);
-  --bg-selected: rgba(9, 105, 218, 0.12);
+  --bg-hover: #e4e0e0;
+  --bg-hover-strong: #d7d3d3;
+  --bg-active: #d7d3d3;
+  --bg-selected: #e4e0e0;
 
-  --text-primary: #1f2328;
-  --text-secondary: #59636e;
-  --text-muted: #8c959f;
-  --text-inverse: #ffffff;
+  --text-primary: #201e1d;
+  --text-secondary: #605d5d;
+  --text-muted: #7d7979;
+  --text-dim: #9b9797;
 
-  --border: #d8dee4;
-  --border-strong: #bcc4cc;
-  --border-focus: #0969da;
+  --border: #d7d3d3;
+  --border-subtle: #cbc7c7;
+  --border-strong: #9c9a99;
 
-  --accent: #d99000;
-  --accent-hover: #c07f00;
+  --accent: #ec3013;
+  --accent-hover: #dd2b0f;
+  --accent-bright: #ae1800;
   --accent-text: #ffffff;
-  --info: #0969da;
   --success: #1a7f37;
   --warning: #9a6700;
   --danger: #cf222e;
 
   --row-odd: rgba(0, 0, 0, 0.022);
-  --cell-edited: rgba(26, 127, 55, 0.14);
-  --cell-inserted: rgba(9, 105, 218, 0.12);
-  --cell-deleted: rgba(207, 34, 46, 0.12);
+  --bg-inserted: rgba(236, 48, 19, 0.08);
 
-  --shadow: 0 8px 28px rgba(31, 35, 40, 0.16);
+  --shadow: 0 24px 64px rgba(45, 43, 43, 0.22);
+  --shadow-menu: 0 12px 32px rgba(45, 43, 43, 0.18);
 }
 
 *,
@@ -113,6 +183,18 @@ textarea {
   color: inherit;
 }
 
+/* Keyboard focus is the accent ring, never the browser default. */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
 /* --- scrollbars --------------------------------------------------------- */
 ::-webkit-scrollbar {
   width: 12px;
@@ -125,7 +207,6 @@ textarea {
   background: var(--border-strong);
   border: 3px solid transparent;
   background-clip: content-box;
-  border-radius: 6px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
@@ -135,25 +216,26 @@ textarea {
   background: transparent;
 }
 
-/* --- shared controls ---------------------------------------------------- */
+/* --- shared controls ----------------------------------------------------- */
+/* Labels sit flush left, even when the button is wider than its label. */
 .btn {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 12px;
+  justify-content: flex-start;
+  gap: 7px;
+  height: var(--h-control);
+  padding: 0 11px;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--bg-raised);
+  border-radius: 0;
+  background: transparent;
   color: var(--text-primary);
   cursor: pointer;
   white-space: nowrap;
-  transition: background var(--transition), border-color var(--transition);
+  transition: background var(--transition), border-color var(--transition),
+    color var(--transition);
 }
 .btn:hover:not(:disabled) {
-  background: var(--bg-overlay);
-  border-color: var(--text-muted);
+  background: var(--bg-hover);
 }
 .btn:active:not(:disabled) {
   background: var(--bg-active);
@@ -162,69 +244,112 @@ textarea {
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* The one filled control on a screen — the primary action. */
 .btn--primary {
+  padding: 0 14px;
+  border-color: transparent;
   background: var(--accent);
-  border-color: var(--accent);
   color: var(--accent-text);
   font-weight: 600;
 }
 .btn--primary:hover:not(:disabled) {
   background: var(--accent-hover);
-  border-color: var(--accent-hover);
 }
+.btn--primary:active:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+/* Secondary: the label drops to the muted ramp, the rule stays. */
+.btn--muted {
+  color: var(--text-secondary);
+}
+.btn--muted:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
 .btn--danger {
   color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
 }
 .btn--danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
 }
 .btn--ghost {
-  background: transparent;
   border-color: transparent;
+  color: var(--text-secondary);
 }
 .btn--ghost:hover:not(:disabled) {
   background: var(--bg-hover);
   border-color: transparent;
+  color: var(--text-primary);
+}
+/* Marks a button as carrying live state — a filter is set, the row panel is open. */
+.btn--armed {
+  border-color: var(--accent);
+  color: var(--text-primary);
 }
 .btn--sm {
-  height: 24px;
-  padding: 0 8px;
+  height: var(--h-control-sm);
+  padding: 0 10px;
   font-size: 12px;
 }
+.btn--lg {
+  height: var(--h-control-lg);
+  padding: 0 14px;
+}
+.btn--lg.btn--primary {
+  padding: 0 18px;
+}
 .btn--icon {
-  width: 28px;
+  width: var(--h-control);
   padding: 0;
+  justify-content: center;
+}
+.btn--icon.btn--sm {
+  width: var(--h-control-sm);
 }
 
 .input,
 .select,
 .textarea {
   width: 100%;
-  height: 30px;
-  padding: 0 8px;
+  height: var(--h-field);
+  padding: 0 10px;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   background: var(--bg-input);
   color: var(--text-primary);
+  font-family: var(--font-mono);
   outline: none;
   user-select: text;
-  transition: border-color var(--transition), box-shadow var(--transition);
+  transition: border-color var(--transition);
+}
+.input--sm,
+.select--sm {
+  height: 30px;
 }
 .textarea {
   height: auto;
-  padding: 6px 8px;
+  padding: 7px 10px;
   resize: vertical;
-  font-family: var(--font-mono);
+  line-height: 1.5;
+}
+.input:hover:not(:disabled),
+.select:hover:not(:disabled),
+.textarea:hover {
+  border-color: var(--text-muted);
 }
 .input:focus,
 .select:focus,
 .textarea:focus {
-  border-color: var(--border-focus);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--border-focus) 25%, transparent);
+  border-color: var(--accent);
+  outline: none;
 }
-.input::placeholder {
+.input::placeholder,
+.textarea::placeholder {
   color: var(--text-muted);
+  font-family: var(--font-ui);
 }
 .input:disabled,
 .select:disabled {
@@ -234,66 +359,190 @@ textarea {
 .select {
   cursor: pointer;
   appearance: none;
-  padding-right: 24px;
-  background-image: linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%),
-    linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%);
-  background-position: calc(100% - 13px) 13px, calc(100% - 8px) 13px;
+  padding-right: 26px;
+  /* A single square caret, drawn flat — no gradient bevel. */
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position: calc(100% - 15px) calc(50% + 1px), calc(100% - 10px) calc(50% + 1px);
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
 }
 
+/* Field labels are mono micro-caps, flush left. */
 .field {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
   min-width: 0;
 }
-.field__label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
+.field__label,
+.caps {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 .field__hint {
-  font-size: 11px;
-  color: var(--text-muted);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+/* The accent micro-caps that title a section or a dialog. */
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
 }
 
+/* A square accent tick — no native checkbox anywhere. */
 .checkbox {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 10px;
   cursor: pointer;
   user-select: none;
 }
 .checkbox input {
-  width: 15px;
-  height: 15px;
-  accent-color: var(--accent);
-  cursor: pointer;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
   margin: 0;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+.checkbox input:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+  /* The tick, drawn rather than typed, so it lands on the pixel grid. */
+  background-image: linear-gradient(
+      to bottom right,
+      transparent 46%,
+      var(--accent-text) 46%,
+      var(--accent-text) 60%,
+      transparent 60%
+    ),
+    linear-gradient(
+      to bottom left,
+      transparent 62%,
+      var(--accent-text) 62%,
+      var(--accent-text) 76%,
+      transparent 76%
+    );
+}
+.checkbox input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
+/* Tags and badges are ruled outlines, not pills. */
 .badge {
   display: inline-flex;
   align-items: center;
-  padding: 1px 6px;
-  border-radius: 10px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  background: var(--bg-active);
+  padding: 2px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 0;
+  background: transparent;
   color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
-.badge--pk {
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
+.badge--accent {
+  border-color: var(--accent);
   color: var(--accent);
 }
+/* The key badges — solid accent, because they mark identity in a dense grid. */
+.badge--pk {
+  padding: 1px 5px;
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
 .badge--fk {
-  background: color-mix(in srgb, var(--info) 20%, transparent);
-  color: var(--info);
+  padding: 1px 5px;
+  border-color: var(--accent);
+  background: transparent;
+  color: var(--accent);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+/* A segmented control: one ruled box, dividers between, accent fill on the
+   selected option. Used for view switches, tunnel modes, formats and themes. */
+.seg {
+  display: inline-flex;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-strong);
+}
+.seg__opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: var(--h-control);
+  padding: 0 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition), color var(--transition);
+}
+.seg__opt + .seg__opt {
+  border-left: 1px solid var(--border-strong);
+}
+.seg__opt:hover:not(.seg__opt--on):not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.seg__opt--on {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.seg__opt:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* Mono micro-caps inside a segment — the table view switch and the filter modes. */
+.seg--caps .seg__opt {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.seg--caps .seg__opt--on {
+  font-weight: 700;
+}
+.seg__count {
+  padding: 1px 5px;
+  background: rgba(0, 0, 0, 0.28);
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+/* A strong 2px rule, the system's main organising device. */
+.rule {
+  height: var(--rule);
+  border: 0;
+  margin: 0;
+  background: var(--border-strong);
+}
+.divider-v {
+  width: 1px;
+  height: 22px;
+  flex: 0 0 auto;
+  background: var(--border-strong);
 }
 
 .mono {
@@ -301,6 +550,13 @@ textarea {
 }
 .muted {
   color: var(--text-muted);
+}
+.dim {
+  color: var(--text-dim);
+}
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 .truncate {
   overflow: hidden;
@@ -316,7 +572,7 @@ textarea {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 10px;
   height: 100%;
   padding: 32px;
   text-align: center;
@@ -324,16 +580,17 @@ textarea {
 }
 .empty-state__title {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 800;
+  letter-spacing: -0.01em;
   color: var(--text-secondary);
 }
 
+/* Square, because nothing here is round. */
 .spinner {
   width: 14px;
   height: 14px;
   border: 2px solid var(--border-strong);
   border-top-color: var(--accent);
-  border-radius: 50%;
   animation: spin 620ms linear infinite;
 }
 @keyframes spin {

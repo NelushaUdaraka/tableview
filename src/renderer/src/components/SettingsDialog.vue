@@ -4,23 +4,33 @@ import { useSettingsStore } from '../stores/settings'
 
 defineEmits<{ (event: 'close'): void }>()
 const settings = useSettingsStore()
+
+const THEMES: { value: 'dark' | 'light' | 'system'; label: string }[] = [
+  { value: 'dark', label: 'Dark' },
+  { value: 'light', label: 'Light' },
+  { value: 'system', label: 'System' }
+]
 </script>
 
 <template>
-  <BaseModal title="Settings" width="520px" @close="$emit('close')">
+  <BaseModal kicker="Preferences" title="Settings" width="560px" @close="$emit('close')">
     <div class="settings">
-      <label class="field">
+      <div class="field">
         <span class="field__label">Theme</span>
-        <select
-          class="select"
-          :value="settings.settings.theme"
-          @change="settings.update({ theme: ($event.target as HTMLSelectElement).value as 'dark' | 'light' | 'system' })"
-        >
-          <option value="dark">Dark</option>
-          <option value="light">Light</option>
-          <option value="system">Follow the system</option>
-        </select>
-      </label>
+        <div class="seg">
+          <button
+            v-for="entry in THEMES"
+            :key="entry.value"
+            class="seg__opt settings__seg-opt"
+            :class="{ 'seg__opt--on': settings.settings.theme === entry.value }"
+            @click="settings.update({ theme: entry.value })"
+          >
+            {{ entry.label }}
+          </button>
+        </div>
+      </div>
+
+      <hr class="rule" />
 
       <div class="settings__row">
         <label class="field" style="flex: 1">
@@ -99,13 +109,15 @@ const settings = useSettingsStore()
         </label>
       </div>
 
+      <hr class="rule" />
+
       <label class="checkbox">
         <input
           type="checkbox"
           :checked="settings.settings.confirmBeforeApply"
           @change="settings.update({ confirmBeforeApply: ($event.target as HTMLInputElement).checked })"
         />
-        <span>Confirm before applying grid edits</span>
+        <span>Confirm before applying a change set</span>
       </label>
 
       <p v-if="settings.appInfo" class="settings__about muted">
@@ -121,6 +133,9 @@ const settings = useSettingsStore()
         }}
       </p>
     </div>
+    <template #footer>
+      <button class="btn btn--primary" @click="$emit('close')">Done</button>
+    </template>
   </BaseModal>
 </template>
 
@@ -128,16 +143,21 @@ const settings = useSettingsStore()
 .settings {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 20px;
 }
 .settings__row {
   display: flex;
-  gap: 10px;
+  gap: 16px;
+}
+.settings__seg-opt {
+  height: 32px;
+  padding: 0 16px;
+  font-size: 13px;
 }
 .settings__about {
-  margin: 4px 0 0;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  margin: 0;
+  padding-top: 16px;
+  border-top: var(--rule) solid var(--border-strong);
   font-size: 11px;
   line-height: 1.7;
 }

@@ -65,7 +65,7 @@ const emit = defineEmits<{
   (event: 'follow-key', payload: { rowIndex: number; columnIndex: number }): void
 }>()
 
-const ROW_HEIGHT = 26
+const ROW_HEIGHT = 30
 const OVERSCAN = 8
 const MIN_WIDTH = 60
 const MAX_AUTO_WIDTH = 420
@@ -95,7 +95,7 @@ function bindEditInput(element: Element | ComponentPublicInstance | null): void 
  * Grows the editor to fit its text.
  *
  * Cells are one line tall, but the values in them are not: an `nvarchar(max)`
- * or a JSON blob is unreadable through a 26px slot. The editor is a textarea
+ * or a JSON blob is unreadable through a 30px slot. The editor is a textarea
  * that overflows its cell downwards, which is also what makes newlines
  * editable at all.
  */
@@ -138,12 +138,12 @@ const visibleRows = computed<VisibleRow[]>(() => {
   return out
 })
 
-const CELL_CHAR_PX = 7.6      // 12px monospace
-const HEADER_NAME_PX = 7.2    // 12px bold UI font
-const HEADER_TYPE_PX = 5.6    // 10px monospace type label
-const PK_BADGE_PX = 26
+const CELL_CHAR_PX = 7.8      // 13px monospace
+const HEADER_NAME_PX = 7      // 10px mono caps, tracked 0.1em
+const HEADER_TYPE_PX = 6      // 10px monospace type label
+const PK_BADGE_PX = 28
 const SORT_ARROW_PX = 16
-const CELL_PADDING_PX = 24
+const CELL_PADDING_PX = 28    // 10px each side, plus the 7px gaps between parts
 
 /**
  * The header carries more than the column name — the type label, an optional
@@ -197,7 +197,7 @@ watch(
 )
 
 const gridTemplate = computed(
-  () => `56px ${widths.value.map((width) => `${width}px`).join(' ')}`
+  () => `48px ${widths.value.map((width) => `${width}px`).join(' ')}`
 )
 
 function onScroll(): void {
@@ -618,49 +618,54 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
 
 .grid__header {
   display: grid;
-  height: 30px;
-  border-bottom: 1px solid var(--border-strong);
-  background: var(--bg-raised);
+  height: var(--h-gridheader);
+  border-bottom: var(--rule) solid var(--border-strong);
+  background: var(--bg-app);
   overflow: hidden;
   flex: 0 0 auto;
 }
 
 .grid__corner {
-  border-right: 1px solid var(--border);
-  background: var(--bg-raised);
+  border-right: 1px solid var(--border-subtle);
+  background: var(--bg-app);
 }
 
 .grid__th {
   position: relative;
   display: flex;
-  align-items: baseline;
-  gap: 5px;
-  padding: 0 8px;
-  border-right: 1px solid var(--border);
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border-right: 1px solid var(--border-subtle);
   cursor: pointer;
   overflow: hidden;
-  line-height: 30px;
   user-select: none;
 }
 .grid__th:hover {
   background: var(--bg-hover);
 }
 .grid__th-name {
-  font-weight: 600;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
+/* The key badge is solid accent — it marks identity in a field of grey. */
 .grid__th-key {
-  padding: 0 4px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  color: var(--accent);
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 0;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 700;
-  line-height: 14px;
+  letter-spacing: 0.06em;
 }
 .grid__th-type {
   font-size: 10px;
-  color: var(--text-muted);
+  color: var(--text-dim);
   font-family: var(--font-mono);
 }
 .grid__th-sort {
@@ -679,7 +684,7 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
   z-index: 2;
 }
 .grid__resizer:hover {
-  background: var(--border-focus);
+  background: var(--accent);
   opacity: 0.5;
 }
 
@@ -701,19 +706,23 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
   left: 0;
   display: grid;
   width: 100%;
-  height: 26px;
+  height: var(--row-height);
   will-change: transform;
 }
 .grid__row--odd {
   background: var(--row-odd);
 }
+/* Staged rows are marked on their leading edge rather than washed in colour. */
 .grid__row--inserted {
-  background: var(--cell-inserted);
+  background: var(--bg-inserted);
+}
+.grid__row--inserted .grid__rownum,
+.grid__row--deleted .grid__rownum {
+  box-shadow: var(--row-staged);
 }
 .grid__row--deleted {
-  background: var(--cell-deleted);
   text-decoration: line-through;
-  opacity: 0.7;
+  opacity: 0.45;
 }
 /* The open editor overflows its cell, so its row has to paint over the rest. */
 .grid__row--editing {
@@ -725,11 +734,12 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding: 0 8px;
-  border-right: 1px solid var(--border);
+  padding: 0 10px;
+  border-right: 1px solid var(--border-subtle);
   border-bottom: 1px solid var(--border);
-  background: var(--bg-raised);
-  color: var(--text-muted);
+  background: var(--bg-app);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   overflow: hidden;
@@ -739,14 +749,15 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
   position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 8px;
+  gap: 6px;
+  padding: 0 10px;
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
   cursor: default;
 }
 .grid__cell--number,
@@ -755,12 +766,13 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
   font-variant-numeric: tabular-nums;
 }
 .grid__cell--selected {
-  outline: 2px solid var(--border-focus);
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
   background: var(--bg-selected);
 }
+/* An edited cell is underscored in accent, not filled — the value stays legible. */
 .grid__cell--edited {
-  background: var(--cell-edited);
+  box-shadow: var(--cell-edited);
 }
 .grid__cell--editing {
   overflow: visible;
@@ -776,15 +788,15 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   margin-left: auto;
   padding: 0;
   border: none;
-  border-radius: 3px;
+  border-radius: 0;
   background: transparent;
-  color: var(--info);
-  opacity: 0.5;
+  color: var(--accent);
+  opacity: 0.65;
   cursor: pointer;
 }
 /* Right-aligned values keep their edge; the arrow follows the number. */
@@ -801,12 +813,14 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
   opacity: 1;
 }
 .grid__fk:hover {
-  background: color-mix(in srgb, var(--info) 22%, transparent);
+  background: var(--accent);
+  color: var(--accent-text);
+  opacity: 1;
 }
 .grid__null {
-  color: var(--text-muted);
+  color: var(--text-dim);
   font-style: italic;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .grid__editor {
@@ -818,16 +832,16 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
   /* Narrow columns still need room to read what is being typed. */
   min-width: 240px;
   max-width: 520px;
-  min-height: 26px;
-  padding: 4px 5px;
-  border: 1px solid var(--border-focus);
-  border-radius: 2px;
+  min-height: var(--row-height);
+  padding: 6px 9px;
+  border: 1px solid var(--accent);
+  border-radius: 0;
   background: var(--bg-input);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-menu);
   color: var(--text-primary);
   font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 13px;
+  line-height: 17px;
   white-space: pre-wrap;
   overflow-y: auto;
   resize: none;

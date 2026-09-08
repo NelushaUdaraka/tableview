@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import type { TableForeignKey, TableStructure } from '@shared/types'
 import { buildCreateTableDdl } from '@shared/sql/builder'
+import TableViewSwitch from '../components/TableViewSwitch.vue'
 import { useSchemaStore } from '../stores/schema'
 import { useToastStore } from '../stores/toasts'
 import type { TableTab } from '../stores/tabs'
@@ -71,21 +72,22 @@ function nullLabel(value: string | null): string {
 
     <template v-else-if="structure">
       <div class="structure__toolbar">
-        <span class="structure__title mono">
-          {{ structure.schema }}.{{ structure.name }}
+        <TableViewSwitch :tab="tab" />
+        <span class="structure__title mono truncate">
+          {{ structure.schema }}.<strong>{{ structure.name }}</strong>
         </span>
         <span class="badge">{{ structure.type }}</span>
-        <span v-if="structure.rowCountEstimate !== null" class="muted">
+        <span v-if="structure.rowCountEstimate !== null" class="structure__rows mono">
           ~{{ structure.rowCountEstimate.toLocaleString() }} rows
         </span>
         <div class="structure__spacer"></div>
-        <button class="btn btn--sm btn--ghost" @click="copyDdl">Copy DDL</button>
-        <button class="btn btn--sm" @click="openDdl">Open DDL in editor</button>
+        <button class="btn btn--muted" @click="copyDdl">Copy DDL</button>
+        <button class="btn" @click="openDdl">Open DDL in editor</button>
       </div>
 
       <div class="structure__scroll">
         <section class="panel">
-          <h3 class="panel__title">Columns <span class="muted">({{ structure.columns.length }})</span></h3>
+          <h3 class="panel__title">Columns <span class="panel__count">{{ structure.columns.length }}</span></h3>
           <table class="table">
             <thead>
               <tr>
@@ -122,7 +124,7 @@ function nullLabel(value: string | null): string {
         </section>
 
         <section v-if="structure.indexes.length" class="panel">
-          <h3 class="panel__title">Indexes <span class="muted">({{ structure.indexes.length }})</span></h3>
+          <h3 class="panel__title">Indexes <span class="panel__count">{{ structure.indexes.length }}</span></h3>
           <table class="table">
             <thead>
               <tr>
@@ -273,79 +275,137 @@ function nullLabel(value: string | null): string {
   min-height: 0;
   background: var(--bg-surface);
 }
+/* The same command bar the data view carries, so switching between them moves
+   nothing but the content below. */
 .structure__toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-raised);
+  gap: 12px;
+  height: var(--h-commandbar);
+  padding: 0 12px;
+  border-bottom: var(--rule) solid var(--border-strong);
+  background: var(--bg-surface);
   flex: 0 0 auto;
 }
 .structure__title {
-  font-weight: 600;
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 13px;
+}
+.structure__title strong {
+  font-weight: 700;
+}
+.structure__rows {
+  font-size: 11px;
+  color: var(--text-dim);
 }
 .structure__spacer {
   flex: 1;
+}
+.structure__toolbar .btn {
+  flex: 0 0 auto;
 }
 .structure__scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 14px;
 }
+
+/* Headings sit above the 2px rule that opens their table, and the tables run
+   the full width of the pane rather than floating in a padded card. */
 .panel {
-  margin-bottom: 22px;
+  margin: 0;
 }
 .panel__title {
-  margin: 0 0 8px;
-  font-size: 12px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+  padding: 26px 24px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--text-secondary);
+  color: var(--accent);
+}
+.panel:first-child .panel__title {
+  padding-top: 18px;
+}
+.panel__count {
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-dim);
 }
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 13px;
   user-select: text;
 }
 .table th {
   position: sticky;
   top: 0;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--border-strong);
-  background: var(--bg-raised);
+  z-index: 1;
+  padding: 8px 10px;
+  border-top: var(--rule) solid var(--border-strong);
+  border-bottom: var(--rule) solid var(--border-strong);
+  background: var(--bg-app);
   text-align: left;
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: 10px;
   font-weight: 700;
-  color: var(--text-secondary);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
   white-space: nowrap;
 }
 .table td {
-  padding: 5px 8px;
+  padding: 9px 10px;
   border-bottom: 1px solid var(--border);
   vertical-align: top;
   max-width: 340px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* The name column is the one that reads at full strength. */
+.table td.mono:first-child,
+.table td:nth-child(2) {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.table td.muted {
+  color: var(--text-muted);
+}
+/* Flush the outer columns with the section heading above them. */
+.table th:first-child,
+.table td:first-child {
+  padding-left: 24px;
+}
+.table th:last-child,
+.table td:last-child {
+  padding-right: 24px;
 }
 .table tbody tr:hover {
   background: var(--bg-hover);
 }
 .num {
+  width: 56px;
   text-align: right;
-  color: var(--text-muted);
+  color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
 .code {
-  margin: 0;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  margin: 0 24px 24px;
+  padding: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 0;
   background: var(--bg-input);
   font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
   overflow-x: auto;
   white-space: pre;
 }

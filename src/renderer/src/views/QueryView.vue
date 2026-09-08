@@ -26,7 +26,7 @@ const toasts = useToastStore()
 const library = useLibraryStore()
 
 const editor = ref<InstanceType<typeof SqlEditor> | null>(null)
-const editorHeight = ref(300)
+const editorHeight = ref(336)
 const cursor = ref(0)
 
 const sql = computed({
@@ -170,6 +170,15 @@ function onCursor(offset: number): void {
   tabs.update<QueryTab>(props.tab.id, { cursor: offset })
 }
 
+// The status bar reads this, so it has to be pushed rather than computed there.
+watch(
+  currentStatement,
+  (statement) => {
+    tabs.update<QueryTab>(props.tab.id, { statementLine: statement?.startLine ?? null })
+  },
+  { immediate: true }
+)
+
 defineExpose({
   run: () => run(),
   runSelection,
@@ -190,29 +199,27 @@ defineExpose({
       <template #first>
         <div class="query__editor">
           <div class="query__toolbar">
+            <!-- Run is the only filled control on this screen. -->
             <button
-              class="btn btn--sm btn--primary"
+              class="btn btn--primary"
               :disabled="tab.running"
               title="Ctrl+Enter"
               @click="run()"
             >
               ▶ Run
+              <span class="query__key mono">CTRL ⏎</span>
             </button>
-            <button class="btn btn--sm" title="Ctrl+Shift+Enter" @click="runSelection">
+            <button class="btn" title="Ctrl+Shift+Enter" @click="runSelection">
               Run selection
             </button>
-            <button class="btn btn--sm" title="Ctrl+Alt+Enter" @click="runCurrent">
-              Run statement
-            </button>
-            <button v-if="tab.running" class="btn btn--sm btn--danger" @click="cancel">
-              ■ Cancel
-            </button>
+            <button class="btn" title="Ctrl+Alt+Enter" @click="runCurrent">Run statement</button>
+            <button v-if="tab.running" class="btn btn--danger" @click="cancel">■ Cancel</button>
             <div class="query__spacer"></div>
-            <button class="btn btn--sm btn--ghost" title="Ctrl+Shift+F" @click="formatDocument">
+            <button class="btn btn--muted" title="Ctrl+Shift+F" @click="formatDocument">
               Format
             </button>
-            <button class="btn btn--sm btn--ghost" title="Ctrl+O" @click="openFile">Open…</button>
-            <button class="btn btn--sm btn--ghost" title="Ctrl+S" @click="save">Save</button>
+            <button class="btn btn--muted" title="Ctrl+O" @click="openFile">Open…</button>
+            <button class="btn btn--muted" title="Ctrl+S" @click="save">Save</button>
           </div>
 
           <SqlEditor
@@ -229,12 +236,6 @@ defineExpose({
             @save="save"
           />
 
-          <div class="query__status">
-            <span v-if="currentStatement" class="truncate">
-              Statement at line {{ currentStatement.startLine }}
-            </span>
-            <span v-else>Empty</span>
-          </div>
         </div>
       </template>
 
@@ -259,27 +260,26 @@ defineExpose({
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  border-bottom: var(--rule) solid var(--border-strong);
 }
 .query__toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-raised);
+  gap: 10px;
+  height: var(--h-commandbar);
+  padding: 0 12px;
+  border-bottom: var(--rule) solid var(--border-strong);
+  background: var(--bg-surface);
   flex: 0 0 auto;
+}
+.query__toolbar .btn {
+  flex: 0 0 auto;
+}
+.query__key {
+  font-size: 10px;
+  opacity: 0.75;
 }
 .query__spacer {
   flex: 1;
-}
-.query__status {
-  display: flex;
-  gap: 12px;
-  padding: 2px 10px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-raised);
-  font-size: 10px;
-  color: var(--text-muted);
-  flex: 0 0 auto;
 }
 </style>

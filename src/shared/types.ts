@@ -512,7 +512,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoCommitEdits: false,
   confirmBeforeApply: true,
   showRowPanel: true,
-  rowPanelWidth: 320,
+  rowPanelWidth: 340,
   formatterKeywordCase: 'upper',
   formatterIndent: 2
 }

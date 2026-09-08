@@ -493,7 +493,7 @@ function onCellContextMenu(row: number, col: number, event: MouseEvent): void {
   emit('row-context', { rowIndex: row, columnIndex: col, x: event.clientX, y: event.clientY })
 }
 
-defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() })
+defineExpose({ selectCell, beginEdit, copySelection, focus: () => viewport.value?.focus() })
 </script>
 
 <template>

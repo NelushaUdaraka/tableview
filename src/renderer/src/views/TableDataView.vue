@@ -11,6 +11,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowR
 import type {
   CellValue,
   ColumnMeta,
+  ExportFormat,
   TableChangeSet,
   TableColumn,
   TableFilter,
@@ -25,7 +26,7 @@ import RowDetailPanel, { type RowField } from '../components/RowDetailPanel.vue'
 import SplitPane from '../components/SplitPane.vue'
 import TableViewSwitch from '../components/TableViewSwitch.vue'
 import { exportRows } from '@shared/export'
-import { foreignKeyFilters, foreignKeyTargets } from '@shared/foreignKeys'
+import { foreignKeyFilterValue, foreignKeyFilters, foreignKeyTargets } from '@shared/foreignKeys'
 import { useSettingsStore } from '../stores/settings'
 import { useSchemaStore } from '../stores/schema'
 import { useTabStore } from '../stores/tabs'
@@ -430,6 +431,87 @@ function addRow(): void {
   newRows.value = [...newRows.value, columns.value.map(() => null)]
 }
 
+/** Whether the server fills this column in, so a copy must leave it alone. */
+function isServerGenerated(columnName: string): boolean {
+  const column = structure.value?.columns.find((entry) => entry.name === columnName)
+  return Boolean(column?.isIdentity || column?.isComputed)
+}
+
+/**
+ * Stages an insert holding this row's values.
+ *
+ * The values have to be staged as edits, not just put in the row: the change
+ * set builds an insert out of what has been edited, and a row nobody typed
+ * into would go up empty. Identity and computed columns are left out, so the
+ * server assigns them.
+ */
+function duplicateRow(rowIndex: number): void {
+  if (!editable.value) return
+  const source = mergedRow(rowIndex)
+  if (!source) return
+
+  const newIndex = loadedRows.value.length + newRows.value.length
+  newRows.value = [
+    ...newRows.value,
+    columns.value.map((column, index) =>
+      isServerGenerated(column.name) ? null : (source[index] ?? null)
+    )
+  ]
+  columns.value.forEach((column, index) => {
+    if (isServerGenerated(column.name)) return
+    edits[`${newIndex}:${index}`] = source[index] ?? null
+  })
+}
+
+/** Drops every staged edit on one row, leaving other rows staged. */
+function revertRow(rowIndex: number): void {
+  for (const key of Object.keys(edits)) {
+    if (Number(key.split(':')[0]) === rowIndex) delete edits[key]
+  }
+}
+
+function rowHasEdits(rowIndex: number): boolean {
+  return Object.keys(edits).some((key) => Number(key.split(':')[0]) === rowIndex)
+}
+
+/**
+ * Filters the table down to (or away from) the value that was right-clicked.
+ *
+ * NULL cannot be compared with `=`, so it maps to the operator that means the
+ * same thing — which is also what the filter builder would have produced.
+ */
+function filterByCell(rowIndex: number, columnIndex: number, exclude: boolean): void {
+  const column = columns.value[columnIndex]
+  const row = mergedRow(rowIndex)
+  if (!column || !row) return
+
+  const value = row[columnIndex] ?? null
+  const filter: TableFilter =
+    value === null
+      ? { column: column.name, operator: exclude ? 'is not null' : 'is null' }
+      : {
+          column: column.name,
+          operator: exclude ? '!=' : '=',
+          value: foreignKeyFilterValue(value) ?? String(value)
+        }
+
+  void withPendingEdits(() => {
+    filters.value = [...filters.value, { ...filter, conjunction: 'AND' }]
+    filterMode.value = 'builder'
+    showFilters.value = true
+    return load(true)
+  })
+}
+
+function clearFilters(): void {
+  if (filters.value.length === 0 && !rawWhere.value) return
+  void withPendingEdits(() => {
+    filters.value = []
+    rawWhere.value = ''
+    return load(true)
+  })
+}
+
 function deleteSelected(rowIndex: number): void {
   if (!editable.value) return
   if (rowIndex >= loadedRows.value.length) {
@@ -551,32 +633,81 @@ function goToPage(delta: number): void {
   })
 }
 
-const menuItems = computed<MenuEntry[]>(() => [
-  { label: 'Copy cell', action: 'copy-cell' },
-  { label: 'Copy row', action: 'copy-row' },
-  ...(menu.value && foreignKeys.value[menu.value.col]
-    ? [
-        { separator: true, label: '' },
-        {
-          label: `Go to ${foreignKeys.value[menu.value.col].schema}.${foreignKeys.value[menu.value.col].table}`,
-          action: 'follow-key'
-        }
-      ]
-    : []),
-  { separator: true, label: '' },
-  { label: 'Set NULL', action: 'null', disabled: !editable.value },
-  { label: 'Add row', action: 'add', disabled: !editable.value },
-  {
-    label:
-      menu.value && deletedRows.value.has(menu.value.row) ? 'Undo delete row' : 'Delete row',
-    action: 'delete',
-    danger: true,
-    disabled: !editable.value
-  },
-  { separator: true, label: '' },
-  { label: 'Copy as CSV', action: 'copy-csv' },
-  { label: 'Export…', action: 'export' }
-])
+/** The formats both "copy as" submenus offer, in one place. */
+const COPY_FORMATS: { label: string; format: ExportFormat }[] = [
+  { label: 'CSV', format: 'csv' },
+  { label: 'TSV', format: 'tsv' },
+  { label: 'JSON', format: 'json' },
+  { label: 'SQL INSERT', format: 'sql' },
+  { label: 'Markdown', format: 'markdown' }
+]
+
+const menuItems = computed<MenuEntry[]>(() => {
+  const target = menu.value
+  const key = target ? foreignKeys.value[target.col] : undefined
+  const isNew = target ? target.row >= loadedRows.value.length : false
+  const deleted = target ? deletedRows.value.has(target.row) : false
+  const column = target ? columns.value[target.col] : undefined
+
+  return [
+    { label: 'Copy cell', action: 'copy-cell', hint: 'Ctrl+C' },
+    { label: 'Copy row', action: 'copy-row', hint: 'Ctrl+Shift+C' },
+    {
+      label: 'Copy row as',
+      items: COPY_FORMATS.map(({ label, format }) => ({ label, action: `copy-row-${format}` }))
+    },
+    {
+      label: `Copy all ${allRows.value.length === 1 ? 'row' : 'rows'} as`,
+      items: COPY_FORMATS.map(({ label, format }) => ({ label, action: `copy-all-${format}` }))
+    },
+
+    { separator: true, label: '' },
+    { label: 'Filter by this value', action: 'filter-eq', disabled: !column },
+    { label: 'Exclude this value', action: 'filter-ne', disabled: !column },
+    {
+      label: 'Clear filters',
+      action: 'filter-clear',
+      disabled: filters.value.length === 0 && !rawWhere.value.trim()
+    },
+
+    ...(key
+      ? [
+          { separator: true, label: '' },
+          { label: `Open referenced row in ${key.schema}.${key.table}`, action: 'follow-key' }
+        ]
+      : []),
+
+    { separator: true, label: '' },
+    { label: 'Edit cell', action: 'edit-cell', hint: 'Enter', disabled: !editable.value },
+    { label: 'Set to NULL', action: 'null', hint: 'Delete', disabled: !editable.value },
+    {
+      label: 'Undo edits in this row',
+      action: 'revert-row',
+      disabled: !target || !rowHasEdits(target.row)
+    },
+
+    { separator: true, label: '' },
+    { label: 'Duplicate row', action: 'duplicate', disabled: !editable.value },
+    { label: 'Add row', action: 'add', disabled: !editable.value },
+    {
+      // A staged insert is dropped outright; a stored row is marked and can be
+      // unmarked, so the label has to say which of the two this is.
+      label: isNew ? 'Remove staged row' : deleted ? 'Undo delete row' : 'Delete row',
+      action: 'delete',
+      danger: !deleted,
+      disabled: !editable.value
+    },
+
+    { separator: true, label: '' },
+    {
+      label: showRowPanel.value ? 'Hide row panel' : 'Show row in panel',
+      action: 'toggle-panel',
+      hint: 'Ctrl+I'
+    },
+    { label: 'Refresh', action: 'refresh', hint: 'F5' },
+    { label: 'Export…', action: 'export' }
+  ]
+})
 
 async function onMenuSelect(action: string): Promise<void> {
   const target = menu.value
@@ -601,16 +732,61 @@ async function onMenuSelect(action: string): Promise<void> {
     case 'delete':
       deleteSelected(target.row)
       break
-    case 'copy-csv': {
-      const text = exportRows(columns.value, allRows.value, { format: 'csv', includeHeader: true })
-      await api.copyToClipboard(text)
-      toasts.info(`Copied ${allRows.value.length} rows`)
+    case 'edit-cell':
+      grid.value?.beginEdit(target.row, target.col)
       break
-    }
+    case 'duplicate':
+      duplicateRow(target.row)
+      break
+    case 'revert-row':
+      revertRow(target.row)
+      break
+    case 'filter-eq':
+      filterByCell(target.row, target.col, false)
+      break
+    case 'filter-ne':
+      filterByCell(target.row, target.col, true)
+      break
+    case 'filter-clear':
+      clearFilters()
+      break
+    case 'toggle-panel':
+      toggleRowPanel()
+      break
+    case 'refresh':
+      void withPendingEdits(() => load())
+      break
     case 'export':
       emit('export', columns.value, allRows.value, `${props.tab.schema}.${props.tab.table}`)
       break
+    default: {
+      // copy-row-<format> and copy-all-<format> differ only in what they copy.
+      const copy = /^copy-(row|all)-(.+)$/.exec(action)
+      if (copy) await copyAs(copy[2] as ExportFormat, copy[1] === 'row' ? target.row : null)
+      break
+    }
   }
+}
+
+/**
+ * Puts rows on the clipboard in one of the export formats.
+ *
+ * `rowIndex` picks a single row, with its staged edits applied — what is on
+ * screen is what gets copied; null takes the whole page.
+ */
+async function copyAs(format: ExportFormat, rowIndex: number | null): Promise<void> {
+  const rows =
+    rowIndex === null
+      ? allRows.value.map((_, index) => mergedRow(index) ?? [])
+      : [mergedRow(rowIndex) ?? []]
+
+  const text = exportRows(columns.value, rows, {
+    format,
+    includeHeader: true,
+    tableName: `${props.tab.schema}.${props.tab.table}`
+  })
+  await api.copyToClipboard(text)
+  toasts.info(`Copied ${rows.length} ${rows.length === 1 ? 'row' : 'rows'} as ${format}`)
 }
 
 defineExpose({

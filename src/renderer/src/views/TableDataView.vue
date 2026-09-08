@@ -737,6 +737,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
             :has-previous="!!selection && selection.rowIndex > 0"
             :has-next="!!selection && selection.rowIndex < allRows.length - 1"
             @edit="editSelectedRow"
+            @revert="selection && revertCell(selection.rowIndex, $event)"
             @follow-key="selection && followKey(selection.rowIndex, $event)"
             @select="selection && grid?.selectCell(selection.rowIndex, $event)"
             @move="moveSelection"

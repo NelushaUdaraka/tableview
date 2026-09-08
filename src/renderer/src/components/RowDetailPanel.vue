@@ -47,6 +47,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (event: 'edit', columnIndex: number, value: CellValue): void
+  (event: 'revert', columnIndex: number): void
   (event: 'follow-key', columnIndex: number): void
   (event: 'select', columnIndex: number): void
   (event: 'move', delta: number): void
@@ -195,6 +196,23 @@ watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
             </svg>
           </button>
           <span class="rowpanel__type mono truncate">{{ field.column.dataType }}</span>
+          <button
+            v-if="field.edited"
+            class="rowpanel__revert"
+            title="Undo this edit"
+            @click="emit('revert', index)"
+          >
+            <svg viewBox="0 0 12 12" aria-hidden="true">
+              <path
+                d="M4.6 2.6 2 5.2l2.6 2.6M2.4 5.2h4.3a2.9 2.9 0 0 1 0 5.8H4.1"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
           <button
             v-if="canEdit(field)"
             class="rowpanel__null"
@@ -357,6 +375,30 @@ watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
   opacity: 0.3;
   cursor: not-allowed;
 }
+/* Matches the grid's undo: same mark, same colour, on the same staged edit. */
+.rowpanel__revert {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--warning);
+  cursor: pointer;
+}
+.rowpanel__revert svg {
+  width: 11px;
+  height: 11px;
+}
+.rowpanel__revert:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
 .rowpanel__null {
   flex: 0 0 auto;
   padding: 1px 5px;

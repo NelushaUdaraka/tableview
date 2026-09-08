@@ -14,6 +14,7 @@
  */
 import { ChildProcess, spawn } from 'node:child_process'
 import type { SsmConfig } from '../../shared/types'
+import { isLoopbackHost } from '../../shared/hosts'
 import { Tunnel, TunnelHandle, TunnelTarget, findFreePort, waitForPort } from './types'
 
 export const SSM_DOCUMENT_REMOTE_HOST = 'AWS-StartPortForwardingSessionToRemoteHost'
@@ -127,6 +128,11 @@ const DESTINATION_UNREACHABLE =
 export function describeSsmDestination(config: SsmConfig, target: TunnelTarget): string {
   const instance = config.instanceId?.trim() || 'the bastion'
   if (config.mode === 'remote-host') {
+    // A relayed address is resolved by the bastion, so a loopback one names the
+    // bastion itself — the setting looks right and quietly forwards nowhere.
+    if (isLoopbackHost(target.host)) {
+      return `Server is "${target.host}", which is resolved from ${instance} — so this dialled port ${target.port} on the bastion itself, not a database elsewhere. Put the database's own address in Server (an RDS endpoint, say), or switch "Forward to" to the instance if SQL Server really does run on the bastion.`
+    }
     return `The session reached ${instance}, but it could not reach ${target.host}:${target.port} from there. Check that the database's security group allows the bastion, that the name resolves from it, and that the server is listening on that port.`
   }
   return `The session reached ${instance}, but nothing is listening on port ${target.port} of the instance itself. "Forward to" is set to the instance, so that port was dialled on the bastion — if SQL Server actually runs elsewhere (an RDS endpoint, say), set "Forward to" to a remote host and put its address in Server.`

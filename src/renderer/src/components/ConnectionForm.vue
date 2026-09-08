@@ -9,6 +9,7 @@ import {
 } from '@shared/types'
 import type { SsmInstance, SsmPreflight } from '@shared/ipc'
 import { parseAwsCredentials } from '@shared/aws/credentials'
+import { isLoopbackHost } from '@shared/hosts'
 import { AWS_REGIONS, describeRegion, isRegionLike } from '@shared/aws/regions'
 import { api } from '../lib/api'
 
@@ -312,6 +313,19 @@ const sshPassphrasePlaceholder = computed(() =>
 
 const nameError = computed(() => (form.name.trim() ? '' : 'A name is required'))
 const hostError = computed(() => (form.host?.trim() ? '' : 'A server is required'))
+
+/**
+ * A relayed Server address is resolved by the far end, so a loopback one names
+ * the bastion rather than this machine — a setting that reads as correct and
+ * then forwards to a port nothing is listening on.
+ */
+const hostWarning = computed(() => {
+  const relayed =
+    (form.ssm!.enabled && form.ssm!.mode === 'remote-host') || form.ssh!.enabled
+  if (!relayed || !isLoopbackHost(form.host)) return ''
+  const relay = form.ssm!.enabled ? 'the bastion' : 'the SSH host'
+  return `"${form.host}" is resolved from ${relay}, so this forwards to ${relay} itself. Use the database's own address if it runs elsewhere.`
+})
 const ssmError = computed(() => {
   if (!form.ssm!.enabled) return ''
   if (usesPastedCredentials.value && !hasCredentials.value) {
@@ -409,6 +423,7 @@ async function browseForKey(): Promise<void> {
           <span class="field__label">Server</span>
           <input v-model="form.host" class="input" placeholder="localhost" />
           <span v-if="hostError" class="field__hint error-text">{{ hostError }}</span>
+          <span v-else-if="hostWarning" class="field__hint warn-text">{{ hostWarning }}</span>
         </label>
         <label class="field" style="flex: 1">
           <span class="field__label">Port</span>

@@ -208,6 +208,25 @@ describe('destination diagnosis', () => {
     expect(advice).toMatch(/security group/)
   })
 
+  it('calls out a loopback Server, which names the bastion once relayed', () => {
+    for (const host of ['localhost', '127.0.0.1', 'LOCALHOST.', '::1']) {
+      const advice = describeSsmDestination(config({ mode: 'remote-host' }), { host, port: 1433 })
+      expect(advice).toMatch(/resolved from i-0123456789abcdef0/)
+      expect(advice).toMatch(/dialled port 1433 on the bastion itself/)
+      // The security-group advice would be a wild goose chase here.
+      expect(advice).not.toMatch(/security group/)
+    }
+  })
+
+  it('leaves a real address to the ordinary advice', () => {
+    const advice = describeSsmDestination(config({ mode: 'remote-host' }), {
+      host: 'landfdb.abc123.eu-west-1.rds.amazonaws.com',
+      port: 1433
+    })
+    expect(advice).toMatch(/security group/)
+    expect(advice).not.toMatch(/resolved from/)
+  })
+
   it('points at the "Forward to" setting when forwarding to the instance itself', () => {
     const advice = describeSsmDestination(config({ mode: 'instance' }), target)
     expect(advice).toContain('i-0123456789abcdef0')

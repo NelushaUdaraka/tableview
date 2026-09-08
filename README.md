@@ -92,8 +92,9 @@ like a healthy session until the first byte moves — and then the driver report
 `Connection lost - socket hang up`. So the CLI's output is watched for the whole life of the session,
 not just at exit (`Connection to destination port failed`, `Unable to dial connection to port`), the
 message is given a moment to arrive after the driver has already given up, and the advice names the
-topology in use: the remote host and its security group, or the "Forward to" setting when the port
-was dialled on the bastion itself. A drop the CLI never explains says so plainly rather than passing
+topology in use: the remote host and its security group, the "Forward to" setting when the port was
+dialled on the bastion itself, or — for a relayed `localhost`, which the *bastion* resolves and so
+forwards to itself — the Server field. The connection form flags that last one before you connect. A drop the CLI never explains says so plainly rather than passing
 on the driver's wording.
 
 Readiness comes from the plugin's own `Waiting for connections` banner rather than a probe

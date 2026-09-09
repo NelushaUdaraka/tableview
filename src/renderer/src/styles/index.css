@@ -63,6 +63,15 @@
   --bg-hover-strong: #3a3736;
   --bg-active: #3a3736;
   --bg-selected: #2d2b2b;
+  /* Selected text. An accent wash rather than another grey: the greys are all
+     spoken for — hover, active row, raised surface — and a selection has to be
+     legible on top of any of them. */
+  --selection: color-mix(in srgb, var(--accent) 34%, transparent);
+  --selection-idle: color-mix(in srgb, var(--accent) 18%, transparent);
+  /* The editor's current-line band. Translucent on purpose: CodeMirror paints
+     the selection in a layer beneath the text, so an opaque band here would
+     hide the selection on the very line the caret is on. */
+  --editor-active-line: color-mix(in srgb, var(--text-primary) 7%, transparent);
 
   --text-primary: #f3f2f2;
   --text-secondary: #bab6b6;
@@ -126,6 +135,9 @@
   --bg-hover-strong: #d7d3d3;
   --bg-active: #d7d3d3;
   --bg-selected: #e4e0e0;
+  --selection: color-mix(in srgb, var(--accent) 26%, transparent);
+  --selection-idle: color-mix(in srgb, var(--accent) 13%, transparent);
+  --editor-active-line: color-mix(in srgb, var(--text-primary) 7%, transparent);
 
   --text-primary: #201e1d;
   --text-secondary: #605d5d;
@@ -192,7 +204,7 @@ textarea {
   outline-offset: -2px;
 }
 ::selection {
-  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  background: var(--selection);
 }
 
 /* --- scrollbars --------------------------------------------------------- */

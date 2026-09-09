@@ -176,6 +176,14 @@ export interface QueryResultSet {
   truncated: boolean
 }
 
+/**
+ * Marks a failure the user can fix in place by pasting fresh AWS credentials.
+ *
+ * It travels as `SerializedError.code` so the renderer can offer that instead
+ * of matching on wording, which changes.
+ */
+export const SSM_CREDENTIALS_EXPIRED = 'SSM_CREDENTIALS_EXPIRED'
+
 export interface SerializedError {
   message: string
   code?: string | number

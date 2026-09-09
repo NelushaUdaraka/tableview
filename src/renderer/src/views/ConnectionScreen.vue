@@ -5,12 +5,14 @@ import BaseModal from '../components/BaseModal.vue'
 import ConnectionForm from '../components/ConnectionForm.vue'
 import ContextMenu, { type MenuEntry } from '../components/ContextMenu.vue'
 import { useConnectionStore } from '../stores/connections'
+import { useCredentialsStore } from '../stores/credentials'
 import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toasts'
 import { onMenuAction } from '../lib/menuBus'
 import { api } from '../lib/api'
 
 const connections = useConnectionStore()
+const credentials = useCredentialsStore()
 const settings = useSettingsStore()
 const toasts = useToastStore()
 
@@ -73,11 +75,13 @@ async function test(input: Partial<ConnectionConfig>): Promise<void> {
         'Connection succeeded',
         `${status.serverEdition ?? ''} ${status.serverVersion ?? ''}`.trim()
       )
-    } else {
+    } else if (!credentials.offerRefresh(editing.value, status.error, () => test(input))) {
       toasts.error('Connection failed', status.error?.message)
     }
   } catch (error) {
-    toasts.fromError('Connection failed', error)
+    if (!credentials.offerRefresh(editing.value, error, () => test(input))) {
+      toasts.fromError('Connection failed', error)
+    }
   } finally {
     testing.value = false
   }
@@ -94,7 +98,11 @@ async function open(connection: SavedConnection, password?: string): Promise<voi
 
   const status = await connections.connect(connection.id, password)
   if (status.state === 'error') {
-    toasts.error(`Could not connect to ${connection.name}`, status.error?.message)
+    // Expiry is the one connection failure with a fix worth offering in place.
+    const offered = credentials.offerRefresh(connection, status.error, () =>
+      open(connection, password)
+    )
+    if (!offered) toasts.error(`Could not connect to ${connection.name}`, status.error?.message)
   } else {
     passwordPrompt.value = null
   }

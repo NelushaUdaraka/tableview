@@ -7,16 +7,18 @@
  * key; a table without one falls back to matching on every column, which the
  * banner warns about because it can match more rows than intended.
  */
-import { computed, nextTick, onMounted, reactive, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import type {
   CellValue,
   ColumnMeta,
+  ExportFormat,
   TableChangeSet,
   TableColumn,
   TableFilter,
   TableSort,
   TableStructure
 } from '@shared/types'
+import BaseModal from '../components/BaseModal.vue'
 import DataGrid, { type RowState } from '../components/DataGrid.vue'
 import FilterBuilder from '../components/FilterBuilder.vue'
 import ContextMenu, { type MenuEntry } from '../components/ContextMenu.vue'
@@ -24,11 +26,14 @@ import RowDetailPanel, { type RowField } from '../components/RowDetailPanel.vue'
 import SplitPane from '../components/SplitPane.vue'
 import TableViewSwitch from '../components/TableViewSwitch.vue'
 import { exportRows } from '@shared/export'
-import { foreignKeyFilters, foreignKeyTargets } from '@shared/foreignKeys'
+import { reindexStagedEdits } from '../lib/stagedRows'
+import { foreignKeyFilterValue, foreignKeyFilters, foreignKeyTargets } from '@shared/foreignKeys'
 import { useSettingsStore } from '../stores/settings'
 import { useSchemaStore } from '../stores/schema'
 import { useTabStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
+import { useConnectionStore } from '../stores/connections'
+import { useCredentialsStore } from '../stores/credentials'
 import type { TableTab } from '../stores/tabs'
 import { api } from '../lib/api'
 
@@ -42,6 +47,8 @@ const settings = useSettingsStore()
 const schemaStore = useSchemaStore()
 const tabs = useTabStore()
 const toasts = useToastStore()
+const connections = useConnectionStore()
+const credentials = useCredentialsStore()
 
 const structure = ref<TableStructure | null>(null)
 const columns = shallowRef<ColumnMeta[]>([])
@@ -65,6 +72,9 @@ const filterMode = ref<'builder' | 'raw'>('builder')
 const rawWhere = ref('')
 const showFilters = ref(false)
 
+/** Rows the grid has picked out; the focused row when nothing else is. */
+const selectedRows = ref<number[]>([])
+
 /** Staged changes. */
 const edits = reactive<Record<string, CellValue>>({})
 const deletedRows = ref<Set<number>>(new Set())
@@ -75,6 +85,16 @@ const isView = computed(() => props.tab.objectType === 'view')
 const primaryKey = computed(() => structure.value?.primaryKey ?? [])
 const hasPrimaryKey = computed(() => primaryKey.value.length > 0)
 const editable = computed(() => !isView.value)
+/**
+ * Whether to warn that edits will match on every column.
+ *
+ * Only once the structure has actually arrived: it is null while the table
+ * opens, which reads as "no primary key" and flashed the warning on every
+ * table for as long as the lookup took.
+ */
+const warnNoPrimaryKey = computed(
+  () => Boolean(structure.value) && editable.value && !hasPrimaryKey.value
+)
 
 const allRows = computed(() => [...loadedRows.value, ...newRows.value])
 
@@ -126,6 +146,58 @@ function discard(): void {
   newRows.value = []
 }
 
+/** Drops one staged cell edit, leaving the rest of the row staged. */
+function revertCell(rowIndex: number, columnIndex: number): void {
+  delete edits[`${rowIndex}:${columnIndex}`]
+}
+
+type PendingChoice = 'apply' | 'discard' | 'cancel'
+
+/**
+ * Asks what to do with staged edits that are about to be lost.
+ *
+ * Reloading the table replaces the rows the edits are keyed against, so they
+ * cannot survive it — but silently dropping them is how a page of retyped
+ * values disappears on a stray Refresh.
+ */
+const pendingPrompt = ref<{ resolve: (choice: PendingChoice) => void } | null>(null)
+
+function askAboutPendingEdits(): Promise<PendingChoice> {
+  return new Promise((resolve) => {
+    pendingPrompt.value = { resolve }
+  })
+}
+
+function answerPendingPrompt(choice: PendingChoice): void {
+  const prompt = pendingPrompt.value
+  pendingPrompt.value = null
+  prompt?.resolve(choice)
+}
+
+/** Runs `action` once the staged edits have been applied or dropped. */
+async function withPendingEdits(action: () => void | Promise<void>): Promise<void> {
+  if (pendingCount.value > 0) {
+    const choice = await askAboutPendingEdits()
+    if (choice === 'cancel') return
+    if (choice === 'apply') {
+      if (!(await apply())) return
+    } else {
+      discard()
+    }
+  }
+  await action()
+}
+
+/** The tab store asks this before leaving or closing this table's tab. */
+async function confirmLeave(): Promise<boolean> {
+  if (pendingCount.value === 0) return true
+  const choice = await askAboutPendingEdits()
+  if (choice === 'cancel') return false
+  if (choice === 'apply') return apply()
+  discard()
+  return true
+}
+
 async function loadStructure(): Promise<void> {
   try {
     structure.value = await schemaStore.getStructure(
@@ -160,11 +232,21 @@ async function load(resetOffset = false): Promise<void> {
     lastSql.value = response.sql
     discard()
   } catch (error) {
-    toasts.fromError('Could not load the table', error)
+    // A session that ran out mid-browse is fixable in place; retry this load.
+    const connection = connections.saved.find((entry) => entry.id === props.tab.connectionId)
+    if (!credentials.offerRefresh(connection, error, () => load(resetOffset))) {
+      toasts.fromError('Could not load the table', error)
+    }
   } finally {
     loading.value = false
   }
 }
+
+onBeforeUnmount(() => {
+  tabs.setLeaveGuard(null)
+  // A dialog left waiting would keep its caller pending forever.
+  if (pendingPrompt.value) answerPendingPrompt('cancel')
+})
 
 /** Filters carried on the tab, e.g. from following a foreign key into it. */
 function applyTabFilters(): boolean {
@@ -182,6 +264,9 @@ onMounted(async () => {
   // A remount starts with no staged edits, so the tab's badge must not claim
   // any left over from the last time this table was open.
   tabs.update<TableTab>(props.tab.id, { pendingEdits: 0 })
+  // Leaving this tab unmounts the view and takes the staged edits with it, so
+  // the store asks here first.
+  tabs.setLeaveGuard(confirmLeave)
   await loadStructure()
   // A primary key gives a stable default order.
   const key = structure.value?.primaryKey ?? []
@@ -198,9 +283,11 @@ onMounted(async () => {
 watch(
   () => props.tab.filterRevision,
   async () => {
-    if (!applyTabFilters()) return
-    await load(true)
-    await selectFirstRow()
+    await withPendingEdits(async () => {
+      if (!applyTabFilters()) return
+      await load(true)
+      await selectFirstRow()
+    })
   }
 )
 
@@ -342,7 +429,7 @@ function onSort(column: string, additive: boolean): void {
           ? []
           : [{ column, direction: 'asc' }]
   }
-  void load(true)
+  void withPendingEdits(() => load(true))
 }
 
 function onEdit(rowIndex: number, columnIndex: number, value: CellValue): void {
@@ -358,21 +445,155 @@ function addRow(): void {
   newRows.value = [...newRows.value, columns.value.map(() => null)]
 }
 
-function deleteSelected(rowIndex: number): void {
+/** Whether the server fills this column in, so a copy must leave it alone. */
+function isServerGenerated(columnName: string): boolean {
+  const column = structure.value?.columns.find((entry) => entry.name === columnName)
+  return Boolean(column?.isIdentity || column?.isComputed)
+}
+
+/**
+ * Stages an insert holding this row's values.
+ *
+ * The values have to be staged as edits, not just put in the row: the change
+ * set builds an insert out of what has been edited, and a row nobody typed
+ * into would go up empty. Identity and computed columns are left out, so the
+ * server assigns them.
+ */
+function duplicateRows(rowIndexes: number[]): void {
   if (!editable.value) return
-  if (rowIndex >= loadedRows.value.length) {
-    // Dropping a staged insert just removes it.
-    const newIndex = rowIndex - loadedRows.value.length
-    newRows.value = newRows.value.filter((_, index) => index !== newIndex)
-    for (const key of Object.keys(edits)) {
-      if (Number(key.split(':')[0]) === rowIndex) delete edits[key]
-    }
-    return
+  for (const rowIndex of [...rowIndexes].sort((a, b) => a - b)) {
+    const source = mergedRow(rowIndex)
+    if (!source) continue
+
+    const newIndex = loadedRows.value.length + newRows.value.length
+    newRows.value = [
+      ...newRows.value,
+      columns.value.map((column, index) =>
+        isServerGenerated(column.name) ? null : (source[index] ?? null)
+      )
+    ]
+    columns.value.forEach((column, index) => {
+      if (isServerGenerated(column.name)) return
+      edits[`${newIndex}:${index}`] = source[index] ?? null
+    })
   }
-  const next = new Set(deletedRows.value)
-  if (next.has(rowIndex)) next.delete(rowIndex)
-  else next.add(rowIndex)
-  deletedRows.value = next
+}
+
+/** Drops every staged edit on these rows, leaving other rows staged. */
+function revertRows(rowIndexes: number[]): void {
+  const targets = new Set(rowIndexes)
+  for (const key of Object.keys(edits)) {
+    if (targets.has(Number(key.split(':')[0]))) delete edits[key]
+  }
+}
+
+function rowsHaveEdits(rowIndexes: number[]): boolean {
+  const targets = new Set(rowIndexes)
+  return Object.keys(edits).some((key) => targets.has(Number(key.split(':')[0])))
+}
+
+/**
+ * The rows an action applies to.
+ *
+ * The grid keeps the row that was right-clicked inside its selection, so this
+ * is the selection whenever there is one — and the clicked row on its own for
+ * anything that arrives without one.
+ */
+function targetRows(clicked: number): number[] {
+  return selectedRows.value.includes(clicked) && selectedRows.value.length > 0
+    ? [...selectedRows.value]
+    : [clicked]
+}
+
+/**
+ * Filters the table down to (or away from) the value that was right-clicked.
+ *
+ * NULL cannot be compared with `=`, so it maps to the operator that means the
+ * same thing — which is also what the filter builder would have produced.
+ */
+function filterByCell(rowIndex: number, columnIndex: number, exclude: boolean): void {
+  const column = columns.value[columnIndex]
+  const row = mergedRow(rowIndex)
+  if (!column || !row) return
+
+  const value = row[columnIndex] ?? null
+  const filter: TableFilter =
+    value === null
+      ? { column: column.name, operator: exclude ? 'is not null' : 'is null' }
+      : {
+          column: column.name,
+          operator: exclude ? '!=' : '=',
+          value: foreignKeyFilterValue(value) ?? String(value)
+        }
+
+  void withPendingEdits(() => {
+    filters.value = [...filters.value, { ...filter, conjunction: 'AND' }]
+    filterMode.value = 'builder'
+    showFilters.value = true
+    return load(true)
+  })
+}
+
+function clearFilters(): void {
+  if (filters.value.length === 0 && !rawWhere.value) return
+  void withPendingEdits(() => {
+    filters.value = []
+    rawWhere.value = ''
+    return load(true)
+  })
+}
+
+/**
+ * Marks stored rows for deletion, and drops staged inserts outright.
+ *
+ * Marking is a toggle over the whole set: rows that are all marked already
+ * unmark together, so the same menu entry undoes what it just did.
+ */
+function deleteRows(rowIndexes: number[]): void {
+  if (!editable.value || rowIndexes.length === 0) return
+  const loadedCount = loadedRows.value.length
+  const stored = rowIndexes.filter((index) => index < loadedCount)
+  const staged = rowIndexes.filter((index) => index >= loadedCount)
+
+  if (stored.length > 0) {
+    const next = new Set(deletedRows.value)
+    const undo = stored.every((index) => next.has(index))
+    for (const index of stored) {
+      if (undo) next.delete(index)
+      else next.add(index)
+    }
+    deletedRows.value = next
+  }
+
+  if (staged.length > 0) dropStagedRows(staged.map((index) => index - loadedCount))
+}
+
+/**
+ * Removes staged inserts, carrying the surviving ones' edits with them.
+ *
+ * Edits are keyed by absolute row index, so dropping a staged row shifts every
+ * staged row after it — and their values would land on their neighbours unless
+ * the keys move too.
+ */
+function dropStagedRows(newIndexes: number[]): void {
+  const loadedCount = loadedRows.value.length
+  const dropped = new Set(newIndexes)
+  const survivors = newRows.value
+    .map((row, newIndex) => ({ row, newIndex }))
+    .filter((entry) => !dropped.has(entry.newIndex))
+
+  const next = reindexStagedEdits(
+    { ...edits },
+    loadedCount,
+    survivors.map((entry) => entry.newIndex)
+  )
+  for (const key of Object.keys(edits)) delete edits[key]
+  Object.assign(edits, next)
+  newRows.value = survivors.map((entry) => entry.row)
+}
+
+function deleteSelected(rowIndex: number): void {
+  deleteRows([rowIndex])
 }
 
 /** The values that identify a stored row, taken from its unedited state. */
@@ -434,8 +655,9 @@ function buildChangeSet(): TableChangeSet {
   }
 }
 
-async function apply(): Promise<void> {
-  if (pendingCount.value === 0) return
+/** Resolves true when the staged changes reached the server. */
+async function apply(): Promise<boolean> {
+  if (pendingCount.value === 0) return true
   const changeSet = buildChangeSet()
 
   if (settings.settings.confirmBeforeApply) {
@@ -449,7 +671,9 @@ async function apply(): Promise<void> {
     const warning = hasPrimaryKey.value
       ? ''
       : '\n\nThis table has no primary key, so rows are matched on every column. More than one row may be affected.'
-    if (!confirm(`Apply ${summary} to ${props.tab.schema}.${props.tab.table}?${warning}`)) return
+    if (!confirm(`Apply ${summary} to ${props.tab.schema}.${props.tab.table}?${warning}`)) {
+      return false
+    }
   }
 
   applying.value = true
@@ -460,45 +684,109 @@ async function apply(): Promise<void> {
       `${applied.inserted} inserted, ${applied.updated} updated, ${applied.deleted} deleted`
     )
     await load()
+    return true
   } catch (error) {
     toasts.fromError('Could not apply the changes — nothing was committed', error)
+    return false
   } finally {
     applying.value = false
   }
 }
 
 function goToPage(delta: number): void {
-  const next = offset.value + delta * pageSize.value
-  offset.value = Math.max(0, next)
-  void load()
+  void withPendingEdits(() => {
+    offset.value = Math.max(0, offset.value + delta * pageSize.value)
+    return load()
+  })
 }
 
-const menuItems = computed<MenuEntry[]>(() => [
-  { label: 'Copy cell', action: 'copy-cell' },
-  { label: 'Copy row', action: 'copy-row' },
-  ...(menu.value && foreignKeys.value[menu.value.col]
-    ? [
-        { separator: true, label: '' },
-        {
-          label: `Go to ${foreignKeys.value[menu.value.col].schema}.${foreignKeys.value[menu.value.col].table}`,
-          action: 'follow-key'
-        }
-      ]
-    : []),
-  { separator: true, label: '' },
-  { label: 'Set NULL', action: 'null', disabled: !editable.value },
-  { label: 'Add row', action: 'add', disabled: !editable.value },
-  {
-    label:
-      menu.value && deletedRows.value.has(menu.value.row) ? 'Undo delete row' : 'Delete row',
-    action: 'delete',
-    danger: true,
-    disabled: !editable.value
-  },
-  { separator: true, label: '' },
-  { label: 'Copy as CSV', action: 'copy-csv' },
-  { label: 'Export…', action: 'export' }
-])
+/** The formats both "copy as" submenus offer, in one place. */
+const COPY_FORMATS: { label: string; format: ExportFormat }[] = [
+  { label: 'CSV', format: 'csv' },
+  { label: 'TSV', format: 'tsv' },
+  { label: 'JSON', format: 'json' },
+  { label: 'SQL INSERT', format: 'sql' },
+  { label: 'Markdown', format: 'markdown' }
+]
+
+const menuItems = computed<MenuEntry[]>(() => {
+  const target = menu.value
+  const key = target ? foreignKeys.value[target.col] : undefined
+  const column = target ? columns.value[target.col] : undefined
+  const rows = target ? targetRows(target.row) : []
+
+  // Everything below reads to whoever right-clicked: one row, or the block
+  // they picked out.
+  const many = rows.length > 1
+  const these = many ? `${rows.length} rows` : 'row'
+  const isNew = rows.length > 0 && rows.every((index) => index >= loadedRows.value.length)
+  const deleted = rows.length > 0 && rows.every((index) => deletedRows.value.has(index))
+
+  return [
+    { label: 'Copy cell', action: 'copy-cell', hint: 'Ctrl+C' },
+    { label: many ? `Copy ${these}` : 'Copy row', action: 'copy-row', hint: 'Ctrl+Shift+C' },
+    {
+      label: many ? `Copy ${these} as` : 'Copy row as',
+      items: COPY_FORMATS.map(({ label, format }) => ({ label, action: `copy-row-${format}` }))
+    },
+    {
+      label: `Copy all ${allRows.value.length === 1 ? 'row' : 'rows'} as`,
+      items: COPY_FORMATS.map(({ label, format }) => ({ label, action: `copy-all-${format}` }))
+    },
+
+    { separator: true, label: '' },
+    { label: 'Filter by this value', action: 'filter-eq', disabled: !column },
+    { label: 'Exclude this value', action: 'filter-ne', disabled: !column },
+    {
+      label: 'Clear filters',
+      action: 'filter-clear',
+      disabled: filters.value.length === 0 && !rawWhere.value.trim()
+    },
+
+    ...(key
+      ? [
+          { separator: true, label: '' },
+          { label: `Open referenced row in ${key.schema}.${key.table}`, action: 'follow-key' }
+        ]
+      : []),
+
+    { separator: true, label: '' },
+    { label: 'Edit cell', action: 'edit-cell', hint: 'Enter', disabled: !editable.value },
+    { label: 'Set to NULL', action: 'null', hint: 'Delete', disabled: !editable.value },
+    {
+      label: many ? `Undo edits in these ${these}` : 'Undo edits in this row',
+      action: 'revert-row',
+      disabled: !rowsHaveEdits(rows)
+    },
+
+    { separator: true, label: '' },
+    { label: many ? `Duplicate ${these}` : 'Duplicate row', action: 'duplicate', disabled: !editable.value },
+    { label: 'Add row', action: 'add', disabled: !editable.value },
+    {
+      // A staged insert is dropped outright; a stored row is marked and can be
+      // unmarked, so the label has to say which of the two this is.
+      label: isNew
+        ? `Remove staged ${these}`
+        : deleted
+          ? `Undo delete ${these}`
+          : `Delete ${these}`,
+      action: 'delete',
+      hint: 'Ctrl+Delete',
+      danger: !deleted,
+      disabled: !editable.value
+    },
+
+    { separator: true, label: '' },
+    { label: 'Select all rows', action: 'select-all', hint: 'Ctrl+A' },
+    {
+      label: showRowPanel.value ? 'Hide row panel' : 'Show row in panel',
+      action: 'toggle-panel',
+      hint: 'Ctrl+I'
+    },
+    { label: 'Refresh', action: 'refresh', hint: 'F5' },
+    { label: 'Export…', action: 'export' }
+  ]
+})
 
 async function onMenuSelect(action: string): Promise<void> {
   const target = menu.value
@@ -521,22 +809,70 @@ async function onMenuSelect(action: string): Promise<void> {
       addRow()
       break
     case 'delete':
-      deleteSelected(target.row)
+      deleteRows(targetRows(target.row))
       break
-    case 'copy-csv': {
-      const text = exportRows(columns.value, allRows.value, { format: 'csv', includeHeader: true })
-      await api.copyToClipboard(text)
-      toasts.info(`Copied ${allRows.value.length} rows`)
+    case 'edit-cell':
+      grid.value?.beginEdit(target.row, target.col)
       break
-    }
+    case 'duplicate':
+      duplicateRows(targetRows(target.row))
+      break
+    case 'revert-row':
+      revertRows(targetRows(target.row))
+      break
+    case 'select-all':
+      grid.value?.selectRows(allRows.value.map((_, index) => index))
+      break
+    case 'filter-eq':
+      filterByCell(target.row, target.col, false)
+      break
+    case 'filter-ne':
+      filterByCell(target.row, target.col, true)
+      break
+    case 'filter-clear':
+      clearFilters()
+      break
+    case 'toggle-panel':
+      toggleRowPanel()
+      break
+    case 'refresh':
+      void withPendingEdits(() => load())
+      break
     case 'export':
       emit('export', columns.value, allRows.value, `${props.tab.schema}.${props.tab.table}`)
       break
+    default: {
+      // copy-row-<format> and copy-all-<format> differ only in what they copy.
+      const copy = /^copy-(row|all)-(.+)$/.exec(action)
+      if (copy) {
+        await copyAs(copy[2] as ExportFormat, copy[1] === 'row' ? targetRows(target.row) : null)
+      }
+      break
+    }
   }
 }
 
+/**
+ * Puts rows on the clipboard in one of the export formats.
+ *
+ * `rowIndexes` picks rows, with their staged edits applied — what is on screen
+ * is what gets copied; null takes the whole page.
+ */
+async function copyAs(format: ExportFormat, rowIndexes: number[] | null): Promise<void> {
+  const indexes = rowIndexes ?? allRows.value.map((_, index) => index)
+  const rows = indexes.map((index) => mergedRow(index) ?? [])
+
+  const text = exportRows(columns.value, rows, {
+    format,
+    includeHeader: true,
+    tableName: `${props.tab.schema}.${props.tab.table}`
+  })
+  await api.copyToClipboard(text)
+  toasts.info(`Copied ${rows.length} ${rows.length === 1 ? 'row' : 'rows'} as ${format}`)
+}
+
 defineExpose({
-  refresh: () => load(),
+  refresh: () => withPendingEdits(() => load()),
   focusFilter: () => {
     showFilters.value = true
   },
@@ -559,7 +895,9 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
 
       <div class="data__spacer"></div>
 
-      <button class="btn" :disabled="loading" @click="load()">⟳ Refresh</button>
+      <button class="btn" :disabled="loading" @click="withPendingEdits(() => load())">
+        ⟳ Refresh
+      </button>
       <button
         class="btn"
         :class="{ 'btn--armed': showFilters || filters.length > 0 || !!rawWhere }"
@@ -606,10 +944,10 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       @update:filters="filters = $event"
       @update:mode="filterMode = $event"
       @update:raw-where="rawWhere = $event"
-      @apply="load(true)"
+      @apply="withPendingEdits(() => load(true))"
     />
 
-    <div v-if="editable && !hasPrimaryKey" class="data__warning">
+    <div v-if="warnNoPrimaryKey" class="data__warning">
       This table has no primary key. Edits match rows on every column, so a duplicate row would be
       changed more than once.
     </div>
@@ -620,7 +958,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
         direction="horizontal"
         pane="second"
         :min="220"
-        :max="640"
+        :max="960"
         :collapsed="!showRowPanel"
       >
         <template #first>
@@ -638,8 +976,11 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
             :foreign-keys="foreignKeyLabels"
             empty-message="No rows match"
             @edit="onEdit"
+            @revert-cell="revertCell"
             @sort="onSort"
             @selection="selection = $event"
+            @rows-selected="selectedRows = $event"
+            @delete-rows="deleteRows"
             @follow-key="followKey($event.rowIndex, $event.columnIndex)"
             @row-context="menu = { x: $event.x, y: $event.y, row: $event.rowIndex, col: $event.columnIndex }"
           />
@@ -656,6 +997,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
             :has-previous="!!selection && selection.rowIndex > 0"
             :has-next="!!selection && selection.rowIndex < allRows.length - 1"
             @edit="editSelectedRow"
+            @revert="selection && revertCell(selection.rowIndex, $event)"
             @follow-key="selection && followKey(selection.rowIndex, $event)"
             @select="selection && grid?.selectCell(selection.rowIndex, $event)"
             @move="moveSelection"
@@ -677,7 +1019,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       <select
         v-model.number="pageSize"
         class="select select--sm data__pagesize"
-        @change="load(true)"
+        @change="withPendingEdits(() => load(true))"
       >
         <option :value="50">50</option>
         <option :value="100">100</option>
@@ -702,10 +1044,45 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       @select="onMenuSelect"
       @close="menu = null"
     />
+
+    <!-- Reloading rekeys every staged edit, so this is the last chance to keep them. -->
+    <BaseModal
+      v-if="pendingPrompt"
+      kicker="Unsaved changes"
+      title="This table has staged edits"
+      :subtitle="`${tab.schema}.${tab.table}`"
+      width="480px"
+      @close="answerPendingPrompt('cancel')"
+    >
+      <p class="prompt__text">
+        {{ pendingCount }} staged {{ pendingCount === 1 ? 'change has' : 'changes have' }} not been
+        written to the database. Reloading the table would discard
+        {{ pendingCount === 1 ? 'it' : 'them' }}.
+      </p>
+
+      <template #footer>
+        <button class="btn" @click="answerPendingPrompt('cancel')">Cancel</button>
+        <div class="prompt__spacer"></div>
+        <button class="btn btn--danger" @click="answerPendingPrompt('discard')">Discard</button>
+        <button class="btn btn--primary" @click="answerPendingPrompt('apply')">
+          Apply and continue
+        </button>
+      </template>
+    </BaseModal>
   </div>
 </template>
 
 <style scoped>
+.prompt__text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.prompt__spacer {
+  flex: 1;
+}
+
 .data {
   display: flex;
   flex-direction: column;

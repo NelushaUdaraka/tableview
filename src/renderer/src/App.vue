@@ -5,6 +5,7 @@ import ConnectionScreen from './views/ConnectionScreen.vue'
 import TitleBar from './components/TitleBar.vue'
 import WorkspaceView from './views/WorkspaceView.vue'
 import ToastHost from './components/ToastHost.vue'
+import CredentialsExpiredDialog from './components/CredentialsExpiredDialog.vue'
 import { useConnectionStore } from './stores/connections'
 import { useSettingsStore } from './stores/settings'
 import { useToastStore } from './stores/toasts'
@@ -46,6 +47,8 @@ onBeforeUnmount(() => unsubscribeMenu?.())
       <ConnectionScreen v-else />
     </div>
     <ToastHost />
+    <!-- Raised from anywhere a session can run out, so it lives above the views. -->
+    <CredentialsExpiredDialog />
   </div>
 </template>
 

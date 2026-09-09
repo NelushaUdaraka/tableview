@@ -9,6 +9,7 @@ import {
 } from '@shared/types'
 import type { SsmInstance, SsmPreflight } from '@shared/ipc'
 import { parseAwsCredentials } from '@shared/aws/credentials'
+import { isLoopbackHost } from '@shared/hosts'
 import { AWS_REGIONS, describeRegion, isRegionLike } from '@shared/aws/regions'
 import { api } from '../lib/api'
 
@@ -312,6 +313,19 @@ const sshPassphrasePlaceholder = computed(() =>
 
 const nameError = computed(() => (form.name.trim() ? '' : 'A name is required'))
 const hostError = computed(() => (form.host?.trim() ? '' : 'A server is required'))
+
+/**
+ * A relayed Server address is resolved by the far end, so a loopback one names
+ * the bastion rather than this machine — a setting that reads as correct and
+ * then forwards to a port nothing is listening on.
+ */
+const hostWarning = computed(() => {
+  const relayed =
+    (form.ssm!.enabled && form.ssm!.mode === 'remote-host') || form.ssh!.enabled
+  if (!relayed || !isLoopbackHost(form.host)) return ''
+  const relay = form.ssm!.enabled ? 'the bastion' : 'the SSH host'
+  return `"${form.host}" is resolved from ${relay}, so this forwards to ${relay} itself. Use the database's own address if it runs elsewhere.`
+})
 const ssmError = computed(() => {
   if (!form.ssm!.enabled) return ''
   if (usesPastedCredentials.value && !hasCredentials.value) {
@@ -409,6 +423,7 @@ async function browseForKey(): Promise<void> {
           <span class="field__label">Server</span>
           <input v-model="form.host" class="input" placeholder="localhost" />
           <span v-if="hostError" class="field__hint error-text">{{ hostError }}</span>
+          <span v-else-if="hostWarning" class="field__hint warn-text">{{ hostWarning }}</span>
         </label>
         <label class="field" style="flex: 1">
           <span class="field__label">Port</span>
@@ -912,6 +927,10 @@ async function browseForKey(): Promise<void> {
   margin: 0;
   padding: 0;
   border: none;
+  /* A fieldset defaults to min-width: min-content and will not shrink past it,
+     so one long unbreakable value — an SSO role ARN, say — widens the dialog
+     and puts a scrollbar under it instead of being truncated. */
+  min-width: 0;
 }
 .form__group:disabled {
   opacity: 0.45;
@@ -931,7 +950,9 @@ async function browseForKey(): Promise<void> {
 .row {
   display: flex;
   gap: 16px;
-  align-items: flex-end;
+  /* Top-aligned, so a hint or an error under one field extends downwards
+     instead of pushing its neighbour's control out of line. */
+  align-items: flex-start;
 }
 .hint {
   margin: 0;

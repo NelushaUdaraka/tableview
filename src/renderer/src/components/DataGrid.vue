@@ -62,7 +62,9 @@ const emit = defineEmits<{
   (event: 'delete-rows', rowIndexes: number[]): void
   (event: 'row-context', payload: { rowIndex: number; columnIndex: number; x: number; y: number }): void
   (event: 'selection', payload: { rowIndex: number; columnIndex: number } | null): void
+  (event: 'rows-selected', rowIndexes: number[]): void
   (event: 'follow-key', payload: { rowIndex: number; columnIndex: number }): void
+  (event: 'revert-cell', rowIndex: number, columnIndex: number): void
 }>()
 
 const ROW_HEIGHT = 30
@@ -73,10 +75,19 @@ const MAX_AUTO_WIDTH = 420
 const MAX_EDITOR_HEIGHT = 220
 
 const viewport = ref<HTMLElement | null>(null)
+const header = ref<HTMLElement | null>(null)
 const scrollTop = ref(0)
 const viewportHeight = ref(600)
 const widths = ref<number[]>([])
 const selected = ref<{ row: number; col: number } | null>(null)
+/**
+ * Rows picked out for an action, which is a different thing from the focused
+ * cell: the cell says where typing goes, this says what Delete, Copy and the
+ * context menu act on. It always contains the focused row.
+ */
+const selectedRows = ref<Set<number>>(new Set())
+/** Where a Shift range measures from — the last row picked without Shift. */
+const anchorRow = ref<number | null>(null)
 const editing = ref<{ row: number; col: number } | null>(null)
 const editValue = ref('')
 const editInput = ref<HTMLTextAreaElement | null>(null)
@@ -182,9 +193,11 @@ watch(
     measureColumns()
     selected.value = null
     editing.value = null
+    anchorRow.value = null
     // A new shape means the old selection is meaningless; say so, or a row
     // inspector would keep showing a row that is no longer there.
     emit('selection', null)
+    setSelectedRows([])
   },
   { immediate: true, deep: false }
 )
@@ -200,9 +213,18 @@ const gridTemplate = computed(
   () => `48px ${widths.value.map((width) => `${width}px`).join(' ')}`
 )
 
+/** Row-number gutter plus every column, which is how wide a row really is. */
+const totalWidth = computed(
+  () => 48 + widths.value.reduce((sum, width) => sum + width, 0)
+)
+
 function onScroll(): void {
   if (!viewport.value) return
   scrollTop.value = viewport.value.scrollTop
+  // The header sits outside the scrolling viewport so it stays put vertically;
+  //;horizontally it has to be moved by hand or the columns part company with
+  // their values.
+  if (header.value) header.value.scrollLeft = viewport.value.scrollLeft
 }
 
 let resizeObserver: ResizeObserver | null = null
@@ -217,6 +239,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  endRowDrag()
   resizeObserver?.disconnect()
   document.removeEventListener('mousemove', onResizeMove)
   document.removeEventListener('mouseup', onResizeEnd)
@@ -286,9 +309,147 @@ function isEdited(rowIndex: number, columnIndex: number): boolean {
   return cellKey(rowIndex, columnIndex) in props.editedCells
 }
 
-function selectCell(row: number, col: number): void {
+function setSelectedRows(rows: Iterable<number>): void {
+  selectedRows.value = new Set(rows)
+  emit('rows-selected', [...selectedRows.value].sort((a, b) => a - b))
+}
+
+/** Every row between two, inclusive, whichever way round they are given. */
+function rowRange(from: number, to: number): number[] {
+  const [start, end] = from <= to ? [from, to] : [to, from]
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index)
+}
+
+/**
+ * Moves the focus, and takes the row selection with it.
+ *
+ * `extend` grows the selection from the anchor, `toggle` adds or removes one
+ * row, and neither collapses it to the row that was clicked — the three
+ * gestures a list has had since long before this grid.
+ */
+function selectCell(
+  row: number,
+  col: number,
+  modifiers: { extend?: boolean; toggle?: boolean } = {}
+): void {
   selected.value = { row, col }
   emit('selection', { rowIndex: row, columnIndex: col })
+
+  if (modifiers.extend && anchorRow.value !== null) {
+    setSelectedRows(rowRange(anchorRow.value, row))
+    return
+  }
+  if (modifiers.toggle) {
+    const next = new Set(selectedRows.value)
+    // Never leave the focused row out of its own selection.
+    if (next.has(row) && next.size > 1) next.delete(row)
+    else next.add(row)
+    anchorRow.value = row
+    setSelectedRows(next)
+    return
+  }
+  anchorRow.value = row
+  setSelectedRows([row])
+}
+
+/** The click handler, so the template does not have to read the event. */
+function onCellMouseDown(row: number, col: number, event: MouseEvent): void {
+  // A right-click inside the selection keeps it; outside, it collapses to the
+  // row under the pointer, which is what every file manager does.
+  if (event.button === 2 && selectedRows.value.has(row)) {
+    selected.value = { row, col }
+    emit('selection', { rowIndex: row, columnIndex: col })
+    return
+  }
+  selectCell(row, col, { extend: event.shiftKey, toggle: event.ctrlKey || event.metaKey })
+
+  // Holding the button and moving sweeps a range out of the rows. Not for
+  // Ctrl, which is picking rows out one at a time and would fight a sweep.
+  if (event.button === 0 && !event.ctrlKey && !event.metaKey) beginRowDrag()
+}
+
+// --- dragging a range out of the rows --------------------------------------
+
+/** How close to an edge the pointer gets before the grid scrolls itself. */
+const AUTO_SCROLL_EDGE = 28
+const AUTO_SCROLL_MS = 16
+
+const dragging = ref(false)
+let pointerY = 0
+let autoScroll: ReturnType<typeof setInterval> | null = null
+
+function beginRowDrag(): void {
+  dragging.value = true
+  document.addEventListener('mousemove', onDragMove)
+  document.addEventListener('mouseup', endRowDrag)
+}
+
+function endRowDrag(): void {
+  dragging.value = false
+  stopAutoScroll()
+  document.removeEventListener('mousemove', onDragMove)
+  document.removeEventListener('mouseup', endRowDrag)
+}
+
+function onDragMove(event: MouseEvent): void {
+  pointerY = event.clientY
+  extendDragTo(pointerY)
+  updateAutoScroll(pointerY)
+}
+
+/**
+ * The row under a screen position.
+ *
+ * Worked out from the scroll offset rather than from what the pointer is over:
+ * the rows are virtualised, so past the edge of the viewport there is nothing
+ * under the pointer to ask.
+ */
+function rowAtClientY(clientY: number): number | null {
+  if (!viewport.value || props.rows.length === 0) return null
+  const rect = viewport.value.getBoundingClientRect()
+  const offset = clientY - rect.top + viewport.value.scrollTop
+  const index = Math.floor(offset / ROW_HEIGHT)
+  return Math.max(0, Math.min(props.rows.length - 1, index))
+}
+
+function extendDragTo(clientY: number): void {
+  const row = rowAtClientY(clientY)
+  if (row === null || anchorRow.value === null) return
+  setSelectedRows(rowRange(anchorRow.value, row))
+}
+
+/** Keeps scrolling while the pointer is held past an edge, as a list does. */
+function updateAutoScroll(clientY: number): void {
+  if (!viewport.value) return
+  const rect = viewport.value.getBoundingClientRect()
+  const above = rect.top + AUTO_SCROLL_EDGE - clientY
+  const below = clientY - (rect.bottom - AUTO_SCROLL_EDGE)
+  const step = above > 0 ? -Math.max(4, above / 2) : below > 0 ? Math.max(4, below / 2) : 0
+
+  if (step === 0) return stopAutoScroll()
+  if (autoScroll) return
+
+  autoScroll = setInterval(() => {
+    if (!viewport.value || !dragging.value) return stopAutoScroll()
+    const rectNow = viewport.value.getBoundingClientRect()
+    const up = rectNow.top + AUTO_SCROLL_EDGE - pointerY
+    const down = pointerY - (rectNow.bottom - AUTO_SCROLL_EDGE)
+    const amount = up > 0 ? -Math.max(4, up / 2) : down > 0 ? Math.max(4, down / 2) : 0
+    if (amount === 0) return stopAutoScroll()
+
+    viewport.value.scrollTop += amount
+    scrollTop.value = viewport.value.scrollTop
+    extendDragTo(pointerY)
+  }, AUTO_SCROLL_MS)
+}
+
+function stopAutoScroll(): void {
+  if (autoScroll) clearInterval(autoScroll)
+  autoScroll = null
+}
+
+function isRowSelected(row: number): boolean {
+  return selectedRows.value.has(row)
 }
 
 function sortIndicator(column: ColumnMeta): string {
@@ -375,11 +536,11 @@ function onCellKeydown(event: KeyboardEvent): void {
   switch (event.key) {
     case 'ArrowDown':
       event.preventDefault()
-      moveTo(Math.min(lastRow, row + 1), col)
+      moveTo(Math.min(lastRow, row + 1), col, event.shiftKey)
       break
     case 'ArrowUp':
       event.preventDefault()
-      moveTo(Math.max(0, row - 1), col)
+      moveTo(Math.max(0, row - 1), col, event.shiftKey)
       break
     case 'ArrowLeft':
       event.preventDefault()
@@ -413,8 +574,11 @@ function onCellKeydown(event: KeyboardEvent): void {
       beginEdit(row, col)
       break
     case 'Delete':
-      if (props.editable) {
-        event.preventDefault()
+      if (!props.editable) break
+      event.preventDefault()
+      if (event.ctrlKey || event.metaKey) {
+        emit('delete-rows', [...selectedRows.value].sort((a, b) => a - b))
+      } else {
         setNull()
       }
       break
@@ -422,6 +586,20 @@ function onCellKeydown(event: KeyboardEvent): void {
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault()
         void copySelection(event.shiftKey)
+      }
+      break
+    case 'a':
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault()
+        anchorRow.value = 0
+        setSelectedRows(rowRange(0, lastRow))
+      }
+      break
+    case 'Backspace':
+      // Delete on its own nulls a cell, so deleting rows takes the modifier.
+      if ((event.ctrlKey || event.metaKey) && props.editable) {
+        event.preventDefault()
+        emit('delete-rows', [...selectedRows.value].sort((a, b) => a - b))
       }
       break
     default:
@@ -439,8 +617,8 @@ function onCellKeydown(event: KeyboardEvent): void {
   }
 }
 
-function moveTo(row: number, col: number): void {
-  selectCell(row, col)
+function moveTo(row: number, col: number, extend = false): void {
+  selectCell(row, col, { extend })
   scrollRowIntoView(row)
 }
 
@@ -454,14 +632,24 @@ function scrollRowIntoView(row: number): void {
   }
 }
 
+/** One row as the grid shows it, tab separated. */
+function rowAsText(row: number): string {
+  return props.columns.map((_, index) => displayValue(row, index) ?? '').join('\t')
+}
+
 async function copySelection(wholeRow: boolean): Promise<void> {
   if (!selected.value) return
   const { row, col } = selected.value
-  const text = wholeRow
-    ? props.columns
-        .map((_, index) => displayValue(row, index) ?? '')
-        .join('\t')
-    : (displayValue(row, col) ?? '')
+
+  // Several rows picked out is an explicit request for all of them, whether
+  // or not the caller asked for the whole row.
+  const rows = [...selectedRows.value].sort((a, b) => a - b)
+  const text =
+    rows.length > 1
+      ? rows.map(rowAsText).join('\n')
+      : wholeRow
+        ? rowAsText(row)
+        : (displayValue(row, col) ?? '')
   await api.copyToClipboard(text)
 }
 
@@ -478,38 +666,47 @@ function followKey(row: number, col: number): void {
 
 function onCellContextMenu(row: number, col: number, event: MouseEvent): void {
   event.preventDefault()
-  selectCell(row, col)
+  // mousedown has already settled the selection; only a keyboard-driven menu
+  // arrives here without one.
+  if (!selectedRows.value.has(row)) selectCell(row, col)
   emit('row-context', { rowIndex: row, columnIndex: col, x: event.clientX, y: event.clientY })
 }
 
-defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() })
+defineExpose({
+  selectCell: (row: number, col: number) => selectCell(row, col),
+  beginEdit,
+  copySelection,
+  selectRows: (rows: number[]) => {
+    anchorRow.value = rows[0] ?? null
+    setSelectedRows(rows)
+  },
+  focus: () => viewport.value?.focus()
+})
 </script>
 
 <template>
-  <div class="grid">
-    <div
-      class="grid__header"
-      :style="{ gridTemplateColumns: gridTemplate }"
-      role="row"
-    >
-      <div class="grid__corner"></div>
-      <div
-        v-for="(column, index) in columns"
-        :key="`${column.name}-${index}`"
-        class="grid__th"
-        :title="`${column.name} — ${column.dataType}${column.nullable ? '' : ' NOT NULL'}`"
-        @click="emit('sort', column.name, $event.shiftKey)"
-      >
-        <span class="grid__th-name truncate">{{ column.name }}</span>
-        <span v-if="primaryKey.includes(column.name)" class="grid__th-key" title="Primary key">PK</span>
-        <span class="grid__th-type truncate">{{ column.dataType }}</span>
-        <span v-if="sortIndicator(column)" class="grid__th-sort">{{ sortIndicator(column) }}</span>
-        <span
-          class="grid__resizer"
-          @mousedown="onResizeStart(index, $event)"
-          @dblclick.stop="autoFit(index)"
-          @click.stop
-        ></span>
+  <div class="grid" :class="{ 'grid--dragging': dragging }">
+    <div ref="header" class="grid__header" role="row">
+      <div class="grid__header-track" :style="{ gridTemplateColumns: gridTemplate }">
+        <div class="grid__corner"></div>
+        <div
+          v-for="(column, index) in columns"
+          :key="`${column.name}-${index}`"
+          class="grid__th"
+          :title="`${column.name} — ${column.dataType}${column.nullable ? '' : ' NOT NULL'}`"
+          @click="emit('sort', column.name, $event.shiftKey)"
+        >
+          <span class="grid__th-name truncate">{{ column.name }}</span>
+          <span v-if="primaryKey.includes(column.name)" class="grid__th-key" title="Primary key">PK</span>
+          <span class="grid__th-type truncate">{{ column.dataType }}</span>
+          <span v-if="sortIndicator(column)" class="grid__th-sort">{{ sortIndicator(column) }}</span>
+          <span
+            class="grid__resizer"
+            @mousedown="onResizeStart(index, $event)"
+            @dblclick.stop="autoFit(index)"
+            @click.stop
+          ></span>
+        </div>
       </div>
     </div>
 
@@ -529,7 +726,11 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
         <div class="empty-state__title">{{ emptyMessage }}</div>
       </div>
 
-      <div v-else class="grid__canvas" :style="{ height: `${totalHeight}px` }">
+      <div
+        v-else
+        class="grid__canvas"
+        :style="{ height: `${totalHeight}px`, width: `${totalWidth}px` }"
+      >
         <div
           v-for="row in visibleRows"
           :key="row.index"
@@ -538,13 +739,14 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
             row.index % 2 === 1 ? 'grid__row--odd' : '',
             row.state === 'inserted' ? 'grid__row--inserted' : '',
             row.state === 'deleted' ? 'grid__row--deleted' : '',
-            editing?.row === row.index ? 'grid__row--editing' : ''
+            editing?.row === row.index ? 'grid__row--editing' : '',
+            isRowSelected(row.index) ? 'grid__row--selected' : ''
           ]"
           :style="{ transform: `translateY(${row.top}px)`, gridTemplateColumns: gridTemplate }"
         >
           <div
             class="grid__rownum"
-            @mousedown="selectCell(row.index, 0)"
+            @mousedown="onCellMouseDown(row.index, 0, $event)"
             @contextmenu="onCellContextMenu(row.index, 0, $event)"
           >
             {{ rowOffset + row.index + 1 }}
@@ -560,7 +762,7 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
               displayValue(row.index, colIndex) === null ? 'grid__cell--null' : '',
               editing?.row === row.index && editing?.col === colIndex ? 'grid__cell--editing' : ''
             ]"
-            @mousedown="selectCell(row.index, colIndex)"
+            @mousedown="onCellMouseDown(row.index, colIndex, $event)"
             @dblclick="beginEdit(row.index, colIndex)"
             @contextmenu="onCellContextMenu(row.index, colIndex, $event)"
           >
@@ -581,6 +783,24 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
             <template v-else>
               <span v-if="displayValue(row.index, colIndex) === null" class="grid__null">NULL</span>
               <span v-else class="truncate">{{ displayValue(row.index, colIndex) }}</span>
+              <button
+                v-if="isEdited(row.index, colIndex)"
+                class="grid__revert"
+                title="Undo this edit"
+                @mousedown.stop
+                @click.stop="emit('revert-cell', row.index, colIndex)"
+              >
+                <svg viewBox="0 0 12 12" aria-hidden="true">
+                  <path
+                    d="M4.6 2.6 2 5.2l2.6 2.6M2.4 5.2h4.3a2.9 2.9 0 0 1 0 5.8H4.1"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.4"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
               <button
                 v-if="canFollowKey(row.index, colIndex)"
                 class="grid__fk"
@@ -615,14 +835,27 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
   min-height: 0;
   background: var(--bg-surface);
 }
+/* Sweeping over cells would otherwise highlight their text as it went. */
+.grid--dragging {
+  user-select: none;
+  cursor: default;
+}
 
 .grid__header {
-  display: grid;
   height: var(--h-gridheader);
   border-bottom: var(--rule) solid var(--border-strong);
   background: var(--bg-app);
+  /* Scrolled in step with the viewport rather than by the user, so the bar
+     itself never shows one. */
   overflow: hidden;
   flex: 0 0 auto;
+}
+.grid__header-track {
+  display: grid;
+  height: 100%;
+  /* Never narrower than the bar, so a table that fits still fills it. */
+  min-width: 100%;
+  width: max-content;
 }
 
 .grid__corner {
@@ -698,6 +931,9 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
 
 .grid__canvas {
   position: relative;
+  /* Rows are absolutely positioned inside this, so its width is what decides
+     how far the viewport scrolls and how far a row's background reaches. */
+  min-width: 100%;
 }
 
 .grid__row {
@@ -727,6 +963,15 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
 /* The open editor overflows its cell, so its row has to paint over the rest. */
 .grid__row--editing {
   z-index: 5;
+}
+/* Picked-out rows carry the accent wash the rest of the app selects with, and
+   a solid leading edge so a run of them reads as one block. */
+.grid__row--selected {
+  background: var(--selection-idle);
+}
+.grid__row--selected .grid__rownum {
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--text-primary);
 }
 
 .grid__rownum {
@@ -783,6 +1028,41 @@ defineExpose({ selectCell, copySelection, focus: () => viewport.value?.focus() }
 }
 
 /* --- foreign key arrow --------------------------------------------------- */
+/* The undo affordance on a staged cell: always visible, because it is the
+   only sign that this value is not the one in the database yet. */
+.grid__revert {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--warning);
+  cursor: pointer;
+}
+.grid__revert svg {
+  width: 11px;
+  height: 11px;
+}
+.grid__revert:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+/* A right-aligned value keeps its edge; the control sits after it. */
+.grid__cell--number .grid__revert,
+.grid__cell--bytes .grid__revert {
+  margin-left: 6px;
+}
+/* With both, the foreign-key arrow gives up the auto margin. */
+.grid__revert + .grid__fk {
+  margin-left: 6px;
+}
+
 .grid__fk {
   display: flex;
   align-items: center;

@@ -28,7 +28,8 @@ import {
   TableForeignKey,
   TableIndex,
   TableStructure,
-  TableTrigger
+  TableTrigger,
+  SSM_CREDENTIALS_EXPIRED
 } from '../../../shared/types'
 import { serializeRow, deserializeCell } from '../../../shared/serialize'
 import { qualify } from '../../../shared/sql/identifiers'
@@ -44,7 +45,7 @@ import {
 import { splitBatches } from '../../../shared/sql/statements'
 import { SshTunnel } from '../../tunnel/ssh'
 import { SsmTunnel } from '../../tunnel/ssm'
-import { credentialsToEnv } from '../../../shared/aws/credentials'
+import { credentialsToEnv, expiresAt, isExpired } from '../../../shared/aws/credentials'
 import type { Tunnel, TunnelHandle } from '../../tunnel/types'
 import { buildMssqlConfig } from './config'
 import type { DbClient, ExecuteOptions, ServerInfo } from '../types'
@@ -69,6 +70,11 @@ const FORWARD_ERROR_GRACE_MS = 1500
  * something. Only these may be reinterpreted as a tunnel failure — a login
  * rejection travels the same path and must reach the user unchanged.
  */
+/** Attaches a code so the renderer can offer the fix rather than a toast. */
+function codedError(message: string, code: string): Error {
+  return Object.assign(new Error(message), { code })
+}
+
 function isTransportFailure(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error)
   return /socket hang up|connection lost|econnreset|epipe|read econnreset/i.test(message)
@@ -184,9 +190,9 @@ export class SqlServerClient implements DbClient {
       await this.teardownTunnel()
 
       if (forwardError) {
-        throw new Error(
-          `Could not reach ${this.config.host}:${this.config.port} through the ${via} — ${forwardError.message}`
-        )
+        const message = `Could not reach ${this.config.host}:${this.config.port} through the ${via} — ${forwardError.message}`
+        const code = (forwardError as Error & { code?: string }).code
+        throw code ? codedError(message, code) : new Error(message)
       }
       // The forward stayed silent: some topologies accept the local socket
       // before anything has been dialled at the far end, so the drop is all
@@ -262,13 +268,44 @@ export class SqlServerClient implements DbClient {
         'This connection is set to use pasted AWS credentials, but none are saved against it. Edit the connection and paste a block from the AWS access portal.'
       )
     }
+    let parsed: ReturnType<typeof JSON.parse>
     try {
-      return credentialsToEnv(JSON.parse(ssm.credentials))
+      parsed = JSON.parse(ssm.credentials)
     } catch {
       throw new Error(
         'The saved AWS credentials for this connection could not be read. Paste a fresh block from the AWS access portal.'
       )
     }
+
+    // The block says when it runs out, so there is no reason to spend a
+    // session start-up discovering it.
+    if (isExpired(parsed)) {
+      const when = expiresAt(parsed)
+      throw codedError(
+        `The AWS credentials saved with this connection expired${
+          when ? ` at ${when.toISOString().replace('T', ' ').slice(0, 19)} UTC` : ''
+        }. Paste a fresh block from the AWS access portal.`,
+        SSM_CREDENTIALS_EXPIRED
+      )
+    }
+
+    return credentialsToEnv(parsed)
+  }
+
+  /**
+   * Re-reads a driver failure that is really the transport giving out.
+   *
+   * A session that dies mid-use — credentials that ran out while the app was
+   * open, most often — reaches the driver as a closed socket and nothing else.
+   * The tunnel knows why, and its reason is the one worth showing.
+   */
+  private explainTransportFailure(error: unknown): unknown {
+    const forwardError = this.tunnel?.lastForwardError
+    if (!forwardError || !isTransportFailure(error)) return error
+
+    const code = (forwardError as Error & { code?: string }).code
+    const message = `The connection dropped — ${forwardError.message}`
+    return code ? codedError(message, code) : new Error(message)
   }
 
   private async teardownTunnel(): Promise<void> {
@@ -374,7 +411,7 @@ export class SqlServerClient implements DbClient {
         await request.query(text)
       }
     } catch (error) {
-      errors.push(error)
+      errors.push(this.explainTransportFailure(error))
     } finally {
       if (executionId) this.activeRequests.delete(executionId)
       request.removeAllListeners()

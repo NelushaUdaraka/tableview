@@ -28,5 +28,6 @@
     "src/preload/**/*",
     "src/shared/**/*",
     "test/**/*"
-  ]
+  ],
+  "exclude": ["test/unit/renderer/**"]
 }

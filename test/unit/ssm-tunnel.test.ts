@@ -16,9 +16,14 @@ import {
   buildSsmCommand,
   classifySsmFailure,
   classifySsmRuntimeFailure,
-  describeSsmDestination
+  describeSsmDestination,
+  isExpiredCredentialsFailure
 } from '../../src/main/tunnel/ssm'
-import { DEFAULT_SSM_CONFIG, type SsmConfig } from '../../src/shared/types'
+import {
+  DEFAULT_SSM_CONFIG,
+  SSM_CREDENTIALS_EXPIRED,
+  type SsmConfig
+} from '../../src/shared/types'
 import { findFreePort } from '../../src/main/tunnel/types'
 
 const FAKE_CLI = join(__dirname, '../fixtures/fake-aws.mjs')
@@ -173,6 +178,19 @@ describe('classifySsmFailure', () => {
     expect(classifySsmFailure(output, 254)).toMatch(expected)
   })
 
+  it('recognises every wording the CLI uses for credentials that ran out', () => {
+    for (const output of [
+      'The security token included in the request is expired',
+      'ExpiredToken: The provided token has expired',
+      'Error loading SSO Token: sso session associated',
+      'The SSO session associated with this profile has expired'
+    ]) {
+      expect(isExpiredCredentialsFailure(output)).toBe(true)
+    }
+    expect(isExpiredCredentialsFailure('An error occurred (AccessDeniedException)')).toBe(false)
+    expect(isExpiredCredentialsFailure('bind: address already in use')).toBe(false)
+  })
+
   it('mentions SSO when the session has expired', () => {
     expect(classifySsmFailure('Error loading SSO Token: sso session associated', 253)).toMatch(
       /aws sso login/
@@ -206,6 +224,25 @@ describe('destination diagnosis', () => {
     const advice = describeSsmDestination(config({ mode: 'remote-host' }), target)
     expect(advice).toContain('db.internal:1433')
     expect(advice).toMatch(/security group/)
+  })
+
+  it('calls out a loopback Server, which names the bastion once relayed', () => {
+    for (const host of ['localhost', '127.0.0.1', 'LOCALHOST.', '::1']) {
+      const advice = describeSsmDestination(config({ mode: 'remote-host' }), { host, port: 1433 })
+      expect(advice).toMatch(/resolved from i-0123456789abcdef0/)
+      expect(advice).toMatch(/dialled port 1433 on the bastion itself/)
+      // The security-group advice would be a wild goose chase here.
+      expect(advice).not.toMatch(/security group/)
+    }
+  })
+
+  it('leaves a real address to the ordinary advice', () => {
+    const advice = describeSsmDestination(config({ mode: 'remote-host' }), {
+      host: 'landfdb.abc123.eu-west-1.rds.amazonaws.com',
+      port: 1433
+    })
+    expect(advice).toMatch(/security group/)
+    expect(advice).not.toMatch(/resolved from/)
   })
 
   it('points at the "Forward to" setting when forwarding to the instance itself', () => {
@@ -362,6 +399,21 @@ describe('SsmTunnel against a stand-in CLI', () => {
   ])('reports the %s failure in plain language', async (scenario, expected) => {
     const tunnel = makeTunnel({}, scenario)
     await expect(tunnel.open()).rejects.toThrow(expected)
+  })
+
+  it('tags an expiry so the UI can offer a paste box', async () => {
+    const tunnel = makeTunnel({}, 'expired')
+    await expect(tunnel.open()).rejects.toMatchObject({
+      name: 'SsmTunnelError',
+      code: SSM_CREDENTIALS_EXPIRED
+    })
+  })
+
+  it('leaves other failures untagged', async () => {
+    const tunnel = makeTunnel({}, 'access-denied')
+    const error = await tunnel.open().catch((caught: unknown) => caught as SsmTunnelError)
+    expect(error).toBeInstanceOf(SsmTunnelError)
+    expect((error as SsmTunnelError).code).toBeUndefined()
   })
 
   it('keeps the raw CLI output for the details pane', async () => {

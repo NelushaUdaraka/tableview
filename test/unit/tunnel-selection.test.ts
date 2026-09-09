@@ -142,6 +142,19 @@ describe.skipIf(process.platform === 'win32')('a forward that drops the connecti
     }
   })
 
+  it('spots a Server that names the bastion rather than the database', async () => {
+    // "localhost" is resolved by the far end, so relaying it forwards nowhere.
+    const client = new SqlServerClient({
+      ...ssmConfig('destination-refused', 'remote-host'),
+      host: 'localhost'
+    })
+    try {
+      await expect(client.connect()).rejects.toThrow(/dialled port 1433 on the bastion itself/)
+    } finally {
+      await client.disconnect()
+    }
+  })
+
   it('still explains a drop the session itself never described', async () => {
     // No diagnosis on the pipe at all: the drop is all there is to go on.
     const client = new SqlServerClient(ssmConfig('silent-drop', 'instance'))

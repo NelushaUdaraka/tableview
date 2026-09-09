@@ -11,6 +11,8 @@ import { useTabStore } from '../stores/tabs'
 import { useSchemaStore } from '../stores/schema'
 import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toasts'
+import { useConnectionStore } from '../stores/connections'
+import { useCredentialsStore } from '../stores/credentials'
 import { useLibraryStore } from '../stores/library'
 import { api } from '../lib/api'
 
@@ -23,6 +25,8 @@ const tabs = useTabStore()
 const schema = useSchemaStore()
 const settings = useSettingsStore()
 const toasts = useToastStore()
+const connections = useConnectionStore()
+const credentials = useCredentialsStore()
 const library = useLibraryStore()
 
 const editor = ref<InstanceType<typeof SqlEditor> | null>(null)
@@ -74,14 +78,23 @@ async function run(text?: string): Promise<void> {
     })
 
     const failed = result.statements.find((statement) => statement.error)
-    if (failed?.error) {
+    if (failed?.error && !offerCredentialFix(failed.error, () => run(text))) {
       toasts.error('Query failed', failed.error.message)
     }
     void library.loadHistory()
   } catch (error) {
     tabs.update<QueryTab>(props.tab.id, { running: false, executionId: null })
-    toasts.fromError('Query failed', error)
+    if (!offerCredentialFix(error, () => run(text))) toasts.fromError('Query failed', error)
   }
+}
+
+/**
+ * A session that ran out mid-query is worth a paste box, not a toast — the
+ * query itself was fine and can be rerun once the credentials are fresh.
+ */
+function offerCredentialFix(error: unknown, retry: () => Promise<void>): boolean {
+  const connection = connections.saved.find((entry) => entry.id === props.tab.connectionId)
+  return credentials.offerRefresh(connection, error, retry)
 }
 
 function runSelection(): void {
@@ -170,11 +183,17 @@ function onCursor(offset: number): void {
   tabs.update<QueryTab>(props.tab.id, { cursor: offset })
 }
 
-// The status bar reads this, so it has to be pushed rather than computed there.
+/**
+ * The status bar reads this, so it has to be pushed rather than computed there.
+ *
+ * Watch the line number, not the statement: `statementAt` builds a fresh object
+ * every call, and writing to the store replaces the tab object this computed
+ * reads from — so watching the object would re-fire on its own write, forever.
+ */
 watch(
-  currentStatement,
-  (statement) => {
-    tabs.update<QueryTab>(props.tab.id, { statementLine: statement?.startLine ?? null })
+  () => currentStatement.value?.startLine ?? null,
+  (line) => {
+    tabs.update<QueryTab>(props.tab.id, { statementLine: line })
   },
   { immediate: true }
 )

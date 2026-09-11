@@ -93,6 +93,15 @@ export interface SqlServerOptions {
   poolMin: number
   poolMax: number
   poolIdleTimeoutMs: number
+  /**
+   * How often to send a one-row query down an otherwise idle connection.
+   *
+   * An idle TDS socket is torn down by whatever sits between the app and the
+   * server long before SQL Server itself minds: an AWS SSM session ends after
+   * its idle timeout, and a NAT or firewall drops the mapping sooner than that.
+   * The heartbeat is what keeps the path open; 0 turns it off.
+   */
+  keepAliveIntervalMs: number
 }
 
 export interface ConnectionConfig {
@@ -534,7 +543,8 @@ export const DEFAULT_SQLSERVER_OPTIONS: SqlServerOptions = {
   readOnlyIntent: false,
   poolMin: 0,
   poolMax: 5,
-  poolIdleTimeoutMs: 30000
+  poolIdleTimeoutMs: 30000,
+  keepAliveIntervalMs: 60000
 }
 
 export const DEFAULT_SSM_CONFIG: SsmConfig = {

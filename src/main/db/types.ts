@@ -33,6 +33,25 @@ export interface ServerInfo {
   versionString: string
 }
 
+/**
+ * A change in a connection's health that nobody asked for.
+ *
+ * Everything else a client does happens because the renderer called it, so the
+ * answer goes back as a return value. A connection dropping while the window
+ * sits idle has no call to return to, so it is reported instead.
+ */
+export type ClientState = 'connected' | 'reconnecting' | 'disconnected'
+
+export interface ClientStateEvent {
+  state: ClientState
+  /** Why the connection went, on `reconnecting` and `disconnected`. */
+  error?: unknown
+  /** Which attempt is in flight, so the window can say how it is going. */
+  attempt?: number
+}
+
+export type ClientStateListener = (event: ClientStateEvent) => void
+
 export interface ExecuteOptions {
   /** Stop retaining rows past this count; the total is still reported. */
   maxRows?: number
@@ -52,6 +71,8 @@ export interface DbClient {
 
   connect(): Promise<ServerInfo>
   disconnect(): Promise<void>
+  /** Registered by the registry so an unprompted drop reaches the window. */
+  onStateChange(listener: ClientStateListener | null): void
 
   runScript(text: string, options?: ExecuteOptions): Promise<StatementResult[]>
   cancel(executionId: string): boolean

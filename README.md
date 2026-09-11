@@ -25,6 +25,10 @@ TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind
 - Passwords and SSH secrets encrypted at rest — the OS keystore via Electron `safeStorage` where
   available, AES-256-GCM under a `0600` key file otherwise. Secrets never reach the renderer.
 - Test-connection button that reports the server edition and version
+- **Kept alive, and put back when it drops** — an idle connection is poked once a minute (the
+  *Keepalive* option; 0 turns it off) so an SSM session, an SSH forward or a firewall does not tear
+  it down for want of traffic. A connection that goes anyway is reopened in the background with a
+  backoff, the status bar says so, and the window keeps its tabs and staged edits throughout.
 
 **Connecting through an AWS bastion (SSM)**
 
@@ -378,8 +382,11 @@ Deliberately out of scope for phase 1, in rough priority order for phase 2:
   which a TCP forward cannot carry. Give an explicit port instead. The app ignores `instanceName`
   when tunnelling rather than failing confusingly.
 - **Azure AD support is password-flow only** — no interactive, device-code or managed-identity flows.
-- **SSM sessions are not resumed.** If the AWS session drops mid-query the connection fails and you
-  reconnect; there is no automatic re-establishment.
+- **A dropped connection is reopened, not resumed.** The keepalive keeps an idle session from being
+  torn down, and a connection that goes anyway is reopened in the background — but reopening means a
+  fresh SSM session and a fresh pool, so anything that was in flight is lost and has to be re-run.
+  Credentials that ran out are not something reopening can fix; the status bar says so and offers
+  the paste box.
 - **No interactive AWS prompts.** The CLI child is spawned without stdin, so a profile configured
   with `mfa_serial` cannot be answered, and `aws sso login` (a browser flow) has to be run yourself —
   the app detects the expiry and says so. Pasting portal credentials sidesteps both.

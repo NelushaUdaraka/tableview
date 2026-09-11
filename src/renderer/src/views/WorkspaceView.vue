@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { CellValue, ColumnMeta, SchemaObjectType, TableFilter } from '@shared/types'
+import type {
+  CellValue,
+  ColumnMeta,
+  ConnectionStatus,
+  SchemaObjectType,
+  TableFilter
+} from '@shared/types'
 import {
   buildCreateTableDdl,
   buildDeleteTemplate,
@@ -194,13 +200,34 @@ function onKeydown(event: KeyboardEvent): void {
   }
 }
 
+/**
+ * A status the main process pushed, rather than one this window asked for.
+ *
+ * The interesting ones are the connection dropping and coming back on its own:
+ * the workspace stays where it is either way, so without a word about it the
+ * only sign would be queries quietly failing for a few seconds.
+ */
+function onStatusChanged(status: ConnectionStatus): void {
+  const before = connections.statusFor(status.connectionId).state
+  connections.setStatus(status)
+  if (status.connectionId !== connections.activeId || status.state === before) return
+
+  if (status.state === 'connecting' && before === 'connected') {
+    toasts.info('The connection dropped — reopening it', status.error?.message)
+  } else if (status.state === 'connected' && before !== 'connected') {
+    toasts.success('Connection restored')
+  } else if (status.state === 'disconnected' || status.state === 'error') {
+    toasts.error('The connection closed', status.error?.message)
+  }
+}
+
 let unsubscribeMenu: (() => void) | null = null
 let unsubscribeStatus: (() => void) | null = null
 
 onMounted(() => {
   document.addEventListener('keydown', onKeydown)
   unsubscribeMenu = onMenuAction(handleAction)
-  unsubscribeStatus = api.onStatusChanged((status) => connections.setStatus(status))
+  unsubscribeStatus = api.onStatusChanged(onStatusChanged)
   if (tabs.tabs.length === 0) newQueryTab()
 })
 
@@ -263,6 +290,7 @@ onBeforeUnmount(() => {
 
     <StatusBar
       @disconnect="disconnect"
+      @reconnect="connections.reconnect()"
       @settings="showSettings = true"
       @shortcuts="showShortcuts = true"
     />

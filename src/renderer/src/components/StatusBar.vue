@@ -6,6 +6,7 @@ import { useTabStore } from '../stores/tabs'
 
 const emit = defineEmits<{
   (event: 'disconnect'): void
+  (event: 'reconnect'): void
   (event: 'settings'): void
   (event: 'shortcuts'): void
 }>()
@@ -20,13 +21,25 @@ const stateLabel = computed(() => {
     case 'connected':
       return 'Connected'
     case 'connecting':
-      return 'Connecting…'
+      // A session that is already open and is connecting again is a connection
+      // being put back, which is worth saying in those words.
+      return connections.inSession ? 'Reconnecting…' : 'Connecting…'
     case 'error':
       return 'Error'
     default:
       return 'Disconnected'
   }
 })
+
+/** Why the connection went, when the main process said. */
+const stateDetail = computed(() => status.value?.error?.message ?? '')
+
+/** Offered once a session's connection is down and staying down. */
+const canReconnect = computed(
+  () =>
+    connections.inSession &&
+    (status.value?.state === 'disconnected' || status.value?.state === 'error')
+)
 
 /** Where the cursor sits in the active query tab, pushed here by QueryView. */
 const statementLine = computed(() =>
@@ -60,7 +73,10 @@ const version = computed(() => {
       <span class="status__name">{{ connections.active?.name ?? 'No connection' }}</span>
       <!-- When connected the dot and the segments carry the state; it is only
            spelled out when something needs saying. -->
-      <span v-if="status?.state !== 'connected'" class="muted">{{ stateLabel }}</span>
+      <span v-if="status?.state !== 'connected'" class="muted" :title="stateDetail">
+        {{ stateLabel }}
+      </span>
+      <button v-if="canReconnect" class="status__retry" @click="emit('reconnect')">Reconnect</button>
     </div>
 
     <template v-if="status?.state === 'connected'">
@@ -174,6 +190,25 @@ const version = computed(() => {
 .status__name {
   font-weight: 600;
   font-size: 13px;
+}
+/* Sits inside the identity segment, because it acts on what that names. */
+.status__retry {
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.status__retry:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
 }
 .status__spacer {
   flex: 1;

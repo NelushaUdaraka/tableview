@@ -29,6 +29,7 @@ import {
   TableIndex,
   TableStructure,
   TableTrigger,
+  DEFAULT_SQLSERVER_OPTIONS,
   SSM_CREDENTIALS_EXPIRED
 } from '../../../shared/types'
 import { serializeRow, deserializeCell } from '../../../shared/serialize'
@@ -48,7 +49,7 @@ import { SsmTunnel } from '../../tunnel/ssm'
 import { credentialsToEnv, expiresAt, isExpired } from '../../../shared/aws/credentials'
 import type { Tunnel, TunnelHandle } from '../../tunnel/types'
 import { buildMssqlConfig } from './config'
-import type { DbClient, ExecuteOptions, ServerInfo } from '../types'
+import type { ClientStateListener, DbClient, ExecuteOptions, ServerInfo } from '../types'
 import * as Q from './queries'
 import { DriverColumn, declarationOf, isReadOnlyType, jsKindOf, renderDriverType } from './types'
 
@@ -64,6 +65,20 @@ const DEFAULT_MAX_ROWS = 50000
  * connection that has already failed.
  */
 const FORWARD_ERROR_GRACE_MS = 1500
+
+/**
+ * Waits between attempts to get a dropped connection back, in order.
+ *
+ * The first is immediate-ish because most drops are a socket that went away
+ * while the far end is perfectly healthy — a tunnel that idled out, a NAT that
+ * forgot the mapping — and reopening it works first time. The later ones back
+ * off for the case that is really down, and the last is repeated for as long
+ * as the connection stays open.
+ */
+const RECONNECT_DELAYS_MS = [500, 2000, 5000, 15000, 30000]
+
+/** Used for connections saved before the option existed. */
+const DEFAULT_KEEPALIVE_MS = DEFAULT_SQLSERVER_OPTIONS.keepAliveIntervalMs
 
 /**
  * Driver errors that mean the socket went away rather than the server refusing
@@ -136,8 +151,30 @@ export class SqlServerClient implements DbClient {
   private tunnelHandle: TunnelHandle | null = null
   private readonly activeRequests = new Map<string, sql.Request>()
   private serverInfo: ServerInfo | null = null
+  private stateListener: ClientStateListener | null = null
+  private keepAliveTimer: ReturnType<typeof setInterval> | null = null
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private reconnectAttempt = 0
+  /** True from the moment a drop is noticed until the connection is back. */
+  private recovering = false
+  /** True while a heartbeat is in flight, so a slow one is not doubled up on. */
+  private probing = false
+  /** Set by `disconnect`, so nothing reopens a connection the user closed. */
+  private closed = false
 
   constructor(private config: ConnectionConfig) {}
+
+  onStateChange(listener: ClientStateListener | null): void {
+    this.stateListener = listener
+  }
+
+  private announce(event: Parameters<ClientStateListener>[0]): void {
+    try {
+      this.stateListener?.(event)
+    } catch {
+      // A listener that throws must not take the connection down with it.
+    }
+  }
 
   get isConnected(): boolean {
     return Boolean(this.pool?.connected)
@@ -157,7 +194,20 @@ export class SqlServerClient implements DbClient {
 
   async connect(): Promise<ServerInfo> {
     if (this.pool?.connected) return this.serverInfo!
+    this.closed = false
+    const info = await this.openConnection()
+    this.startKeepAlive()
+    return info
+  }
 
+  /**
+   * Opens the transport and the pool, and reads the server's details.
+   *
+   * Separate from `connect` because recovering from a drop runs exactly this
+   * and nothing else: the same tunnel, the same pool, the same first query —
+   * only without the caller who asked for it the first time.
+   */
+  private async openConnection(): Promise<ServerInfo> {
     this.tunnel = this.createTunnel()
     if (this.tunnel) {
       this.tunnelHandle = await this.tunnel.open()
@@ -212,7 +262,124 @@ export class SqlServerClient implements DbClient {
     return this.serverInfo
   }
 
+  // -------------------------------------------------------------------------
+  // Staying connected
+  // -------------------------------------------------------------------------
+
+  /**
+   * How often to poke an idle connection; 0 turns the heartbeat off.
+   *
+   * Read through the defaults because connections saved before this option
+   * existed have no value for it, and a `NaN` interval would silently disable
+   * the very thing that keeps them alive.
+   */
+  private get keepAliveIntervalMs(): number {
+    const configured = this.config.options?.keepAliveIntervalMs
+    return Number.isFinite(configured) ? Number(configured) : DEFAULT_KEEPALIVE_MS
+  }
+
+  private startKeepAlive(): void {
+    this.stopKeepAlive()
+    const interval = this.keepAliveIntervalMs
+    if (interval <= 0) return
+    this.keepAliveTimer = setInterval(() => void this.probe(), interval)
+    // A heartbeat is no reason to hold the process open at quit.
+    this.keepAliveTimer.unref?.()
+  }
+
+  private stopKeepAlive(): void {
+    if (this.keepAliveTimer) clearInterval(this.keepAliveTimer)
+    this.keepAliveTimer = null
+  }
+
+  /**
+   * Sends one row down the connection to prove it is still there.
+   *
+   * Skipped whenever something else is already talking to the server: a
+   * connection carrying a query needs no help staying up, and a heartbeat
+   * queued behind a long-running statement proves nothing about the socket.
+   */
+  private async probe(): Promise<void> {
+    if (this.closed || this.recovering || this.probing) return
+    if (this.activeRequests.size > 0) return
+
+    const pool = this.pool
+    if (!pool?.connected) {
+      void this.handleDrop(new Error('The connection pool closed'))
+      return
+    }
+
+    this.probing = true
+    try {
+      await pool.request().query('SELECT 1')
+    } catch (error) {
+      void this.handleDrop(this.explainTransportFailure(error))
+    } finally {
+      this.probing = false
+    }
+  }
+
+  /**
+   * Takes the dead connection down and starts trying to get it back.
+   *
+   * Tearing the pool down first matters: a half-open pool hands out sockets
+   * that fail one query at a time, which reads to the user as the app being
+   * broken rather than the connection being gone.
+   */
+  private async handleDrop(error: unknown): Promise<void> {
+    if (this.closed || this.recovering) return
+    this.recovering = true
+    this.reconnectAttempt = 0
+    this.stopKeepAlive()
+    this.announce({ state: 'reconnecting', error })
+    await this.teardown()
+    void this.attemptReconnect()
+  }
+
+  private async attemptReconnect(): Promise<void> {
+    if (this.closed) return
+    try {
+      await this.openConnection()
+      this.recovering = false
+      this.reconnectAttempt = 0
+      this.startKeepAlive()
+      this.announce({ state: 'connected' })
+    } catch (error) {
+      if (this.closed) return
+      await this.teardown()
+      const delay =
+        RECONNECT_DELAYS_MS[Math.min(this.reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)]
+      this.reconnectAttempt += 1
+      // Keep saying so: the window shows the last attempt's reason, and a
+      // session whose credentials ran out has to say that rather than sit
+      // silently on a connection that is never coming back.
+      this.announce({ state: 'reconnecting', error, attempt: this.reconnectAttempt })
+      this.reconnectTimer = setTimeout(() => void this.attemptReconnect(), delay)
+      this.reconnectTimer.unref?.()
+    }
+  }
+
+  /** Closes the pool and the transport, leaving the client able to reopen. */
+  private async teardown(): Promise<void> {
+    if (this.pool) {
+      const pool = this.pool
+      this.pool = null
+      try {
+        await pool.close()
+      } catch {
+        /* pool already closed */
+      }
+    }
+    await this.teardownTunnel()
+  }
+
   async disconnect(): Promise<void> {
+    this.closed = true
+    this.recovering = false
+    this.stopKeepAlive()
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = null
+
     for (const request of this.activeRequests.values()) {
       try {
         request.cancel()
@@ -222,15 +389,7 @@ export class SqlServerClient implements DbClient {
     }
     this.activeRequests.clear()
 
-    if (this.pool) {
-      try {
-        await this.pool.close()
-      } catch {
-        /* pool already closed */
-      }
-      this.pool = null
-    }
-    await this.teardownTunnel()
+    await this.teardown()
     this.serverInfo = null
   }
 
@@ -299,6 +458,17 @@ export class SqlServerClient implements DbClient {
    * open, most often — reaches the driver as a closed socket and nothing else.
    * The tunnel knows why, and its reason is the one worth showing.
    */
+  /**
+   * Starts recovery when a failure turns out to be the connection going away.
+   *
+   * Without this a drop is only noticed by the next heartbeat, so the query
+   * after the one that failed fails too — for up to a whole keepalive interval
+   * — when the connection could have been back by then.
+   */
+  private noteTransportFailure(error: unknown): void {
+    if (!this.closed && isTransportFailure(error)) void this.handleDrop(error)
+  }
+
   private explainTransportFailure(error: unknown): unknown {
     const forwardError = this.tunnel?.lastForwardError
     if (!forwardError || !isTransportFailure(error)) return error
@@ -318,7 +488,13 @@ export class SqlServerClient implements DbClient {
 
   private requirePool(): sql.ConnectionPool {
     if (!this.pool?.connected) {
-      throw new Error('Not connected. Open the connection before running queries.')
+      // A connection that is being reopened will be back on its own, so say
+      // that rather than sending the user to reconnect by hand.
+      throw new Error(
+        this.recovering
+          ? 'The connection dropped and is being reopened. Try again in a moment.'
+          : 'Not connected. Open the connection before running queries.'
+      )
     }
     return this.pool
   }
@@ -334,8 +510,13 @@ export class SqlServerClient implements DbClient {
   ): Promise<T[]> {
     const request = this.requirePool().request()
     for (const param of params) request.input(param.name, toBindable(param.value))
-    const result = await request.query<T>(text)
-    return (result.recordset ?? []) as T[]
+    try {
+      const result = await request.query<T>(text)
+      return (result.recordset ?? []) as T[]
+    } catch (error) {
+      this.noteTransportFailure(error)
+      throw this.explainTransportFailure(error)
+    }
   }
 
   /**
@@ -412,6 +593,7 @@ export class SqlServerClient implements DbClient {
       }
     } catch (error) {
       errors.push(this.explainTransportFailure(error))
+      this.noteTransportFailure(error)
     } finally {
       if (executionId) this.activeRequests.delete(executionId)
       request.removeAllListeners()

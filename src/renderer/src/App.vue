@@ -46,7 +46,9 @@ onBeforeUnmount(() => unsubscribeMenu?.())
       <div v-if="!ready" class="empty-state">
         <span class="spinner"></span>
       </div>
-      <WorkspaceView v-else-if="connections.isConnected" />
+      <!-- The session, not the socket: a connection being reopened keeps its
+           tabs rather than dropping back to the connection screen. -->
+      <WorkspaceView v-else-if="connections.inSession" />
       <ConnectionScreen v-else />
     </div>
     <ToastHost />

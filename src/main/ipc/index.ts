@@ -61,6 +61,17 @@ export function scopeForWindow(window: BrowserWindow | null): string {
 export function registerIpcHandlers(context: IpcContext): void {
   const { registry, appData, getWindow } = context
 
+  // A connection that drops on its own has no call to return to, so the
+  // registry reports it here and it is delivered to the window that owns it.
+  registry.onStatusChange((scope, status) => {
+    const window = BrowserWindow.getAllWindows().find(
+      (candidate) => scopeForWindow(candidate) === scope
+    )
+    if (window && !window.isDestroyed()) {
+      window.webContents.send(CHANNELS.eventStatusChanged, status)
+    }
+  })
+
   function callContext(event: IpcMainInvokeEvent): CallContext {
     const window = BrowserWindow.fromWebContents(event.sender) ?? getWindow()
     return { window, scope: scopeForWindow(window) }

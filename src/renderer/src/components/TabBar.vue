@@ -7,7 +7,7 @@
  * a strip to reorder, onto the other pane's strip to move there, and out of the
  * window entirely to open in a window of their own.
  */
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
 import { beginTabDrag, draggedTab, endTabDrag, markTabDropped } from '../lib/tabDrag'
 import { useTabStore, type TabPane } from '../stores/tabs'
@@ -24,7 +24,8 @@ const menu = ref<{ x: number; y: number; id: string } | null>(null)
 /** Where a drop would insert, drawn as a rule between two tabs. */
 const dropIndex = ref<number | null>(null)
 
-const menuItems = (id: string): MenuEntry[] => {
+const menuItems = computed<MenuEntry[]>(() => {
+  if (!menu.value) return []
   const inThisPane = tabs.tabsIn(props.pane.id).length
   return [
     { label: 'Close', action: 'close', hint: 'Ctrl+W' },
@@ -43,16 +44,9 @@ const menuItems = (id: string): MenuEntry[] => {
     },
     { label: 'Close split', action: 'close-split', disabled: !tabs.isSplit },
     { separator: true, label: '' },
-    { label: 'Move to a new window', action: 'detach', disabled: !tabs.paneFor(id) }
+    { label: 'Move to a new window', action: 'detach' }
   ]
-}
-
-const openMenuItems = ref<MenuEntry[]>([])
-
-function openMenu(event: MouseEvent, id: string): void {
-  openMenuItems.value = menuItems(id)
-  menu.value = { x: event.clientX, y: event.clientY, id }
-}
+})
 
 function onMenuSelect(action: string): void {
   const id = menu.value?.id
@@ -161,7 +155,7 @@ function onDragEnd(event: DragEvent, tabId: string): void {
           :title="tab.kind === 'table' ? `${tab.schema}.${tab.table}` : tab.title"
           @click="tabs.select(tab.id)"
           @auxclick="onAuxClick($event, tab.id)"
-          @contextmenu.prevent="openMenu($event, tab.id)"
+          @contextmenu.prevent="menu = { x: $event.clientX, y: $event.clientY, id: tab.id }"
           @dragstart="onDragStart($event, tab.id)"
           @dragend="onDragEnd($event, tab.id)"
         >
@@ -194,7 +188,7 @@ function onDragEnd(event: DragEvent, tabId: string): void {
       v-if="menu"
       :x="menu.x"
       :y="menu.y"
-      :items="openMenuItems"
+      :items="menuItems"
       @select="onMenuSelect"
       @close="menu = null"
     />

@@ -596,7 +596,10 @@ function filterOnColumn(columnIndex: number): void {
   const column = columns.value[columnIndex]
   if (!column) return
   filterMode.value = 'builder'
-  filters.value = [...filters.value, { column: column.name, operator: '=', value: '', conjunction: 'AND' }]
+  filters.value = [
+    ...filters.value,
+    { column: column.name, operator: '=', value: '', conjunction: 'AND' }
+  ]
   showFilters.value = true
 }
 
@@ -859,11 +862,13 @@ const rowMenuItems = computed<MenuEntry[]>(() => {
     { separator: true, label: '' },
     { label: 'Select all rows', action: 'select-all', hint: 'Ctrl+A' },
     // Opens the panel on the row that was clicked, whether or not it was
-    // already open — which is a different thing from the toggle below it.
-    { label: 'View row details', action: 'row-details', hint: 'Ctrl+I' },
+    // already open — which is a different thing from the toggle below it, and
+    // from Ctrl+I, so it does not borrow that shortcut's name.
+    { label: 'View row details', action: 'row-details' },
     {
       label: showRowPanel.value ? 'Hide row panel' : 'Show row panel',
-      action: 'toggle-panel'
+      action: 'toggle-panel',
+      hint: 'Ctrl+I'
     },
     { label: 'Refresh', action: 'refresh', hint: 'F5' },
     { label: 'Export…', action: 'export' }

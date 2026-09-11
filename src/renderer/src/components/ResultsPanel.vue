@@ -202,7 +202,7 @@ const rowMenuItems: MenuEntry[] = [
   { label: 'Copy all as JSON', action: 'copy-json' },
   { label: 'Copy all as INSERTs', action: 'copy-sql' },
   { separator: true, label: '' },
-  { label: 'View row details', action: 'row-details', hint: 'Ctrl+I' },
+  { label: 'View row details', action: 'row-details' },
   { label: 'Export…', action: 'export' }
 ]
 

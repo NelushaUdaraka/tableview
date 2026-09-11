@@ -41,21 +41,19 @@ const toasts = useToastStore()
 const sidebar = ref<InstanceType<typeof AppSidebar> | null>(null)
 
 /**
- * The mounted pane views, by pane id.
+ * The two pane views, and which of them a menu action goes to.
  *
- * A menu action goes to whichever pane has the focus, so the views have to be
- * reachable by pane rather than by position — template refs are bound through
- * a function so a pane that comes and goes takes its entry with it.
+ * There are at most two panes and they keep their positions, so the views are
+ * held by position rather than by pane id — a ref bound to an id would have to
+ * name a pane that, by the time the ref is cleared, has already gone.
  */
-const paneViews = ref<Record<string, PaneView | null>>({})
+const primaryPane = ref<PaneView | null>(null)
+const secondaryPane = ref<PaneView | null>(null)
 
-function bindPane(paneId: string, instance: unknown): void {
-  if (instance) paneViews.value[paneId] = instance as PaneView
-  else delete paneViews.value[paneId]
-}
-
-const focusedView = computed<PaneView | null>(
-  () => paneViews.value[tabs.focusedPaneId] ?? null
+const focusedView = computed<PaneView | null>(() =>
+  tabs.panes[1] && tabs.focusedPaneId === tabs.panes[1].id
+    ? secondaryPane.value
+    : primaryPane.value
 )
 
 const mainArea = ref<HTMLElement | null>(null)
@@ -220,7 +218,9 @@ function handleAction(action: string): void {
       void tabs.closeSplit()
       break
     case 'tab:detach':
-      if (tabs.activeId) void detachTab(tabs.activeId, { x: window.screenX + 80, y: window.screenY + 80 })
+      if (tabs.activeId) {
+        void detachTab(tabs.activeId, { x: window.screenX + 80, y: window.screenY + 80 })
+      }
       break
     case 'view:toggle-sidebar':
       sidebarCollapsed.value = !sidebarCollapsed.value
@@ -349,7 +349,7 @@ onBeforeUnmount(() => {
           >
             <template #first>
               <TabPaneView
-                :ref="(instance) => bindPane(tabs.panes[0].id, instance)"
+                ref="primaryPane"
                 :pane="tabs.panes[0]"
                 @new-query="newQueryTab"
                 @export="(columns, rows, name) => (exportPayload = { columns, rows, name })"
@@ -361,7 +361,7 @@ onBeforeUnmount(() => {
             <template #second>
               <TabPaneView
                 v-if="tabs.panes[1]"
-                :ref="(instance) => bindPane(tabs.panes[1].id, instance)"
+                ref="secondaryPane"
                 :pane="tabs.panes[1]"
                 @new-query="newQueryTab"
                 @export="(columns, rows, name) => (exportPayload = { columns, rows, name })"

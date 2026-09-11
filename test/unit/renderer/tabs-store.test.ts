@@ -288,6 +288,25 @@ describe('split view', () => {
     expect(tabs.tabsIn(tabs.panes[0].id).map((tab) => tab.id)).toEqual([third, first, second])
   })
 
+  it('drops a tab into the gap the pointer is over, not one past it', async () => {
+    const tabs = await threeTabs()
+    const [first, second, third] = tabs.tabs.map((tab) => tab.id)
+
+    // The strip reads [first, second, third]; dragging the first tab into the
+    // gap before the third means landing between second and third. The index
+    // counts gaps in the strip as drawn, so it still counts the dragged tab.
+    tabs.reorder(first, 2)
+    expect(tabs.tabsIn(tabs.panes[0].id).map((tab) => tab.id)).toEqual([second, first, third])
+
+    // Dragging backwards needs no such correction.
+    tabs.reorder(third, 0)
+    expect(tabs.tabsIn(tabs.panes[0].id).map((tab) => tab.id)).toEqual([third, second, first])
+
+    // Past the last gap the tab goes to the end.
+    tabs.reorder(third, 3)
+    expect(tabs.tabsIn(tabs.panes[0].id).map((tab) => tab.id)).toEqual([second, first, third])
+  })
+
   it('cycles within the focused pane only', async () => {
     const tabs = await threeTabs()
     const moved = tabs.activeId!

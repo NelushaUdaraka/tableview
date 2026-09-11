@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type {
   CellValue,
   ColumnMeta,
@@ -58,9 +58,26 @@ const focusedView = computed<PaneView | null>(
   () => paneViews.value[tabs.focusedPaneId] ?? null
 )
 
+const mainArea = ref<HTMLElement | null>(null)
 const sidebarWidth = ref(280)
 /** Width of the second pane when the workspace is split. */
 const splitWidth = ref(640)
+
+/**
+ * A split starts even.
+ *
+ * The remembered width is whatever the last drag left, which on a narrower
+ * window can be most of it — and a pane opening at that width would leave the
+ * other one a sliver. Half of what there is to share is a fair opening bid;
+ * the divider is there for anything else.
+ */
+watch(
+  () => tabs.isSplit,
+  (split) => {
+    const width = mainArea.value?.clientWidth ?? 0
+    if (split && width > 0) splitWidth.value = Math.round(width / 2)
+  }
+)
 const sidebarCollapsed = ref(false)
 const showSettings = ref(false)
 const showShortcuts = ref(false)
@@ -314,7 +331,7 @@ onBeforeUnmount(() => {
       </template>
 
       <template #second>
-        <div class="workspace__main">
+        <div ref="mainArea" class="workspace__main">
           <!--
             One pane, or two side by side once a tab has been split off. The
             split pane is always the one rendering the first pane, collapsed

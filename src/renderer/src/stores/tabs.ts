@@ -353,8 +353,12 @@ export const useTabStore = defineStore('tabs', () => {
   function reorder(tabId: string, index: number): void {
     const pane = paneFor(tabId)
     if (!pane) return
+    const from = pane.tabIds.indexOf(tabId)
     const without = pane.tabIds.filter((id) => id !== tabId)
-    const at = Math.max(0, Math.min(index, without.length))
+    // `index` counts the gaps in the strip as it is drawn, which still has the
+    // dragged tab in it; lifting the tab out shifts every gap after it left.
+    const wanted = from >= 0 && index > from ? index - 1 : index
+    const at = Math.max(0, Math.min(wanted, without.length))
     pane.tabIds = [...without.slice(0, at), tabId, ...without.slice(at)]
   }
 

@@ -9,6 +9,7 @@
  */
 import { ref } from 'vue'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
+import { beginTabDrag, draggedTab, endTabDrag, markTabDropped } from '../lib/tabDrag'
 import { useTabStore, type TabPane } from '../stores/tabs'
 
 const props = defineProps<{ pane: TabPane }>()
@@ -19,17 +20,6 @@ const emit = defineEmits<{
 
 const tabs = useTabStore()
 const menu = ref<{ x: number; y: number; id: string } | null>(null)
-
-/**
- * The drag in progress, shared by both strips.
- *
- * `dragover` cannot read the drag's data — the browser withholds it until the
- * drop — so the two strips need somewhere outside the event to agree about
- * what is being dragged. Module scope is that place: there is only ever one
- * drag at a time.
- */
-let dragged: { tabId: string; paneId: string } | null = null
-let landed = false
 
 /** Where a drop would insert, drawn as a rule between two tabs. */
 const dropIndex = ref<number | null>(null)
@@ -90,8 +80,7 @@ function onAuxClick(event: MouseEvent, id: string): void {
 // --- dragging ---------------------------------------------------------------
 
 function onDragStart(event: DragEvent, tabId: string): void {
-  dragged = { tabId, paneId: props.pane.id }
-  landed = false
+  beginTabDrag({ tabId, paneId: props.pane.id })
   event.dataTransfer?.setData('text/plain', tabId)
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
 }
@@ -108,7 +97,7 @@ function indexAt(event: DragEvent): number {
 }
 
 function onDragOver(event: DragEvent): void {
-  if (!dragged) return
+  if (!draggedTab()) return
   event.preventDefault()
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
   dropIndex.value = indexAt(event)
@@ -119,13 +108,13 @@ function onDragLeave(): void {
 }
 
 function onDrop(event: DragEvent): void {
-  if (!dragged) return
+  const drag = draggedTab()
+  if (!drag) return
   event.preventDefault()
-  landed = true
+  markTabDropped()
   const index = indexAt(event)
   dropIndex.value = null
-  void tabs.moveToPane(dragged.tabId, props.pane.id, index)
-  dragged = null
+  void tabs.moveToPane(drag.tabId, props.pane.id, index)
 }
 
 /**
@@ -137,9 +126,8 @@ function onDrop(event: DragEvent): void {
  */
 function onDragEnd(event: DragEvent, tabId: string): void {
   dropIndex.value = null
-  const wasDragged = dragged
-  dragged = null
-  if (landed || !wasDragged) return
+  const { drag, landed } = endTabDrag()
+  if (landed || !drag) return
 
   const outside =
     event.screenX < window.screenX ||

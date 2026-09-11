@@ -49,6 +49,7 @@ import { SsmTunnel } from '../../tunnel/ssm'
 import { credentialsToEnv, expiresAt, isExpired } from '../../../shared/aws/credentials'
 import type { Tunnel, TunnelHandle } from '../../tunnel/types'
 import { buildMssqlConfig } from './config'
+import { planReconnect } from '../reconnect'
 import type { ClientStateListener, DbClient, ExecuteOptions, ServerInfo } from '../types'
 import * as Q from './queries'
 import { DriverColumn, declarationOf, isReadOnlyType, jsKindOf, renderDriverType } from './types'
@@ -65,17 +66,6 @@ const DEFAULT_MAX_ROWS = 50000
  * connection that has already failed.
  */
 const FORWARD_ERROR_GRACE_MS = 1500
-
-/**
- * Waits between attempts to get a dropped connection back, in order.
- *
- * The first is immediate-ish because most drops are a socket that went away
- * while the far end is perfectly healthy — a tunnel that idled out, a NAT that
- * forgot the mapping — and reopening it works first time. The later ones back
- * off for the case that is really down, and the last is repeated for as long
- * as the connection stays open.
- */
-const RECONNECT_DELAYS_MS = [500, 2000, 5000, 15000, 30000]
 
 /** Used for connections saved before the option existed. */
 const DEFAULT_KEEPALIVE_MS = DEFAULT_SQLSERVER_OPTIONS.keepAliveIntervalMs
@@ -347,14 +337,21 @@ export class SqlServerClient implements DbClient {
     } catch (error) {
       if (this.closed) return
       await this.teardown()
-      const delay =
-        RECONNECT_DELAYS_MS[Math.min(this.reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)]
       this.reconnectAttempt += 1
-      // Keep saying so: the window shows the last attempt's reason, and a
-      // session whose credentials ran out has to say that rather than sit
-      // silently on a connection that is never coming back.
+      const plan = planReconnect(this.reconnectAttempt, error)
+
+      // Nothing more to try: say the connection is gone, with the reason, and
+      // leave it to the user — the window offers them a Reconnect button.
+      if (!plan.retry) {
+        this.recovering = false
+        this.announce({ state: 'disconnected', error, attempt: this.reconnectAttempt })
+        return
+      }
+
+      // Keep saying so: the window shows the last attempt's reason, so a
+      // connection that is taking a while explains itself while it tries.
       this.announce({ state: 'reconnecting', error, attempt: this.reconnectAttempt })
-      this.reconnectTimer = setTimeout(() => void this.attemptReconnect(), delay)
+      this.reconnectTimer = setTimeout(() => void this.attemptReconnect(), plan.delayMs)
       this.reconnectTimer.unref?.()
     }
   }

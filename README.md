@@ -28,7 +28,9 @@ TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind
 - **Kept alive, and put back when it drops** — an idle connection is poked once a minute (the
   *Keepalive* option; 0 turns it off) so an SSM session, an SSH forward or a firewall does not tear
   it down for want of traffic. A connection that goes anyway is reopened in the background with a
-  backoff, the status bar says so, and the window keeps its tabs and staged edits throughout.
+  backoff, for about eight minutes; the status bar says what is happening and offers *Reconnect*
+  once it stops trying. Credentials that have run out and a login the server refuses are not retried
+  at all — neither is going to fix itself. The window keeps its tabs and staged edits throughout.
 
 **Connecting through an AWS bastion (SSM)**
 

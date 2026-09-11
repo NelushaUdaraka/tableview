@@ -7,6 +7,7 @@ import type {
   TableStructure
 } from '@shared/types'
 import { api } from '../lib/api'
+import { useBusyStore } from './busy'
 
 /** Groups objects under their schema for the sidebar tree. */
 export interface SchemaGroup {
@@ -80,7 +81,9 @@ export const useSchemaStore = defineStore('schema', () => {
   }
 
   async function loadAll(connectionId: string): Promise<void> {
+    const busy = useBusyStore()
     loading.value = true
+    busy.begin()
     try {
       const [dbs, objs, procs] = await Promise.all([
         api.listDatabases(connectionId),
@@ -100,6 +103,7 @@ export const useSchemaStore = defineStore('schema', () => {
         .catch(() => undefined)
     } finally {
       loading.value = false
+      busy.end()
     }
   }
 

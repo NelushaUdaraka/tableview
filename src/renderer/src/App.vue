@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import type { MenuAction } from '@shared/menu'
 import ConnectionScreen from './views/ConnectionScreen.vue'
 import TitleBar from './components/TitleBar.vue'
+import ProgressBar from './components/ProgressBar.vue'
 import WorkspaceView from './views/WorkspaceView.vue'
 import ToastHost from './components/ToastHost.vue'
 import CredentialsExpiredDialog from './components/CredentialsExpiredDialog.vue'
@@ -39,6 +40,8 @@ onBeforeUnmount(() => unsubscribeMenu?.())
 <template>
   <div class="app">
     <TitleBar />
+    <!-- Spans the window, under the title bar: whatever is loading, it shows here. -->
+    <ProgressBar />
     <div class="app__body">
       <div v-if="!ready" class="empty-state">
         <span class="spinner"></span>

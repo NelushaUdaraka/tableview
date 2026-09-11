@@ -26,8 +26,10 @@ import RowDetailPanel, { type RowField } from '../components/RowDetailPanel.vue'
 import SplitPane from '../components/SplitPane.vue'
 import TableViewSwitch from '../components/TableViewSwitch.vue'
 import { exportRows } from '@shared/export'
+import { columnMenuItems } from '../lib/columnMenu'
 import { reindexStagedEdits } from '../lib/stagedRows'
 import { foreignKeyFilterValue, foreignKeyFilters, foreignKeyTargets } from '@shared/foreignKeys'
+import { useBusyStore } from '../stores/busy'
 import { useSettingsStore } from '../stores/settings'
 import { useSchemaStore } from '../stores/schema'
 import { useTabStore } from '../stores/tabs'
@@ -43,6 +45,7 @@ const emit = defineEmits<{
   (event: 'open-related', schema: string, table: string, filters: TableFilter[]): void
 }>()
 
+const busy = useBusyStore()
 const settings = useSettingsStore()
 const schemaStore = useSchemaStore()
 const tabs = useTabStore()
@@ -61,7 +64,16 @@ const loading = ref(false)
 const durationMs = ref(0)
 const lastSql = ref('')
 const grid = ref<InstanceType<typeof DataGrid> | null>(null)
-const menu = ref<{ x: number; y: number; row: number; col: number } | null>(null)
+/**
+ * The open context menu.
+ *
+ * `kind` says which of the two it is: right-clicking a row asks about rows,
+ * right-clicking a header asks about a column, and they share one menu
+ * component because only one can be open at a time.
+ */
+const menu = ref<{ kind: 'row' | 'header'; x: number; y: number; row: number; col: number } | null>(
+  null
+)
 const selection = ref<{ rowIndex: number; columnIndex: number } | null>(null)
 
 const offset = ref(0)
@@ -210,9 +222,17 @@ async function loadStructure(): Promise<void> {
   }
 }
 
+/**
+ * Fetches the current page.
+ *
+ * The rows already on screen are left alone until the new ones arrive: the
+ * grid dims them and stops answering, and the window's progress bar carries
+ * the wait. Sorting a table no longer empties it for the round trip.
+ */
 async function load(resetOffset = false): Promise<void> {
   if (resetOffset) offset.value = 0
   loading.value = true
+  busy.begin()
   try {
     const response = await api.fetchTableData({
       connectionId: props.tab.connectionId,
@@ -239,6 +259,7 @@ async function load(resetOffset = false): Promise<void> {
     }
   } finally {
     loading.value = false
+    busy.end()
   }
 }
 
@@ -310,6 +331,17 @@ async function selectFirstRow(): Promise<void> {
 
 function toggleRowPanel(): void {
   void settings.update({ showRowPanel: !settings.settings.showRowPanel })
+}
+
+/**
+ * Puts one row in the panel, opening the panel if it was closed.
+ *
+ * The menu entry that leads here names a row, so it has to select that row as
+ * well as show the panel — the panel only ever shows the selected one.
+ */
+function showRowDetails(rowIndex: number, columnIndex: number): void {
+  grid.value?.selectCell(rowIndex, columnIndex)
+  if (!settings.settings.showRowPanel) void settings.update({ showRowPanel: true })
 }
 
 // Dragging the divider emits on every mouse move; only the resting width is
@@ -409,6 +441,25 @@ function followKey(rowIndex: number, columnIndex: number): void {
     return
   }
   emit('open-related', target.schema, target.table, related)
+}
+
+/** Sorts by one column alone, replacing whatever order was in force. */
+function sortBy(column: string, direction: 'asc' | 'desc'): void {
+  sorts.value = [{ column, direction }]
+  void withPendingEdits(() => load(true))
+}
+
+/** Appends a column to the existing order, the way Shift-clicking a header does. */
+function addSort(column: string, direction: 'asc' | 'desc' = 'asc'): void {
+  if (sorts.value.some((sort) => sort.column === column)) return
+  sorts.value = [...sorts.value, { column, direction }]
+  void withPendingEdits(() => load(true))
+}
+
+function clearSorts(): void {
+  if (sorts.value.length === 0) return
+  sorts.value = []
+  void withPendingEdits(() => load(true))
 }
 
 function onSort(column: string, additive: boolean): void {
@@ -528,6 +579,32 @@ function filterByCell(rowIndex: number, columnIndex: number, exclude: boolean): 
 
   void withPendingEdits(() => {
     filters.value = [...filters.value, { ...filter, conjunction: 'AND' }]
+    filterMode.value = 'builder'
+    showFilters.value = true
+    return load(true)
+  })
+}
+
+/**
+ * Opens the filter builder on a row for this column, ready to be filled in.
+ *
+ * Nothing is applied yet: the operator and the value are the user's to choose,
+ * and firing a query off an empty `=` would only throw the page away.
+ */
+function filterOnColumn(columnIndex: number): void {
+  const column = columns.value[columnIndex]
+  if (!column) return
+  filterMode.value = 'builder'
+  filters.value = [...filters.value, { column: column.name, operator: '=', value: '', conjunction: 'AND' }]
+  showFilters.value = true
+}
+
+/** The two filters that need no value, straight from the header menu. */
+function filterNullity(columnIndex: number, operator: 'is null' | 'is not null'): void {
+  const column = columns.value[columnIndex]
+  if (!column) return
+  void withPendingEdits(() => {
+    filters.value = [...filters.value, { column: column.name, operator, conjunction: 'AND' }]
     filterMode.value = 'builder'
     showFilters.value = true
     return load(true)
@@ -677,6 +754,7 @@ async function apply(): Promise<boolean> {
   }
 
   applying.value = true
+  busy.begin()
   try {
     const applied = await api.applyChanges(changeSet)
     toasts.success(
@@ -690,6 +768,7 @@ async function apply(): Promise<boolean> {
     return false
   } finally {
     applying.value = false
+    busy.end()
   }
 }
 
@@ -709,7 +788,7 @@ const COPY_FORMATS: { label: string; format: ExportFormat }[] = [
   { label: 'Markdown', format: 'markdown' }
 ]
 
-const menuItems = computed<MenuEntry[]>(() => {
+const rowMenuItems = computed<MenuEntry[]>(() => {
   const target = menu.value
   const key = target ? foreignKeys.value[target.col] : undefined
   const column = target ? columns.value[target.col] : undefined
@@ -778,19 +857,84 @@ const menuItems = computed<MenuEntry[]>(() => {
 
     { separator: true, label: '' },
     { label: 'Select all rows', action: 'select-all', hint: 'Ctrl+A' },
+    // Opens the panel on the row that was clicked, whether or not it was
+    // already open — which is a different thing from the toggle below it.
+    { label: 'View row details', action: 'row-details', hint: 'Ctrl+I' },
     {
-      label: showRowPanel.value ? 'Hide row panel' : 'Show row in panel',
-      action: 'toggle-panel',
-      hint: 'Ctrl+I'
+      label: showRowPanel.value ? 'Hide row panel' : 'Show row panel',
+      action: 'toggle-panel'
     },
     { label: 'Refresh', action: 'refresh', hint: 'F5' },
     { label: 'Export…', action: 'export' }
   ]
 })
 
+/** What right-clicking a column header offers: how it is ordered and filtered. */
+const headerMenuItems = computed<MenuEntry[]>(() => {
+  const column = menu.value ? columns.value[menu.value.col] : undefined
+  if (!column) return []
+  const sort = sorts.value.find((entry) => entry.column === column.name)
+  return columnMenuItems({
+    column: column.name,
+    direction: sort?.direction ?? null,
+    anySort: sorts.value.length > 0,
+    // The table browser writes the query, so it can filter as well as sort.
+    filterable: true,
+    filtered: filters.value.length > 0 || rawWhere.value.trim() !== ''
+  })
+})
+
+const menuItems = computed<MenuEntry[]>(() =>
+  menu.value?.kind === 'header' ? headerMenuItems.value : rowMenuItems.value
+)
+
+/** The column half of the menu; `onMenuSelect` hands over when it is open. */
+async function onColumnMenuSelect(action: string, columnIndex: number): Promise<void> {
+  const column = columns.value[columnIndex]
+  if (!column) return
+
+  switch (action) {
+    case 'sort-asc':
+      sortBy(column.name, 'asc')
+      break
+    case 'sort-desc':
+      sortBy(column.name, 'desc')
+      break
+    case 'sort-add':
+      addSort(column.name)
+      break
+    case 'sort-clear':
+      clearSorts()
+      break
+    case 'filter-column':
+      filterOnColumn(columnIndex)
+      break
+    case 'filter-null':
+      filterNullity(columnIndex, 'is null')
+      break
+    case 'filter-not-null':
+      filterNullity(columnIndex, 'is not null')
+      break
+    case 'filter-clear':
+      clearFilters()
+      break
+    case 'copy-name':
+      await api.copyToClipboard(column.name)
+      toasts.info(`Copied “${column.name}”`)
+      break
+    case 'fit-column':
+      grid.value?.autoFit(columnIndex)
+      break
+    case 'fit-all':
+      grid.value?.autoFitAll()
+      break
+  }
+}
+
 async function onMenuSelect(action: string): Promise<void> {
   const target = menu.value
   if (!target) return
+  if (target.kind === 'header') return onColumnMenuSelect(action, target.col)
 
   switch (action) {
     case 'copy-cell':
@@ -831,6 +975,9 @@ async function onMenuSelect(action: string): Promise<void> {
       break
     case 'filter-clear':
       clearFilters()
+      break
+    case 'row-details':
+      showRowDetails(target.row, target.col)
       break
     case 'toggle-panel':
       toggleRowPanel()
@@ -909,10 +1056,11 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       <button
         class="btn"
         :class="{ 'btn--armed': showRowPanel }"
-        title="Show the selected row beside the grid (Ctrl+I)"
+        :title="`${showRowPanel ? 'Hide' : 'Show'} the selected row beside the grid (Ctrl+I)`"
+        :aria-pressed="showRowPanel"
         @click="toggleRowPanel"
       >
-        Row
+        ▤ Row details
       </button>
 
       <template v-if="editable">
@@ -982,7 +1130,18 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
             @rows-selected="selectedRows = $event"
             @delete-rows="deleteRows"
             @follow-key="followKey($event.rowIndex, $event.columnIndex)"
-            @row-context="menu = { x: $event.x, y: $event.y, row: $event.rowIndex, col: $event.columnIndex }"
+            @row-context="
+              menu = {
+                kind: 'row',
+                x: $event.x,
+                y: $event.y,
+                row: $event.rowIndex,
+                col: $event.columnIndex
+              }
+            "
+            @header-context="
+              menu = { kind: 'header', x: $event.x, y: $event.y, row: -1, col: $event.columnIndex }
+            "
           />
         </template>
 

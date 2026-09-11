@@ -9,14 +9,47 @@ import ToastHost from './components/ToastHost.vue'
 import CredentialsExpiredDialog from './components/CredentialsExpiredDialog.vue'
 import { useConnectionStore } from './stores/connections'
 import { useSettingsStore } from './stores/settings'
+import { useTabStore } from './stores/tabs'
 import { useToastStore } from './stores/toasts'
 import { dispatchMenuAction } from './lib/menuBus'
 import { api } from './lib/api'
 
 const connections = useConnectionStore()
 const settings = useSettingsStore()
+const tabs = useTabStore()
 const toasts = useToastStore()
 const ready = ref(false)
+
+/**
+ * Opens the tab this window was created for, if it was created for one.
+ *
+ * A tab dragged out of another window arrives as a description, not as state:
+ * this window has its own connection pool, so it connects for itself before it
+ * can show anything. Done before the workspace is shown, so it opens onto the
+ * tab rather than onto a blank query.
+ */
+async function openDetachedTab(): Promise<void> {
+  const pending = await api.takePendingTab()
+  if (!pending) return
+
+  const status = await connections.connect(pending.connectionId)
+  if (status.state !== 'connected') {
+    toasts.error('Could not open that tab in this window', status.error?.message)
+    return
+  }
+
+  if (pending.kind === 'table' && pending.schema && pending.table) {
+    await tabs.openTable(
+      pending.connectionId,
+      pending.schema,
+      pending.table,
+      pending.objectType ?? 'table',
+      pending.view ?? 'data'
+    )
+  } else {
+    await tabs.openQuery(pending.connectionId, pending.sql ?? '', pending.title)
+  }
+}
 
 let unsubscribeMenu: (() => void) | null = null
 
@@ -27,6 +60,7 @@ onMounted(async () => {
   try {
     await settings.load()
     await connections.load()
+    await openDetachedTab()
   } catch (error) {
     toasts.fromError('Could not start up cleanly', error)
   } finally {

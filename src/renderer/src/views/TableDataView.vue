@@ -264,7 +264,7 @@ async function load(resetOffset = false): Promise<void> {
 }
 
 onBeforeUnmount(() => {
-  tabs.setLeaveGuard(null)
+  tabs.setLeaveGuard(props.tab.id, null)
   // A dialog left waiting would keep its caller pending forever.
   if (pendingPrompt.value) answerPendingPrompt('cancel')
 })
@@ -286,8 +286,9 @@ onMounted(async () => {
   // any left over from the last time this table was open.
   tabs.update<TableTab>(props.tab.id, { pendingEdits: 0 })
   // Leaving this tab unmounts the view and takes the staged edits with it, so
-  // the store asks here first.
-  tabs.setLeaveGuard(confirmLeave)
+  // the store asks here first. Keyed by tab: a split workspace has a view
+  // mounted per pane, each answering for its own tab.
+  tabs.setLeaveGuard(props.tab.id, confirmLeave)
   await loadStructure()
   // A primary key gives a stable default order.
   const key = structure.value?.primaryKey ?? []

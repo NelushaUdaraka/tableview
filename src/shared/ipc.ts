@@ -19,9 +19,36 @@ import {
   TableDataResponse,
   SsmConfig,
   TableForeignKey,
-  TableStructure
+  TableStructure,
+  SchemaObjectType
 } from './types'
 import type { MenuRole } from './menu'
+
+/**
+ * A tab being handed to a window of its own.
+ *
+ * Only what it takes to open the same thing again: a window has its own
+ * connection pool and its own tab state, so nothing that belongs to the tab's
+ * old window — staged edits, a result set, a scroll position — travels with it.
+ */
+export interface DetachedTab {
+  kind: 'query' | 'table'
+  connectionId: string
+  title: string
+  /** Query tabs only. */
+  sql?: string
+  /** Table tabs only. */
+  schema?: string
+  table?: string
+  objectType?: SchemaObjectType
+  view?: 'data' | 'structure'
+}
+
+export interface DetachRequest {
+  tab: DetachedTab
+  /** Screen position the tab was dropped at, so the window opens under it. */
+  position?: { x: number; y: number }
+}
 
 /** Result of the AWS SSM readiness check; mirrors `main/tunnel/ssmPreflight`. */
 export interface SsmCheckResult {
@@ -84,6 +111,8 @@ export const CHANNELS = {
   ssmInstances: 'ssm:instances',
 
   windowNew: 'window:new',
+  windowDetachTab: 'window:detachTab',
+  windowPendingTab: 'window:pendingTab',
   windowMinimize: 'window:minimize',
   windowToggleMaximize: 'window:toggleMaximize',
   windowClose: 'window:close',
@@ -172,6 +201,15 @@ export interface RendererApi {
   listSsmInstances(config: SsmConfig, connectionId?: string): Promise<SsmInstanceList>
 
   openNewWindow(): Promise<void>
+  /** Opens a window showing one tab, for a tab dragged out of this one. */
+  detachTab(request: DetachRequest): Promise<void>
+  /**
+   * The tab this window was opened to show, if it was opened for one.
+   *
+   * Consumed by the first caller: a window asks once, on startup, and a reload
+   * must not reopen a tab the user has since closed.
+   */
+  takePendingTab(): Promise<DetachedTab | null>
   minimizeWindow(): Promise<void>
   toggleMaximizeWindow(): Promise<void>
   closeWindow(): Promise<void>

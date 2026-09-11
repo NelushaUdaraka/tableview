@@ -54,16 +54,22 @@ export class WindowManager {
     return this.all.length
   }
 
-  create(preloadPath: string): BrowserWindow {
+  /**
+   * Opens a window. `position` places it where a dragged-out tab was dropped,
+   * clamped to a display so a drop past the edge of the screen still lands
+   * somewhere visible.
+   */
+  create(preloadPath: string, position?: { x: number; y: number }): BrowserWindow {
     const state = this.restoreState()
     const offset = this.windows.size * CASCADE_STEP
     const isMac = process.platform === 'darwin'
+    const dropped = position ? clampToDisplay(position, state.width, state.height) : null
 
     const window = new BrowserWindow({
       width: state.width,
       height: state.height,
-      x: state.x === undefined ? undefined : state.x + offset,
-      y: state.y === undefined ? undefined : state.y + offset,
+      x: dropped ? dropped.x : state.x === undefined ? undefined : state.x + offset,
+      y: dropped ? dropped.y : state.y === undefined ? undefined : state.y + offset,
       minWidth: 900,
       minHeight: 560,
       show: false,
@@ -89,7 +95,9 @@ export class WindowManager {
     if (!isMac) window.setMenuBarVisibility(false)
 
     // Only the first window inherits "maximized"; later ones cascade instead.
-    if (state.maximized && this.windows.size === 0) window.maximize()
+    // A window opened at a dropped position is never maximised — the point of
+    // the drop was to put it somewhere.
+    if (state.maximized && this.windows.size === 0 && !dropped) window.maximize()
     window.once('ready-to-show', () => window.show())
 
     const persist = (): void => this.persistState(window)
@@ -150,6 +158,28 @@ export class WindowManager {
       y: bounds.y,
       maximized
     })
+  }
+}
+
+/**
+ * Keeps a dropped window on a screen.
+ *
+ * A tab can be let go anywhere, including past the edge of every display or
+ * so close to one that the window would open mostly off it. This pulls the
+ * frame back inside the work area of whichever display the drop was nearest.
+ */
+function clampToDisplay(
+  position: { x: number; y: number },
+  width: number,
+  height: number
+): { x: number; y: number } {
+  const area = screen.getDisplayNearestPoint({
+    x: Math.round(position.x),
+    y: Math.round(position.y)
+  }).workArea
+  return {
+    x: Math.round(Math.min(Math.max(position.x, area.x), area.x + area.width - width)),
+    y: Math.round(Math.min(Math.max(position.y, area.y), area.y + area.height - height))
   }
 }
 

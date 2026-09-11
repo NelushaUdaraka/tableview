@@ -42,34 +42,62 @@ export interface TableTab {
 
 export type Tab = QueryTab | TableTab
 
+/**
+ * A column of the workspace: its own strip of tabs, one of which is showing.
+ *
+ * There is one to begin with. Splitting a tab off adds a second, so two tables
+ * can be read side by side; emptying it takes it away again. Every tab belongs
+ * to exactly one pane.
+ */
+export interface TabPane {
+  id: string
+  tabIds: string[]
+  activeTabId: string | null
+}
+
 let counter = 0
 const newId = (): string => `tab-${++counter}`
 
+let paneCounter = 0
+const newPaneId = (): string => `pane-${++paneCounter}`
+
 /**
- * Asked before the active tab is left or closed; `false` cancels the move.
+ * Asked before a tab is unmounted; `false` cancels whatever would unmount it.
  *
- * Only the active tab is mounted, so only it can be holding work that leaving
- * would throw away — the view that owns that work registers this and answers
- * for it. Nothing is registered by default, and then every move goes through.
+ * Only a pane's active tab is mounted, so only those can be holding work that
+ * leaving would throw away — the view that owns that work registers this
+ * against its own tab id and answers for it. Guards are per tab because a split
+ * workspace has one mounted view per pane, and a single slot would let the
+ * second overwrite the first.
  */
 export type LeaveGuard = () => Promise<boolean>
 
 export const useTabStore = defineStore('tabs', () => {
   const tabs = ref<Tab[]>([])
-  const activeId = ref<string | null>(null)
-  let leaveGuard: LeaveGuard | null = null
+  const panes = ref<TabPane[]>([{ id: newPaneId(), tabIds: [], activeTabId: null }])
+  const focusedPaneId = ref(panes.value[0].id)
 
-  /** Registered by the active view on mount, cleared on unmount. */
-  function setLeaveGuard(guard: LeaveGuard | null): void {
-    leaveGuard = guard
+  /** Registered by each mounted view, cleared when it unmounts. */
+  const guards = new Map<string, LeaveGuard>()
+
+  function setLeaveGuard(tabId: string, guard: LeaveGuard | null): void {
+    if (guard) guards.set(tabId, guard)
+    else guards.delete(tabId)
   }
 
-  /** Runs `move` unless the tab being left asks to stay. */
-  async function leaving(move: () => void): Promise<void> {
-    if (leaveGuard && !(await leaveGuard())) return
-    move()
+  /** Asks a tab that is about to be unmounted whether it is ready to go. */
+  async function canLeave(tabId: string | null | undefined): Promise<boolean> {
+    if (!tabId) return true
+    const guard = guards.get(tabId)
+    return guard ? guard() : true
   }
 
+  const focusedPane = computed(
+    () => panes.value.find((pane) => pane.id === focusedPaneId.value) ?? panes.value[0]
+  )
+  const isSplit = computed(() => panes.value.length > 1)
+
+  const activeId = computed(() => focusedPane.value?.activeTabId ?? null)
   const active = computed(() => tabs.value.find((tab) => tab.id === activeId.value) ?? null)
   const activeQueryTab = computed<QueryTab | null>(() =>
     active.value?.kind === 'query' ? active.value : null
@@ -78,37 +106,74 @@ export const useTabStore = defineStore('tabs', () => {
     active.value?.kind === 'table' ? active.value : null
   )
 
-  async function openQuery(connectionId: string, sql = '', title = 'Query'): Promise<void> {
-    await leaving(() => openQueryNow(connectionId, sql, title))
+  function paneById(paneId: string): TabPane | undefined {
+    return panes.value.find((pane) => pane.id === paneId)
   }
 
-  function openQueryNow(connectionId: string, sql: string, title: string): void {
+  function paneFor(tabId: string): TabPane | undefined {
+    return panes.value.find((pane) => pane.tabIds.includes(tabId))
+  }
+
+  function byId(tabId: string): Tab | undefined {
+    return tabs.value.find((tab) => tab.id === tabId)
+  }
+
+  /** The tabs in a pane, in the order its strip shows them. */
+  function tabsIn(paneId: string): Tab[] {
+    const pane = paneById(paneId)
+    if (!pane) return []
+    return pane.tabIds
+      .map((id) => byId(id))
+      .filter((tab): tab is Tab => Boolean(tab))
+  }
+
+  /** The mounted tab of a pane — the one a menu action in it would act on. */
+  function activeIdIn(paneId: string): string | null {
+    return paneById(paneId)?.activeTabId ?? null
+  }
+
+  function focusPane(paneId: string): void {
+    if (paneById(paneId)) focusedPaneId.value = paneId
+  }
+
+  function addTab(tab: Tab, paneId: string): void {
+    const pane = paneById(paneId) ?? panes.value[0]
+    tabs.value = [...tabs.value, tab]
+    pane.tabIds = [...pane.tabIds, tab.id]
+    pane.activeTabId = tab.id
+    focusedPaneId.value = pane.id
+  }
+
+  // --- opening ---------------------------------------------------------------
+
+  async function openQuery(connectionId: string, sql = '', title = 'Query'): Promise<void> {
     const existingUntitled = tabs.value.find(
       (tab): tab is QueryTab =>
         tab.kind === 'query' && tab.connectionId === connectionId && !tab.dirty && tab.sql === ''
     )
     // Reuse a blank tab rather than piling up empties.
-    if (existingUntitled && sql === '') {
-      activeId.value = existingUntitled.id
-      return
-    }
+    if (existingUntitled && sql === '') return select(existingUntitled.id)
 
-    const tab: QueryTab = {
-      id: newId(),
-      kind: 'query',
-      title,
-      connectionId,
-      sql,
-      cursor: sql.length,
-      result: null,
-      running: false,
-      executionId: null,
-      activeResultIndex: 0,
-      dirty: false,
-      statementLine: null
-    }
-    tabs.value = [...tabs.value, tab]
-    activeId.value = tab.id
+    // The new tab takes the focused pane's slot, so what is there now goes.
+    if (!(await canLeave(focusedPane.value?.activeTabId))) return
+
+    addTab(
+      {
+        id: newId(),
+        kind: 'query',
+        title,
+        connectionId,
+        sql,
+        cursor: sql.length,
+        result: null,
+        running: false,
+        executionId: null,
+        activeResultIndex: 0,
+        dirty: false,
+        statementLine: null
+      },
+      focusedPaneId.value
+    )
   }
 
   async function openTable(
@@ -119,17 +184,6 @@ export const useTabStore = defineStore('tabs', () => {
     view: 'data' | 'structure' = 'data',
     filters?: TableFilter[]
   ): Promise<void> {
-    await leaving(() => openTableNow(connectionId, schema, table, objectType, view, filters))
-  }
-
-  function openTableNow(
-    connectionId: string,
-    schema: string,
-    table: string,
-    objectType: SchemaObjectType,
-    view: 'data' | 'structure',
-    filters?: TableFilter[]
-  ): void {
     const existing = tabs.value.find(
       (tab): tab is TableTab =>
         tab.kind === 'table' &&
@@ -138,84 +192,251 @@ export const useTabStore = defineStore('tabs', () => {
         tab.table === table
     )
     if (existing) {
+      // A table already open is shown where it is, split pane included.
+      const pane = paneFor(existing.id)
+      if (pane && pane.activeTabId !== existing.id && !(await canLeave(pane.activeTabId))) return
       existing.view = view
       if (filters) {
         existing.filters = filters
         existing.filterRevision += 1
       }
-      activeId.value = existing.id
+      if (pane) {
+        pane.activeTabId = existing.id
+        focusedPaneId.value = pane.id
+      }
       return
     }
 
-    const tab: TableTab = {
-      id: newId(),
-      kind: 'table',
-      title: table,
-      connectionId,
-      schema,
-      table,
-      objectType,
-      view,
-      pendingEdits: 0,
-      filters,
-      filterRevision: filters ? 1 : 0
-    }
-    tabs.value = [...tabs.value, tab]
-    activeId.value = tab.id
+    if (!(await canLeave(focusedPane.value?.activeTabId))) return
+
+    addTab(
+      {
+        id: newId(),
+        kind: 'table',
+        title: table,
+        connectionId,
+        schema,
+        table,
+        objectType,
+        view,
+        pendingEdits: 0,
+        filters,
+        filterRevision: filters ? 1 : 0
+      },
+      focusedPaneId.value
+    )
   }
 
-  async function close(id: string): Promise<void> {
-    if (id === activeId.value) return leaving(() => closeNow(id))
-    closeNow(id)
+  // --- closing ---------------------------------------------------------------
+
+  /** Resolves false when the tab asked to stay. */
+  async function close(id: string): Promise<boolean> {
+    const pane = paneFor(id)
+    if (!pane) return false
+    // Only the mounted tab can be holding work that closing would throw away.
+    if (pane.activeTabId === id && !(await canLeave(id))) return false
+    removeTab(id)
+    return true
   }
 
-  function closeNow(id: string): void {
-    const index = tabs.value.findIndex((tab) => tab.id === id)
-    if (index < 0) return
-    const next = tabs.value.filter((tab) => tab.id !== id)
-    tabs.value = next
-    if (activeId.value === id) {
-      activeId.value = next[Math.min(index, next.length - 1)]?.id ?? null
+  function removeTab(id: string): void {
+    const pane = paneFor(id)
+    guards.delete(id)
+    tabs.value = tabs.value.filter((tab) => tab.id !== id)
+    if (!pane) return
+
+    const index = pane.tabIds.indexOf(id)
+    pane.tabIds = pane.tabIds.filter((tabId) => tabId !== id)
+    if (pane.activeTabId === id) {
+      pane.activeTabId = pane.tabIds[Math.min(index, pane.tabIds.length - 1)] ?? null
     }
+    dropEmptyPane(pane.id)
+  }
+
+  /** A split pane with nothing left in it stops being a pane. */
+  function dropEmptyPane(paneId: string): void {
+    const pane = paneById(paneId)
+    if (!pane || pane.tabIds.length > 0 || panes.value.length === 1) return
+    panes.value = panes.value.filter((entry) => entry.id !== paneId)
+    if (focusedPaneId.value === paneId) focusedPaneId.value = panes.value[0].id
+  }
+
+  /** Every mounted tab except `keep`, which are the ones that get a say. */
+  function mountedExcept(keep: string[]): string[] {
+    return panes.value
+      .map((pane) => pane.activeTabId)
+      .filter((id): id is string => Boolean(id) && !keep.includes(id as string))
   }
 
   async function closeOthers(id: string): Promise<void> {
-    // Only a move away from the active tab needs asking about.
-    if (activeId.value !== null && activeId.value !== id) {
-      return leaving(() => {
-        tabs.value = tabs.value.filter((tab) => tab.id === id)
-        activeId.value = id
-      })
+    for (const tabId of mountedExcept([id])) {
+      if (!(await canLeave(tabId))) return
     }
-    tabs.value = tabs.value.filter((tab) => tab.id === id)
-    activeId.value = id
+    for (const tab of [...tabs.value]) {
+      if (tab.id !== id) removeTab(tab.id)
+    }
   }
 
   async function closeAll(): Promise<void> {
-    await leaving(() => {
-      tabs.value = []
-      activeId.value = null
-    })
+    for (const tabId of mountedExcept([])) {
+      if (!(await canLeave(tabId))) return
+    }
+    for (const tab of [...tabs.value]) removeTab(tab.id)
   }
 
+  /** Disconnecting takes its tabs with it; there is nothing left to save to. */
   function closeForConnection(connectionId: string): void {
-    const next = tabs.value.filter((tab) => tab.connectionId !== connectionId)
-    tabs.value = next
-    if (!next.some((tab) => tab.id === activeId.value)) activeId.value = next[0]?.id ?? null
+    for (const tab of [...tabs.value]) {
+      if (tab.connectionId === connectionId) removeTab(tab.id)
+    }
   }
+
+  // --- moving around ---------------------------------------------------------
 
   async function select(id: string): Promise<void> {
-    if (id === activeId.value) return
-    await leaving(() => {
-      activeId.value = id
-    })
+    const pane = paneFor(id)
+    if (!pane) return
+    if (pane.activeTabId === id) {
+      focusedPaneId.value = pane.id
+      return
+    }
+    if (!(await canLeave(pane.activeTabId))) return
+    pane.activeTabId = id
+    focusedPaneId.value = pane.id
   }
 
   async function cycle(delta: number): Promise<void> {
-    if (tabs.value.length === 0) return
-    const index = tabs.value.findIndex((tab) => tab.id === activeId.value)
-    const next = (index + delta + tabs.value.length) % tabs.value.length
-    await select(tabs.value[next].id)
+    const pane = focusedPane.value
+    if (!pane || pane.tabIds.length === 0) return
+    const index = pane.tabIds.indexOf(pane.activeTabId ?? '')
+    const next = (index + delta + pane.tabIds.length) % pane.tabIds.length
+    await select(pane.tabIds[next])
+  }
+
+  /**
+   * Moves a tab into a pane, at a position in its strip.
+   *
+   * Both ends can lose a mounted view: the tab being moved is remounted in its
+   * new pane, and whatever was showing in that pane is replaced — so both are
+   * asked before anything moves.
+   */
+  async function moveToPane(tabId: string, paneId: string, index?: number): Promise<void> {
+    const from = paneFor(tabId)
+    const to = paneById(paneId)
+    if (!from || !to) return
+
+    if (from.id === to.id) {
+      reorder(tabId, index ?? from.tabIds.length)
+      focusedPaneId.value = to.id
+      return
+    }
+
+    if (from.activeTabId === tabId && !(await canLeave(tabId))) return
+    if (to.activeTabId && to.activeTabId !== tabId && !(await canLeave(to.activeTabId))) return
+
+    const wasActive = from.activeTabId === tabId
+    const position = from.tabIds.indexOf(tabId)
+    from.tabIds = from.tabIds.filter((id) => id !== tabId)
+    if (wasActive) {
+      from.activeTabId = from.tabIds[Math.min(position, from.tabIds.length - 1)] ?? null
+    }
+
+    const at = Math.max(0, Math.min(index ?? to.tabIds.length, to.tabIds.length))
+    to.tabIds = [...to.tabIds.slice(0, at), tabId, ...to.tabIds.slice(at)]
+    to.activeTabId = tabId
+    focusedPaneId.value = to.id
+
+    dropEmptyPane(from.id)
+  }
+
+  /** Drag within one strip: nothing is unmounted, so nothing is asked. */
+  function reorder(tabId: string, index: number): void {
+    const pane = paneFor(tabId)
+    if (!pane) return
+    const without = pane.tabIds.filter((id) => id !== tabId)
+    const at = Math.max(0, Math.min(index, without.length))
+    pane.tabIds = [...without.slice(0, at), tabId, ...without.slice(at)]
+  }
+
+  // --- splitting -------------------------------------------------------------
+
+  /** A second view of the same thing: a new tab, none of the first one's state. */
+  function copyOf(tab: Tab): Tab {
+    if (tab.kind === 'query') {
+      return {
+        ...tab,
+        id: newId(),
+        result: null,
+        running: false,
+        executionId: null,
+        savedQueryId: tab.savedQueryId,
+        dirty: tab.dirty
+      }
+    }
+    return {
+      ...tab,
+      id: newId(),
+      pendingEdits: 0,
+      filters: tab.filters ? tab.filters.map((filter) => ({ ...filter })) : undefined
+    }
+  }
+
+  /**
+   * Puts a tab in a pane beside the one it is in.
+   *
+   * Splitting the only tab in a pane would empty that pane, so what opens
+   * beside it is a second view of the same table or query instead — which is
+   * what "show me these side by side" means when there is only one of them.
+   */
+  async function splitTab(tabId: string): Promise<void> {
+    const tab = byId(tabId)
+    const from = paneFor(tabId)
+    if (!tab || !from) return
+
+    const existing = panes.value.find((pane) => pane.id !== from.id)
+    if (existing) {
+      // Already split: the second pane is where it goes, not a third one.
+      if (from.tabIds.length === 1) {
+        addTab(copyOf(tab), existing.id)
+        return
+      }
+      await moveToPane(tabId, existing.id)
+      return
+    }
+
+    const pane: TabPane = { id: newPaneId(), tabIds: [], activeTabId: null }
+    panes.value = [...panes.value, pane]
+    if (from.tabIds.length === 1) {
+      addTab(copyOf(tab), pane.id)
+      return
+    }
+    await moveToPane(tabId, pane.id)
+  }
+
+  /**
+   * Folds the split away, keeping every tab in the pane that remains.
+   *
+   * Both mounted views go: the one being folded in is remounted in the pane
+   * that stays, and whatever was showing there is replaced by it — so both are
+   * asked before anything moves.
+   */
+  async function closeSplit(): Promise<void> {
+    if (panes.value.length < 2) return
+    const [first, second] = panes.value
+    const keep = second.activeTabId
+    if (keep && !(await canLeave(keep))) return
+    if (first.activeTabId && first.activeTabId !== keep && !(await canLeave(first.activeTabId))) {
+      return
+    }
+
+    for (const tabId of [...second.tabIds]) {
+      first.tabIds = [...first.tabIds, tabId]
+    }
+    second.tabIds = []
+    panes.value = [first]
+    focusedPaneId.value = first.id
+    if (keep) first.activeTabId = keep
+    else if (!first.activeTabId) first.activeTabId = first.tabIds[0] ?? null
   }
 
   /**
@@ -240,10 +461,18 @@ export const useTabStore = defineStore('tabs', () => {
 
   return {
     tabs,
+    panes,
+    focusedPaneId,
+    focusedPane,
+    isSplit,
     activeId,
     active,
     activeQueryTab,
     activeTableTab,
+    tabsIn,
+    activeIdIn,
+    paneFor,
+    focusPane,
     openQuery,
     openTable,
     close,
@@ -252,6 +481,10 @@ export const useTabStore = defineStore('tabs', () => {
     closeForConnection,
     select,
     cycle,
+    moveToPane,
+    reorder,
+    splitTab,
+    closeSplit,
     update,
     setLeaveGuard
   }

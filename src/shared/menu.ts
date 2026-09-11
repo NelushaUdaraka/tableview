@@ -16,6 +16,7 @@ export type MenuAction =
   | 'tab:close'
   | 'tab:next'
   | 'tab:previous'
+  | 'tab:detach'
   | 'query:open-file'
   | 'query:save'
   | 'query:save-as'
@@ -28,6 +29,8 @@ export type MenuAction =
   | 'results:copy'
   | 'view:toggle-sidebar'
   | 'view:toggle-row-panel'
+  | 'view:split-tab'
+  | 'view:close-split'
   | 'view:toggle-theme'
   | 'view:focus-filter'
   | 'schema:refresh'
@@ -123,6 +126,7 @@ export function buildMenuModel(platform: string): MenuModel[] {
         },
         SEPARATOR,
         { label: 'New Query Tab', accelerator: 'CmdOrCtrl+T', action: 'tab:new-query' },
+        { label: 'Move Tab to New Window', action: 'tab:detach' },
         { label: 'Open SQL File…', accelerator: 'CmdOrCtrl+O', action: 'query:open-file' },
         { label: 'Save Query', accelerator: 'CmdOrCtrl+S', action: 'query:save' },
         { label: 'Save Query As…', accelerator: 'CmdOrCtrl+Shift+S', action: 'query:save-as' },
@@ -177,6 +181,8 @@ export function buildMenuModel(platform: string): MenuModel[] {
       items: [
         { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', action: 'view:toggle-sidebar' },
         { label: 'Toggle Row Panel', accelerator: 'CmdOrCtrl+I', action: 'view:toggle-row-panel' },
+        { label: 'Split Tab Right', accelerator: 'CmdOrCtrl+\\', action: 'view:split-tab' },
+        { label: 'Close Split', accelerator: 'CmdOrCtrl+Shift+\\', action: 'view:close-split' },
         { label: 'Toggle Theme', accelerator: 'CmdOrCtrl+Shift+L', action: 'view:toggle-theme' },
         { label: 'Refresh Schema', accelerator: 'F5', action: 'schema:refresh' },
         SEPARATOR,

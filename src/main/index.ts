@@ -18,9 +18,9 @@ if (!app.requestSingleInstanceLock()) {
 const registry = new ConnectionRegistry()
 let windows: WindowManager | null = null
 
-function createWindow(): void {
-  if (!windows) return
-  const window = windows.create(path.join(__dirname, '../preload/index.js'))
+function createWindow(position?: { x: number; y: number }): BrowserWindow | null {
+  if (!windows) return null
+  const window = windows.create(path.join(__dirname, '../preload/index.js'), position)
 
   // Keep navigation inside the app; open real links in the user's browser.
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -38,6 +38,8 @@ function createWindow(): void {
   } else {
     void window.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
+
+  return window
 }
 
 void app.whenReady().then(async () => {

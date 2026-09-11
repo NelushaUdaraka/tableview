@@ -45,6 +45,8 @@ const api: RendererApi = {
   listSsmInstances: (config, connectionId) =>
     invoke(CHANNELS.ssmInstances, config, connectionId),
   openNewWindow: () => invoke(CHANNELS.windowNew),
+  detachTab: (request) => invoke(CHANNELS.windowDetachTab, request),
+  takePendingTab: () => invoke(CHANNELS.windowPendingTab),
   minimizeWindow: () => invoke(CHANNELS.windowMinimize),
   toggleMaximizeWindow: () => invoke(CHANNELS.windowToggleMaximize),
   closeWindow: () => invoke(CHANNELS.windowClose),

@@ -14,6 +14,15 @@ export const useConnectionStore = defineStore('connections', () => {
     activeId.value ? (statuses.value[activeId.value] ?? null) : null
   )
   const isConnected = computed(() => activeStatus.value?.state === 'connected')
+  /**
+   * Whether a connection is open as far as the workspace is concerned.
+   *
+   * Not the same as `isConnected`: a connection that drops mid-session is being
+   * reopened, and throwing the user back to the connection screen would take
+   * their tabs and staged edits with it. The session ends when they disconnect,
+   * not when the socket does.
+   */
+  const inSession = computed(() => activeId.value !== null)
 
   /** Most-recently-used first, then alphabetical for never-used entries. */
   const sorted = computed(() =>
@@ -71,6 +80,12 @@ export const useConnectionStore = defineStore('connections', () => {
     }
   }
 
+  /** Opens the active connection again after it dropped and stayed down. */
+  async function reconnect(): Promise<ConnectionStatus | null> {
+    const id = activeId.value
+    return id ? connect(id) : null
+  }
+
   async function disconnect(id: string): Promise<void> {
     await api.disconnect(id)
     statuses.value = { ...statuses.value, [id]: { connectionId: id, state: 'disconnected' } }
@@ -93,12 +108,14 @@ export const useConnectionStore = defineStore('connections', () => {
     active,
     activeStatus,
     isConnected,
+    inSession,
     connectingId,
     load,
     save,
     remove,
     duplicate,
     connect,
+    reconnect,
     disconnect,
     setStatus,
     statusFor

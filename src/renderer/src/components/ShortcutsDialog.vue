@@ -22,7 +22,10 @@ const GROUPS = [
       ['Ctrl+T', 'New query tab'],
       ['Ctrl+W', 'Close tab'],
       ['Ctrl+Tab', 'Next tab'],
-      ['Ctrl+Shift+Tab', 'Previous tab']
+      ['Ctrl+Shift+Tab', 'Previous tab'],
+      ['Ctrl+\\', 'Show this tab beside the others'],
+      ['Ctrl+Shift+\\', 'Close the split'],
+      ['Drag a tab', 'Reorder, move to the other pane, or drop outside for a new window']
     ]
   },
   {
@@ -39,7 +42,8 @@ const GROUPS = [
       ['Ctrl+Shift+C', 'Copy the row'],
       ['Click the › arrow', 'Open the row a foreign key points at'],
       ['Double-click a divider', 'Fit the column to its contents'],
-      ['Shift+click a header', 'Add a secondary sort']
+      ['Shift+click a header', 'Add a secondary sort'],
+      ['Right-click a header', 'Sorting, filtering and column widths']
     ]
   },
   {

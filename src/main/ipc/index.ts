@@ -27,7 +27,14 @@ import {
   TableChangeSet,
   TableDataRequest
 } from '../../shared/types'
-import { AppInfo, CHANNELS, IpcResult, WindowChromeState } from '../../shared/ipc'
+import {
+  AppInfo,
+  CHANNELS,
+  DetachRequest,
+  DetachedTab,
+  IpcResult,
+  WindowChromeState
+} from '../../shared/ipc'
 import { MenuRole } from '../../shared/menu'
 import { EXPORT_EXTENSIONS, exportRows } from '../../shared/export'
 import { credentialsToEnv, parseAwsCredentials } from '../../shared/aws/credentials'
@@ -60,6 +67,17 @@ export function scopeForWindow(window: BrowserWindow | null): string {
 
 export function registerIpcHandlers(context: IpcContext): void {
   const { registry, appData, getWindow } = context
+
+  // A connection that drops on its own has no call to return to, so the
+  // registry reports it here and it is delivered to the window that owns it.
+  registry.onStatusChange((scope, status) => {
+    const window = BrowserWindow.getAllWindows().find(
+      (candidate) => scopeForWindow(candidate) === scope
+    )
+    if (window && !window.isDestroyed()) {
+      window.webContents.send(CHANNELS.eventStatusChanged, status)
+    }
+  })
 
   function callContext(event: IpcMainInvokeEvent): CallContext {
     const window = BrowserWindow.fromWebContents(event.sender) ?? getWindow()
@@ -98,6 +116,28 @@ export function registerIpcHandlers(context: IpcContext): void {
     // The creator lives in main/index.ts; it registers itself here.
     if (!newWindowFactory) throw new Error('Window creation is not available')
     newWindowFactory()
+  })
+
+  /**
+   * Opens a window for a tab that was dragged out of another one.
+   *
+   * The tab is remembered against the new window's contents rather than sent
+   * to it: the renderer is not up yet, and a message to a window that is still
+   * loading goes nowhere. It asks for it once it is ready.
+   */
+  handle(CHANNELS.windowDetachTab, (_call, request: DetachRequest) => {
+    if (!newWindowFactory) throw new Error('Window creation is not available')
+    const window = newWindowFactory(request.position)
+    if (window) pendingTabs.set(window.webContents.id, request.tab)
+  })
+
+  handle(CHANNELS.windowPendingTab, (call): DetachedTab | null => {
+    const id = call.window?.webContents.id
+    if (id === undefined) return null
+    const tab = pendingTabs.get(id) ?? null
+    // Taken, not read: reloading must not reopen a tab that has been closed.
+    pendingTabs.delete(id)
+    return tab
   })
 
   // -- window frame ---------------------------------------------------------
@@ -361,9 +401,14 @@ export function registerIpcHandlers(context: IpcContext): void {
 }
 
 /** Set by main/index.ts so the renderer can ask for another window. */
-let newWindowFactory: (() => void) | null = null
+let newWindowFactory: ((position?: { x: number; y: number }) => BrowserWindow | null) | null = null
 
-export function setWindowFactory(factory: () => void): void {
+/** Tabs waiting for the window they were opened for to ask what it is showing. */
+const pendingTabs = new Map<number, DetachedTab>()
+
+export function setWindowFactory(
+  factory: (position?: { x: number; y: number }) => BrowserWindow | null
+): void {
   newWindowFactory = factory
 }
 

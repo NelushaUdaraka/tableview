@@ -6,8 +6,16 @@
  * of silently evicting one another.
  */
 import { ConnectionConfig, ConnectionStatus, SerializedError } from '../../shared/types'
-import type { DbClient } from './types'
+import type { ClientStateEvent, DbClient } from './types'
 import { SqlServerClient, serializeError } from './sqlserver/client'
+
+/**
+ * Told about a connection that changed on its own, and which window's it is.
+ *
+ * The registry has no idea what a window is; the IPC layer turns the scope
+ * back into one and delivers the status there.
+ */
+export type StatusListener = (scope: string, status: ConnectionStatus) => void
 
 /** Separator that cannot appear in a window scope or a connection uuid. */
 const KEY_SEPARATOR = '::'
@@ -21,6 +29,15 @@ export class ConnectionRegistry {
   private readonly clients = new Map<string, DbClient>()
   private readonly errors = new Map<string, SerializedError>()
   private readonly connecting = new Set<string>()
+  /** Connections that dropped and are being reopened without being asked. */
+  private readonly recovering = new Set<string>()
+  private readonly statusListeners = new Set<StatusListener>()
+
+  /** Registered once by the IPC layer; returns a function that unregisters. */
+  onStatusChange(listener: StatusListener): () => void {
+    this.statusListeners.add(listener)
+    return () => this.statusListeners.delete(listener)
+  }
 
   /** Constructs the driver for a connection's engine. */
   private create(config: ConnectionConfig): DbClient {
@@ -46,6 +63,9 @@ export class ConnectionRegistry {
       client = this.create(config)
       const info = await client.connect()
       this.clients.set(key, client)
+      this.recovering.delete(key)
+      // From here the client can report a drop nobody asked about.
+      client.onStateChange((event) => this.onClientState(scope, config.id, event))
       return {
         connectionId: config.id,
         state: 'connected',
@@ -87,6 +107,42 @@ export class ConnectionRegistry {
     }
   }
 
+  /**
+   * Turns a client's own report into a status and passes it on.
+   *
+   * A reconnection reads as `connecting` with the reason attached, so the
+   * window can say what went and that it is being dealt with, rather than
+   * dropping the user back to the connection screen.
+   */
+  private onClientState(scope: string, connectionId: string, event: ClientStateEvent): void {
+    const key = entryKey(scope, connectionId)
+    // A client that has been replaced or closed no longer speaks for this slot.
+    if (!this.clients.has(key)) return
+
+    let status: ConnectionStatus
+    if (event.state === 'connected') {
+      this.recovering.delete(key)
+      this.errors.delete(key)
+      status = this.status(scope, connectionId)
+    } else if (event.state === 'reconnecting') {
+      this.recovering.add(key)
+      status = {
+        connectionId,
+        state: 'connecting',
+        error: event.error ? serializeError(event.error) : undefined
+      }
+    } else {
+      this.recovering.delete(key)
+      status = {
+        connectionId,
+        state: 'disconnected',
+        error: event.error ? serializeError(event.error) : undefined
+      }
+    }
+
+    for (const listener of this.statusListeners) listener(scope, status)
+  }
+
   get(scope: string, connectionId: string): DbClient {
     const client = this.clients.get(entryKey(scope, connectionId))
     if (!client) throw new Error('That connection is not open. Connect first.')
@@ -111,7 +167,10 @@ export class ConnectionRegistry {
         tunnelPort: client.tunnelPort
       }
     }
-    if (this.connecting.has(key)) return { connectionId, state: 'connecting' }
+    // A connection being reopened after a drop is on its way back, not gone.
+    if (this.connecting.has(key) || this.recovering.has(key)) {
+      return { connectionId, state: 'connecting' }
+    }
     const error = this.errors.get(key)
     if (error) return { connectionId, state: 'error', error }
     return { connectionId, state: 'disconnected' }
@@ -123,6 +182,8 @@ export class ConnectionRegistry {
     if (!client) return
     this.clients.delete(key)
     this.errors.delete(key)
+    this.recovering.delete(key)
+    client.onStateChange(null)
     await client.disconnect().catch(() => undefined)
   }
 
@@ -140,6 +201,9 @@ export class ConnectionRegistry {
     for (const key of [...this.connecting]) {
       if (key.startsWith(prefix)) this.connecting.delete(key)
     }
+    for (const key of [...this.recovering]) {
+      if (key.startsWith(prefix)) this.recovering.delete(key)
+    }
   }
 
   async closeAll(): Promise<void> {
@@ -150,6 +214,8 @@ export class ConnectionRegistry {
     const client = this.clients.get(key)
     this.clients.delete(key)
     this.errors.delete(key)
+    this.recovering.delete(key)
+    client?.onStateChange(null)
     await client?.disconnect().catch(() => undefined)
   }
 

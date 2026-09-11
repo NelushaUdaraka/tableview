@@ -1,6 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { CellValue, ColumnMeta, SchemaObjectType, TableFilter } from '@shared/types'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type {
+  CellValue,
+  ColumnMeta,
+  ConnectionStatus,
+  SchemaObjectType,
+  TableFilter
+} from '@shared/types'
 import {
   buildCreateTableDdl,
   buildDeleteTemplate,
@@ -9,22 +15,22 @@ import {
   buildUpdateTemplate
 } from '@shared/sql/builder'
 import AppSidebar from '../components/AppSidebar.vue'
-import TabBar from '../components/TabBar.vue'
 import SplitPane from '../components/SplitPane.vue'
 import StatusBar from '../components/StatusBar.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import SettingsDialog from '../components/SettingsDialog.vue'
 import ShortcutsDialog from '../components/ShortcutsDialog.vue'
-import QueryView from './QueryView.vue'
-import TableView from './TableView.vue'
+import TabPaneView from './TabPaneView.vue'
 import { useConnectionStore } from '../stores/connections'
 import { useSchemaStore } from '../stores/schema'
 import { useSettingsStore } from '../stores/settings'
 import { useTabStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
-import type { QueryTab, TableTab } from '../stores/tabs'
 import { onMenuAction } from '../lib/menuBus'
+import { detachedTabFrom } from '../lib/detach'
 import { api } from '../lib/api'
+
+type PaneView = InstanceType<typeof TabPaneView>
 
 const connections = useConnectionStore()
 const schema = useSchemaStore()
@@ -33,10 +39,43 @@ const tabs = useTabStore()
 const toasts = useToastStore()
 
 const sidebar = ref<InstanceType<typeof AppSidebar> | null>(null)
-const queryView = ref<InstanceType<typeof QueryView> | null>(null)
-const tableView = ref<InstanceType<typeof TableView> | null>(null)
 
+/**
+ * The two pane views, and which of them a menu action goes to.
+ *
+ * There are at most two panes and they keep their positions, so the views are
+ * held by position rather than by pane id — a ref bound to an id would have to
+ * name a pane that, by the time the ref is cleared, has already gone.
+ */
+const primaryPane = ref<PaneView | null>(null)
+const secondaryPane = ref<PaneView | null>(null)
+
+const focusedView = computed<PaneView | null>(() =>
+  tabs.panes[1] && tabs.focusedPaneId === tabs.panes[1].id
+    ? secondaryPane.value
+    : primaryPane.value
+)
+
+const mainArea = ref<HTMLElement | null>(null)
 const sidebarWidth = ref(280)
+/** Width of the second pane when the workspace is split. */
+const splitWidth = ref(640)
+
+/**
+ * A split starts even.
+ *
+ * The remembered width is whatever the last drag left, which on a narrower
+ * window can be most of it — and a pane opening at that width would leave the
+ * other one a sliver. Half of what there is to share is a fair opening bid;
+ * the divider is there for anything else.
+ */
+watch(
+  () => tabs.isSplit,
+  (split) => {
+    const width = mainArea.value?.clientWidth ?? 0
+    if (split && width > 0) splitWidth.value = Math.round(width / 2)
+  }
+)
 const sidebarCollapsed = ref(false)
 const showSettings = ref(false)
 const showShortcuts = ref(false)
@@ -92,6 +131,35 @@ async function generate(kind: string, schemaName: string, table: string): Promis
   }
 }
 
+/**
+ * Opens a tab in a window of its own, and closes it here.
+ *
+ * Windows do not share connections, so the new one reconnects for itself; what
+ * travels is only what it takes to open the same thing again. The tab is asked
+ * before it goes — a detach unmounts its view, and staged edits would go with
+ * it — and put back if the window could not be opened.
+ */
+async function detachTab(tabId: string, position: { x: number; y: number }): Promise<void> {
+  const tab = tabs.tabs.find((entry) => entry.id === tabId)
+  if (!tab) return
+
+  const payload = detachedTabFrom(tab)
+
+  if (!(await tabs.close(tabId))) return
+
+  try {
+    await api.detachTab({ tab: payload, position })
+  } catch (error) {
+    toasts.fromError('Could not open a window for that tab', error)
+    // Put it back rather than losing it to a window that never opened.
+    if (payload.kind === 'table' && payload.schema && payload.table) {
+      void tabs.openTable(payload.connectionId, payload.schema, payload.table, payload.objectType)
+    } else {
+      void tabs.openQuery(payload.connectionId, payload.sql ?? '', payload.title)
+    }
+  }
+}
+
 async function disconnect(): Promise<void> {
   const id = connections.activeId
   if (!id) return
@@ -117,31 +185,42 @@ function handleAction(action: string): void {
       tabs.cycle(-1)
       break
     case 'query:run':
-      queryView.value?.run()
+      focusedView.value?.run()
       break
     case 'query:run-selection':
-      queryView.value?.runSelection()
+      focusedView.value?.runSelection()
       break
     case 'query:run-current':
-      queryView.value?.runCurrent()
+      focusedView.value?.runCurrent()
       break
     case 'query:cancel':
-      void queryView.value?.cancel()
+      focusedView.value?.cancel()
       break
     case 'query:format':
-      queryView.value?.format()
+      focusedView.value?.format()
       break
     case 'query:save':
-      void queryView.value?.save()
+      focusedView.value?.save()
       break
     case 'query:save-as':
-      void queryView.value?.saveAs()
+      focusedView.value?.saveAs()
       break
     case 'query:open-file':
-      void queryView.value?.openFile()
+      focusedView.value?.openFile()
       break
     case 'results:export':
-      tableView.value?.exportRows()
+      focusedView.value?.exportRows()
+      break
+    case 'view:split-tab':
+      if (tabs.activeId) void tabs.splitTab(tabs.activeId)
+      break
+    case 'view:close-split':
+      void tabs.closeSplit()
+      break
+    case 'tab:detach':
+      if (tabs.activeId) {
+        void detachTab(tabs.activeId, { x: window.screenX + 80, y: window.screenY + 80 })
+      }
       break
     case 'view:toggle-sidebar':
       sidebarCollapsed.value = !sidebarCollapsed.value
@@ -153,11 +232,11 @@ function handleAction(action: string): void {
       settings.toggleTheme()
       break
     case 'view:focus-filter':
-      if (tabs.active?.kind === 'table') tableView.value?.focusFilter()
+      if (tabs.active?.kind === 'table') focusedView.value?.focusFilter()
       else sidebar.value?.focusFilter()
       break
     case 'schema:refresh':
-      if (tabs.active?.kind === 'table') tableView.value?.refresh()
+      if (tabs.active?.kind === 'table') focusedView.value?.refresh()
       else void sidebar.value?.refresh()
       break
     case 'connection:disconnect':
@@ -194,13 +273,34 @@ function onKeydown(event: KeyboardEvent): void {
   }
 }
 
+/**
+ * A status the main process pushed, rather than one this window asked for.
+ *
+ * The interesting ones are the connection dropping and coming back on its own:
+ * the workspace stays where it is either way, so without a word about it the
+ * only sign would be queries quietly failing for a few seconds.
+ */
+function onStatusChanged(status: ConnectionStatus): void {
+  const before = connections.statusFor(status.connectionId).state
+  connections.setStatus(status)
+  if (status.connectionId !== connections.activeId || status.state === before) return
+
+  if (status.state === 'connecting' && before === 'connected') {
+    toasts.info('The connection dropped — reopening it', status.error?.message)
+  } else if (status.state === 'connected' && before !== 'connected') {
+    toasts.success('Connection restored')
+  } else if (status.state === 'disconnected' || status.state === 'error') {
+    toasts.error('The connection closed', status.error?.message)
+  }
+}
+
 let unsubscribeMenu: (() => void) | null = null
 let unsubscribeStatus: (() => void) | null = null
 
 onMounted(() => {
   document.addEventListener('keydown', onKeydown)
   unsubscribeMenu = onMenuAction(handleAction)
-  unsubscribeStatus = api.onStatusChanged((status) => connections.setStatus(status))
+  unsubscribeStatus = api.onStatusChanged(onStatusChanged)
   if (tabs.tabs.length === 0) newQueryTab()
 })
 
@@ -231,38 +331,53 @@ onBeforeUnmount(() => {
       </template>
 
       <template #second>
-        <div class="workspace__main">
-          <TabBar @new-query="newQueryTab" />
-
-          <div class="workspace__content">
-            <QueryView
-              v-if="tabs.active?.kind === 'query'"
-              ref="queryView"
-              :key="tabs.active.id"
-              :tab="tabs.active as QueryTab"
-              @export="(columns, rows) => (exportPayload = { columns, rows })"
-            />
-            <TableView
-              v-else-if="tabs.active?.kind === 'table'"
-              ref="tableView"
-              :key="tabs.active.id"
-              :tab="tabs.active as TableTab"
-              @export="(columns, rows, name) => (exportPayload = { columns, rows, name })"
-              @open-sql="openSql"
-              @open-related="openRelated"
-            />
-            <div v-else class="empty-state">
-              <div class="empty-state__title">No open tabs</div>
-              <p>Pick a table on the left, or open a query tab.</p>
-              <button class="btn btn--primary" @click="newQueryTab">New query tab</button>
-            </div>
-          </div>
+        <div ref="mainArea" class="workspace__main">
+          <!--
+            One pane, or two side by side once a tab has been split off. The
+            split pane is always the one rendering the first pane, collapsed
+            rather than replaced when there is no second — swapping between two
+            layouts would remount the first pane's view and take its staged
+            edits with it.
+          -->
+          <SplitPane
+            v-model="splitWidth"
+            direction="horizontal"
+            pane="second"
+            :min="320"
+            :max="1600"
+            :collapsed="!tabs.isSplit"
+          >
+            <template #first>
+              <TabPaneView
+                ref="primaryPane"
+                :pane="tabs.panes[0]"
+                @new-query="newQueryTab"
+                @export="(columns, rows, name) => (exportPayload = { columns, rows, name })"
+                @open-sql="openSql"
+                @open-related="openRelated"
+                @detach="detachTab"
+              />
+            </template>
+            <template #second>
+              <TabPaneView
+                v-if="tabs.panes[1]"
+                ref="secondaryPane"
+                :pane="tabs.panes[1]"
+                @new-query="newQueryTab"
+                @export="(columns, rows, name) => (exportPayload = { columns, rows, name })"
+                @open-sql="openSql"
+                @open-related="openRelated"
+                @detach="detachTab"
+              />
+            </template>
+          </SplitPane>
         </div>
       </template>
     </SplitPane>
 
     <StatusBar
       @disconnect="disconnect"
+      @reconnect="connections.reconnect()"
       @settings="showSettings = true"
       @shortcuts="showShortcuts = true"
     />
@@ -297,9 +412,8 @@ onBeforeUnmount(() => {
   height: 100%;
   min-height: 0;
 }
-.workspace__content {
+.workspace__main > * {
   flex: 1;
   min-height: 0;
-  background: var(--bg-surface);
 }
 </style>

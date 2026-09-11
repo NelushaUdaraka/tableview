@@ -841,6 +841,24 @@ async function browseForKey(): Promise<void> {
         </label>
       </div>
 
+      <div class="row">
+        <label class="field" style="flex: 1">
+          <span class="field__label">Keepalive (ms)</span>
+          <input
+            v-model.number="form.options!.keepAliveIntervalMs"
+            class="input"
+            type="number"
+            min="0"
+            step="5000"
+          />
+          <span class="field__hint">
+            Sends one row down an idle connection this often, so a tunnel or a
+            firewall does not drop it for want of traffic. 0 turns it off.
+          </span>
+        </label>
+        <div class="field" style="flex: 1"></div>
+      </div>
+
       <label class="checkbox">
         <input v-model="form.options!.readOnlyIntent" type="checkbox" />
         <span>Read-only intent (route to a readable secondary)</span>

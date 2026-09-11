@@ -25,6 +25,12 @@ TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind
 - Passwords and SSH secrets encrypted at rest — the OS keystore via Electron `safeStorage` where
   available, AES-256-GCM under a `0600` key file otherwise. Secrets never reach the renderer.
 - Test-connection button that reports the server edition and version
+- **Kept alive, and put back when it drops** — an idle connection is poked once a minute (the
+  *Keepalive* option; 0 turns it off) so an SSM session, an SSH forward or a firewall does not tear
+  it down for want of traffic. A connection that goes anyway is reopened in the background with a
+  backoff, for about eight minutes; the status bar says what is happening and offers *Reconnect*
+  once it stops trying. Credentials that have run out and a login the server refuses are not retried
+  at all — neither is going to fix itself. The window keeps its tabs and staged edits throughout.
 
 **Connecting through an AWS bastion (SSM)**
 
@@ -118,8 +124,16 @@ connect, and holding only one of them still produces a usable list.
 - Filter builder (16 operators, AND/OR) and a raw `WHERE` mode; values are always **bound
   parameters**, and `contains`/`starts with`/`ends with` escape LIKE wildcards
 - Column resize by drag, double-click a divider to fit
+- **Right-click a column header** for what can be done to that column: sort either way, add it to
+  the sort, clear the order, filter on it (including `IS NULL` / `IS NOT NULL` in one click), and
+  fit the widths — the spreadsheet's header menu, over a server-side query
+- **The rows stay while the next page loads.** Sorting or filtering leaves what is on screen where
+  it is, dimmed and inert, until the replacements arrive; a thin bar under the title bar carries the
+  wait for the whole window
 - **Row panel** beside the grid (`Ctrl+I`): the selected row as one field per line, with room for
-  the values a 26px cell cannot show, editable in place and moving with the selection
+  the values a 26px cell cannot show, editable in place and moving with the selection. The same
+  panel sits beside query results, read-only, and "View row details" on any row's menu opens it
+  there
 - **Follow a foreign key**: a `›` at the end of a referencing cell opens the referenced table in its
   own tab, filtered to the row it points at — composite keys included
 
@@ -157,6 +171,8 @@ rather than opening a query that would match nothing.
 - Scripts split on `GO` (like SSMS), so `BEGIN … END` bodies and `CREATE PROCEDURE` work; `GO 5` repeats
 - Multiple result sets per batch, rows-affected, `PRINT` output, and errors with their
   message number, state and line
+- Results sort by clicking a header — a local reorder, since the statement is yours to re-issue, not
+  ours to rewrite — with NULLs kept at the end either way
 - SQL formatting, open/save `.sql` files, saved queries, searchable query history
 
 **One title bar**
@@ -166,6 +182,21 @@ Windows and Linux (inset on macOS, where the traffic lights stay put and the sys
 the menus), and the renderer draws the menus, the document title and the minimise/maximise/close
 buttons itself. The native menu is still installed and still owns every accelerator — the title bar
 and it are built from one shared model in `src/shared/menu.ts`, so they cannot drift apart.
+
+**Panes, and tabs that move between them**
+
+A tab can be put in a pane of its own beside the one it is in — `Ctrl+\`, the tab's own menu, or by
+dragging it onto the other pane's strip — so two tables, or a query and its table, can be read at
+once. Each pane has its own strip of tabs and its own tab showing; the pane you last clicked in is
+the one `Ctrl+Enter` and `F5` act on. Splitting the only tab in a pane opens a second view of the
+same thing rather than leaving an empty pane behind. `Ctrl+Shift+\` folds the split away, keeping
+every tab.
+
+Tabs drag: within a strip to reorder, onto the other strip to move pane, and **out of the window
+entirely** to open in a window of their own (also on the tab's menu, and File → Move Tab to New
+Window). Nothing is carried across but a description of what to open — the new window has its own
+connection pool, so it connects for itself, which needs the connection's password to be saved.
+Staged edits stay with the window they were made in: a tab that is holding them asks before it goes.
 
 **Windows and connections**
 
@@ -327,9 +358,10 @@ src/
 └── renderer/src/             Vue 3 + Pinia
     ├── lib/api.ts            the only place that touches window.api
     ├── lib/menuBus.ts        menu actions, whichever menu raised them
-    ├── stores/               connections, schema, tabs, library, settings, toasts
+    ├── stores/               connections, schema, tabs (and panes), library,
+    │                         settings, toasts, busy (the window's progress bar)
     ├── components/           title bar, grid, row panel, editor, sidebar, dialogs
-    └── views/                connection screen, workspace, query, table
+    └── views/                connection screen, workspace, pane, query, table
 ```
 
 A few decisions worth knowing about:
@@ -356,6 +388,14 @@ every platform) and the title bar draws the same items in the window. Items the 
 carry out itself — clipboard, zoom, dev tools, closing the window — name an Electron role and come
 back over IPC.
 
+**A tab belongs to a pane, and only a pane's active tab is mounted.** The tab store holds one flat
+list of tabs and one or two panes naming which of them they hold. Because only the mounted tab can be
+holding staged edits, the view that owns them registers a leave guard *against its own tab id*, and
+everything that would unmount a view — selecting another tab, closing one, moving it to the other
+pane, folding the split away, dragging it into a new window — asks the tabs that are about to go.
+The split pane is always rendered, collapsed rather than replaced when there is no second pane:
+swapping between two layouts would remount the first pane's view and take its staged edits with it.
+
 **The renderer converts reactive state to plain data before the bridge.** `contextBridge` clones
 arguments with the structured clone algorithm, which refuses to clone a Proxy — which is exactly
 what Vue reactive state is. `lib/api.ts` handles this once for every call site.
@@ -367,8 +407,11 @@ what Vue reactive state is. `lib/api.ts` handles this once for every call site.
 Deliberately out of scope for phase 1, in rough priority order for phase 2:
 
 - **One engine.** Only SQL Server. The `DbClient` seam is in place but there is no second driver.
-- **One connection per window.** Several windows work, but a single window cannot hold two
-  connections side by side — the schema store is keyed for one connection at a time.
+- **One connection per window.** Several windows work, and a window can show two panes side by side,
+  but both panes talk to the same connection — the schema store is keyed for one connection at a
+  time. Two connections at once means two windows.
+- **Two panes, not more.** A tab can be split off into a second pane; there is no third, and no
+  stacking panes vertically.
 - **No schema editing UI.** You can drop and truncate from the sidebar and run any DDL you like in
   the editor, but there is no visual "add column" / "create index" builder.
 - **No backup/restore, import, or diff tooling.**
@@ -378,8 +421,11 @@ Deliberately out of scope for phase 1, in rough priority order for phase 2:
   which a TCP forward cannot carry. Give an explicit port instead. The app ignores `instanceName`
   when tunnelling rather than failing confusingly.
 - **Azure AD support is password-flow only** — no interactive, device-code or managed-identity flows.
-- **SSM sessions are not resumed.** If the AWS session drops mid-query the connection fails and you
-  reconnect; there is no automatic re-establishment.
+- **A dropped connection is reopened, not resumed.** The keepalive keeps an idle session from being
+  torn down, and a connection that goes anyway is reopened in the background — but reopening means a
+  fresh SSM session and a fresh pool, so anything that was in flight is lost and has to be re-run.
+  Credentials that ran out are not something reopening can fix; the status bar says so and offers
+  the paste box.
 - **No interactive AWS prompts.** The CLI child is spawned without stdin, so a profile configured
   with `mfa_serial` cannot be answered, and `aws sso login` (a browser flow) has to be run yourself —
   the app detects the expiry and says so. Pasting portal credentials sidesteps both.

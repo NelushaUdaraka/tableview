@@ -61,6 +61,7 @@ const emit = defineEmits<{
   (event: 'sort', column: string, additive: boolean): void
   (event: 'delete-rows', rowIndexes: number[]): void
   (event: 'row-context', payload: { rowIndex: number; columnIndex: number; x: number; y: number }): void
+  (event: 'header-context', payload: { columnIndex: number; x: number; y: number }): void
   (event: 'selection', payload: { rowIndex: number; columnIndex: number } | null): void
   (event: 'rows-selected', rowIndexes: number[]): void
   (event: 'follow-key', payload: { rowIndex: number; columnIndex: number }): void
@@ -118,6 +119,16 @@ function autoSizeEditor(): void {
 }
 
 const totalHeight = computed(() => props.rows.length * ROW_HEIGHT)
+
+/**
+ * Loading over rows that are already on screen.
+ *
+ * A sort or a filter re-runs the query, and blanking the grid for the round
+ * trip loses the reader's place for no reason: the rows that are there are
+ * still the answer to the last question. They stay, dimmed and inert, until
+ * their replacements arrive — `grid--busy` is what makes them inert.
+ */
+const busyOverRows = computed(() => props.loading && props.rows.length > 0)
 
 const startIndex = computed(() =>
   Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - OVERSCAN)
@@ -290,6 +301,11 @@ function autoFit(index: number): void {
     Math.max(MIN_WIDTH, longest * CELL_CHAR_PX + CELL_PADDING_PX, headerWidth(column))
   )
   widths.value = next
+}
+
+/** Fits every column at once, from the rows currently rendered. */
+function autoFitAll(): void {
+  props.columns.forEach((_, index) => autoFit(index))
 }
 
 // --- selection & editing ---------------------------------------------------
@@ -469,7 +485,7 @@ function canEditColumn(columnIndex: number): boolean {
  * that opened the editor rather than selecting it.
  */
 function beginEdit(row: number, col: number, initial?: string): void {
-  if (!canEditColumn(col)) return
+  if (!canEditColumn(col) || busyOverRows.value) return
   const key = cellKey(row, col)
   const current = key in props.editedCells ? props.editedCells[key] : props.rows[row]?.[col]
   editValue.value =
@@ -528,6 +544,9 @@ function setNull(): void {
 
 function onCellKeydown(event: KeyboardEvent): void {
   if (editing.value) return
+  // Rows on screen during a reload are the previous answer; typing into them
+  // would stage an edit against values that are about to be replaced.
+  if (busyOverRows.value) return
   if (!selected.value) return
   const { row, col } = selected.value
   const lastRow = props.rows.length - 1
@@ -664,6 +683,21 @@ function followKey(row: number, col: number): void {
   emit('follow-key', { rowIndex: row, columnIndex: col })
 }
 
+/**
+ * The header's own menu.
+ *
+ * Right-clicking a column asks about *that column* — how it is sorted, what it
+ * is filtered to, how wide it is — which is a different set of questions from
+ * the ones a row raises, so it is a different menu. The parent builds it,
+ * because only the parent knows whether sorting means a new query or a local
+ * reorder.
+ */
+function onHeaderContextMenu(col: number, event: MouseEvent): void {
+  event.preventDefault()
+  if (busyOverRows.value) return
+  emit('header-context', { columnIndex: col, x: event.clientX, y: event.clientY })
+}
+
 function onCellContextMenu(row: number, col: number, event: MouseEvent): void {
   event.preventDefault()
   // mousedown has already settled the selection; only a keyboard-driven menu
@@ -680,12 +714,14 @@ defineExpose({
     anchorRow.value = rows[0] ?? null
     setSelectedRows(rows)
   },
+  autoFit,
+  autoFitAll,
   focus: () => viewport.value?.focus()
 })
 </script>
 
 <template>
-  <div class="grid" :class="{ 'grid--dragging': dragging }">
+  <div class="grid" :class="{ 'grid--dragging': dragging, 'grid--busy': busyOverRows }">
     <div ref="header" class="grid__header" role="row">
       <div class="grid__header-track" :style="{ gridTemplateColumns: gridTemplate }">
         <div class="grid__corner"></div>
@@ -695,6 +731,7 @@ defineExpose({
           class="grid__th"
           :title="`${column.name} — ${column.dataType}${column.nullable ? '' : ' NOT NULL'}`"
           @click="emit('sort', column.name, $event.shiftKey)"
+          @contextmenu="onHeaderContextMenu(index, $event)"
         >
           <span class="grid__th-name truncate">{{ column.name }}</span>
           <span v-if="primaryKey.includes(column.name)" class="grid__th-key" title="Primary key">PK</span>
@@ -714,10 +751,14 @@ defineExpose({
       ref="viewport"
       class="grid__viewport"
       tabindex="0"
+      :aria-busy="loading"
       @scroll.passive="onScroll"
       @keydown="onCellKeydown"
     >
-      <div v-if="loading" class="grid__overlay">
+      <!-- Only an empty grid gets the spinner in the middle: with rows on
+           screen the window's progress bar says the same thing without
+           covering the answer. -->
+      <div v-if="loading && rows.length === 0" class="grid__overlay">
         <span class="spinner"></span>
         <span>Loading…</span>
       </div>
@@ -839,6 +880,18 @@ defineExpose({
 .grid--dragging {
   user-select: none;
   cursor: default;
+}
+/* Waiting on replacements: the old rows stay readable but answer to nothing —
+   no sorting, no selecting, no editing values that are about to be replaced.
+   The viewport itself keeps its events, so the page can still be scrolled. */
+.grid--busy .grid__header-track,
+.grid--busy .grid__canvas {
+  pointer-events: none;
+  opacity: 0.5;
+  transition: opacity var(--transition);
+}
+.grid--busy .grid__viewport {
+  cursor: progress;
 }
 
 .grid__header {

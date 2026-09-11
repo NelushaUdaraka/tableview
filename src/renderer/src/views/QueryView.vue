@@ -8,6 +8,7 @@ import ResultsPanel from '../components/ResultsPanel.vue'
 import SplitPane from '../components/SplitPane.vue'
 import type { QueryTab } from '../stores/tabs'
 import { useTabStore } from '../stores/tabs'
+import { useBusyStore } from '../stores/busy'
 import { useSchemaStore } from '../stores/schema'
 import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toasts'
@@ -22,6 +23,7 @@ const emit = defineEmits<{
 }>()
 
 const tabs = useTabStore()
+const busy = useBusyStore()
 const schema = useSchemaStore()
 const settings = useSettingsStore()
 const toasts = useToastStore()
@@ -61,6 +63,9 @@ async function run(text?: string): Promise<void> {
 
   const executionId = `exec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   tabs.update<QueryTab>(props.tab.id, { running: true, executionId })
+  // The bar under the title bar carries the wait for the whole window, so a
+  // query running in a pane that is not on screen is still visible as work.
+  busy.begin()
 
   try {
     const result = await api.runQuery({
@@ -85,6 +90,8 @@ async function run(text?: string): Promise<void> {
   } catch (error) {
     tabs.update<QueryTab>(props.tab.id, { running: false, executionId: null })
     if (!offerCredentialFix(error, () => run(text))) toasts.fromError('Query failed', error)
+  } finally {
+    busy.end()
   }
 }
 

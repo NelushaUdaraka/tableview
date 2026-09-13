@@ -113,21 +113,21 @@ await waitFor(`!!document.querySelector('.brand__title')`, 'reloaded')
 await ev(`[...document.querySelectorAll('.btn')].find(b => b.textContent.includes('New connection')).click()`)
 await waitFor(`!!document.querySelector('.form__tabs')`, 'connection form')
 await ev(`[...document.querySelectorAll('.form__tab')].find(t => t.textContent.includes('Tunnel')).click()`)
-await waitFor(`!!document.querySelector('.choices')`, 'tunnel picker')
+await waitFor(`!!document.querySelector('.seg')`, 'tunnel picker')
 
 steps.push({
   step: 'tunnel picker',
-  choices: await ev(`[...document.querySelectorAll('.choice__label')].map(e => e.textContent.trim())`),
-  active: await ev(`document.querySelector('.choice--active .choice__label')?.textContent?.trim()`)
+  choices: await ev(`[...document.querySelectorAll('.seg__opt')].map(e => e.textContent.trim())`),
+  active: await ev(`document.querySelector('.seg__opt--on')?.textContent?.trim()`)
 })
 await shot('01-tunnel-picker')
 
 // Choose AWS SSM.
-await ev(`[...document.querySelectorAll('.choice')].find(c => c.textContent.includes('AWS SSM')).click()`)
+await ev(`[...document.querySelectorAll('.seg__opt')].find(c => c.textContent.includes('AWS SSM')).click()`)
 await waitFor(`!!document.querySelector('input[placeholder="i-0123456789abcdef0"]')`, 'ssm fields')
 steps.push({
   step: 'ssm selected',
-  active: await ev(`document.querySelector('.choice--active .choice__label')?.textContent?.trim()`),
+  active: await ev(`document.querySelector('.seg__opt--on')?.textContent?.trim()`),
   fields: await ev(`[...document.querySelectorAll('.form__group .field__label')].map(e => e.textContent.trim())`)
 })
 
@@ -268,7 +268,7 @@ await setInput('input[placeholder="Production reporting"]', 'Prod via bastion')
 await setInput('input[placeholder="localhost"]', 'prod.abc123.eu-west-2.rds.amazonaws.com')
 await delay(300)
 await ev(`document.querySelector('button[type=submit]').click()`)
-await waitFor(`!!document.querySelector('.card')`, 'saved connection card', 20000)
+await waitFor(`!!document.querySelector('.row')`, 'saved connection row', 20000)
 
 steps.push({
   step: 'saved',
@@ -289,11 +289,11 @@ steps.push({
   secretReachesRenderer: await ev(`
     (async () => JSON.stringify(await window.api.listConnections()).includes('wJalrXUtnFEMI'))()
   `),
-  cardSubtitle: await ev(`document.querySelector('.card__sub')?.textContent?.trim()`)
+  rowSubtitle: await ev(`document.querySelector('.row__sub')?.textContent?.trim()`)
 })
 
 // Reopen the saved connection: the summary should be there, the box empty.
-await ev(`[...document.querySelectorAll('.card__buttons .btn')].find(b => b.textContent.includes('Edit')).click()`)
+await ev(`[...document.querySelectorAll('.row__buttons .btn')].find(b => b.textContent.includes('Edit')).click()`)
 await waitFor(`!!document.querySelector('.form__tabs')`, 'edit form')
 await ev(`[...document.querySelectorAll('.form__tab')].find(t => t.textContent.includes('Tunnel')).click()`)
 await waitFor(`!!document.querySelector('.creds__current')`, 'stored credential summary')
@@ -305,7 +305,7 @@ steps.push({
   secretInDom: await ev(`document.body.innerHTML.includes('wJalrXUtnFEMI')`)
 })
 await shot('07-reopened')
-await ev(`[...document.querySelectorAll('.modal__head .btn')].pop().click()`)
+await ev(`document.querySelector('.modal__close').click()`)
 await delay(400)
 
 // A second window must open, and be independent of the first.

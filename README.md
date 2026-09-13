@@ -22,6 +22,8 @@ TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind
 - **Bastion picked from the account, not remembered** — paste credentials, choose a region, and the
   connection form lists the instances in it with their Name tags and whether Systems Manager can
   actually reach them
+- **…or named rather than picked** — a connection can hold the bastion's *Name tag* instead of its
+  ID and resolve it on every connect, so a redeployed bastion needs no edit at all
 - Passwords and SSH secrets encrypted at rest — the OS keystore via Electron `safeStorage` where
   available, AES-256-GCM under a `0600` key file otherwise. Secrets never reach the renderer.
 - Test-connection button that reports the server edition and version
@@ -60,6 +62,25 @@ whether a session can start at all. The reachable ones sort first, `mi-` managed
 not EC2 are included, and either call being denied by IAM degrades to the other's list with a note
 rather than to nothing. Reopen a saved connection, fetch, and an ID the region no longer knows about
 is called out as replaced.
+
+**Or name it, and stop picking.** *Find the bastion by* switches the connection from an ID to the
+instance's **Name tag**, which is the half of the pair that survives a redeploy. Nothing is stored
+but the name; the ID is looked up each time the connection opens, so an instance replaced overnight
+needs no edit in the morning. The form still lists the account's instances — picking one fills the
+name in — and shows what the name resolves to right now:
+
+```
+Find the bastion by  [ Name tag ▾ ]   Bastion name  [ prod-bastion ]
+
+“prod-bastion” is i-0ba5711000fee1dad · running · 10.0.2.11 · SSM Online
+```
+
+EC2 does the matching, so its `*` wildcards work (`prod-bastion-*`), and filtering there rather than
+over the answer is what keeps a large account from cutting the bastion off the end of the list.
+Where several instances answer to one name — an autoscaled pair, a half-finished replacement — the
+one Systems Manager can reach is used, and that second lookup only runs when there is something to
+decide. Nothing answering to the name, or nothing running, fails the connection with that sentence
+rather than with a session timeout.
 
 The list is per region, so the region field is the one that has to be right; it is prefilled from
 the pasted block when that names one. You can still type an ID by hand — the field stays editable,
@@ -328,7 +349,7 @@ The suites:
   checks the filter and the row it lands on, opens the expanding cell editor, and hides the panel
 - **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block,
   fetches the account's instances and picks the bastion from the list (including the empty answer a
-  wrong region gives), runs the prerequisite check in both its failing and passing states, saves,
+  wrong region gives), switches the connection to finding that bastion by its Name tag and back, runs the prerequisite check in both its failing and passing states, saves,
   reopens the connection to confirm the stored summary appears while the secret never reaches the
   renderer, and opens a second window. `scripts/e2e.sh` writes stand-ins for `aws` and
   `session-manager-plugin` into `.tmp/bin`, so it needs no AWS account.
@@ -346,7 +367,8 @@ src/
 │   │   ├── registry.ts       live client per connection
 │   │   └── sqlserver/        client, config mapping, catalog queries, type mapping
 │   ├── tunnel/               ssh.ts, ssm.ts (AWS Session Manager), ec2Instances.ts
-│   │                         (the bastion picker's lookup), shared contract
+│   │                         (the bastion picker's lookup, and the name a
+│   │                         connection resolves on connect), shared contract
 │   ├── storage/              JSON stores + credential vault
 │   ├── ipc/                  handlers, each wrapped in a result envelope
 │   ├── menu.ts, window.ts    native menu + roles, frameless windows and their state
@@ -448,9 +470,8 @@ Deliberately out of scope for phase 1, in rough priority order for phase 2:
 - **Expiry is only known when the block says so.** The portal's environment-variable format carries
   no expiry, so the app can tell you the credentials *are* temporary but not when they lapse; it
   reports the failure when they do.
-- **The bastion is still stored as an instance ID.** The picker resolves Name tags at the moment you
-  fetch, but what the connection saves is the ID it produced, so a redeploy still means fetching the
-  list again and picking the new instance — the form tells you when the saved ID has gone.
+- **A named bastion needs `ec2:DescribeInstances`.** Names are matched by EC2, so an identity that
+  can start a session but cannot describe instances has to point the connection at an ID instead.
 - **The renderer bundle is ~1.7 MB** (CodeMirror and the SQL formatter dominate). Fine for a desktop
   app; worth code-splitting if startup time ever matters.
 - **Query results are capped** at `maxResultRows` (50 000 by default). Rows past the cap are counted

@@ -15,7 +15,25 @@
 import { ChildProcess, spawn } from 'node:child_process'
 import { SSM_CREDENTIALS_EXPIRED, type SsmConfig } from '../../shared/types'
 import { isLoopbackHost } from '../../shared/hosts'
+import { InstanceLookupError, resolveInstanceByName } from './ec2Instances'
 import { Tunnel, TunnelHandle, TunnelTarget, findFreePort, waitForPort } from './types'
+
+/** Resolves a bastion named by its Name tag; injected so tests can answer it. */
+export type InstanceResolver = (config: SsmConfig) => Promise<string>
+
+/**
+ * Asks the account which instance is answering to the connection's name.
+ *
+ * The credentials come from the environment the tunnel was built with, which
+ * is the same environment the session itself will run in — so a name that
+ * resolves here is a name `start-session` can use.
+ */
+function resolverFor(credentialEnv?: Record<string, string>): InstanceResolver {
+  return async (config) => {
+    const { instance } = await resolveInstanceByName(config, credentialEnv ?? {})
+    return instance.instanceId
+  }
+}
 
 export const SSM_DOCUMENT_REMOTE_HOST = 'AWS-StartPortForwardingSessionToRemoteHost'
 export const SSM_DOCUMENT_INSTANCE = 'AWS-StartPortForwardingSession'
@@ -66,7 +84,11 @@ export function buildSsmCommand(
   localPort: number
 ): SsmCommand {
   if (!config.instanceId?.trim()) {
-    throw new SsmTunnelError('An EC2 instance ID is required for an SSM session')
+    throw new SsmTunnelError(
+      config.target === 'name'
+        ? 'No instance answered to that name, so there is nothing to start a session on'
+        : 'An EC2 instance ID is required for an SSM session'
+    )
   }
   if (!INSTANCE_ID.test(config.instanceId.trim())) {
     throw new SsmTunnelError(
@@ -141,7 +163,11 @@ const DESTINATION_UNREACHABLE =
  * the one actually in use rather than listing both.
  */
 export function describeSsmDestination(config: SsmConfig, target: TunnelTarget): string {
-  const instance = config.instanceId?.trim() || 'the bastion'
+  const id = config.instanceId?.trim()
+  const name = config.target === 'name' ? config.instanceName?.trim() : ''
+  // Named bastions are recognised by their name, so lead with it and keep the
+  // ID — which is the thing that changed since the connection was saved.
+  const instance = name ? (id ? `${name} (${id})` : name) : id || 'the bastion'
   if (config.mode === 'remote-host') {
     // A relayed address is resolved by the bastion, so a loopback one names the
     // bastion itself — the setting looks right and quietly forwards nowhere.
@@ -230,6 +256,8 @@ export class SsmTunnel implements Tunnel {
   private exited: { code: number | null; signal: NodeJS.Signals | null } | null = null
   private closed = false
   private forwardError: Error | null = null
+  /** The ID a named bastion resolved to, for this session. */
+  private resolvedInstanceId: string | null = null
 
   constructor(
     private readonly config: SsmConfig,
@@ -240,8 +268,24 @@ export class SsmTunnel implements Tunnel {
      */
     private readonly credentialEnv?: Record<string, string>,
     /** Injected so tests can drive a stand-in for the AWS CLI. */
-    private readonly spawnFn: typeof spawn = spawn
+    private readonly spawnFn: typeof spawn = spawn,
+    /** Injected likewise, so a named bastion can be resolved without an account. */
+    private readonly resolveInstance: InstanceResolver = resolverFor(credentialEnv)
   ) {}
+
+  /**
+   * The config as this session is actually using it.
+   *
+   * A bastion named by its Name tag has no ID until it is looked up, so
+   * everything downstream — the command, and every message about where the
+   * session went — reads the resolved ID from here rather than from the saved
+   * connection, which never had one.
+   */
+  private get activeConfig(): SsmConfig {
+    return this.resolvedInstanceId
+      ? { ...this.config, instanceId: this.resolvedInstanceId }
+      : this.config
+  }
 
   get lastForwardError(): Error | null {
     return this.forwardError
@@ -267,7 +311,7 @@ export class SsmTunnel implements Tunnel {
    * the CLI said nothing about.
    */
   get droppedConnectionHint(): string {
-    return describeSsmDestination(this.config, this.target)
+    return describeSsmDestination(this.activeConfig, this.target)
   }
 
   /** Everything the CLI printed, for surfacing in the UI on failure. */
@@ -276,12 +320,29 @@ export class SsmTunnel implements Tunnel {
   }
 
   async open(): Promise<TunnelHandle> {
+    // A named bastion is resolved on every open, which is the point of naming
+    // one: the ID it resolves to is whatever is answering to that name now.
+    if (this.config.target === 'name') {
+      try {
+        this.resolvedInstanceId = await this.resolveInstance(this.config)
+      } catch (error) {
+        // Same shape as every other way this tunnel fails, so a lookup that
+        // fell over expired credentials offers to take a fresh block too.
+        const message = error instanceof Error ? error.message : String(error)
+        throw new SsmTunnelError(
+          message,
+          error instanceof InstanceLookupError ? error.detail : undefined,
+          isExpiredCredentialsFailure(message) ? SSM_CREDENTIALS_EXPIRED : undefined
+        )
+      }
+    }
+
     const localPort =
       this.config.localPort && this.config.localPort > 0
         ? this.config.localPort
         : await findFreePort()
 
-    const { command, args, env } = buildSsmCommand(this.config, this.target, localPort)
+    const { command, args, env } = buildSsmCommand(this.activeConfig, this.target, localPort)
 
     const child = this.spawnFn(command, args, {
       // Pasted credentials win over anything inherited, so a stale AWS_PROFILE

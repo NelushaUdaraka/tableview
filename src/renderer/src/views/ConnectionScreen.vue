@@ -137,7 +137,14 @@ function endpoint(connection: SavedConnection): string {
 
 /** How the connection gets there — the detail people scan for. */
 function route(connection: SavedConnection): string {
-  if (connection.ssm?.enabled) return `via SSM ${connection.ssm.instanceId || '(no instance)'}`
+  const ssm = connection.ssm
+  if (ssm?.enabled) {
+    // A bastion found by name has no ID until it opens, so the name is what
+    // there is to show — and the more useful of the two to recognise anyway.
+    const bastion =
+      ssm.target === 'name' ? ssm.instanceName?.trim() : ssm.instanceId?.trim()
+    return `via SSM ${bastion || '(no instance)'}`
+  }
   if (connection.ssh?.enabled) return `via ${connection.ssh.host}`
   return 'direct'
 }

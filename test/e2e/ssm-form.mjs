@@ -212,6 +212,56 @@ steps.push({
   saveDisabled: await ev(`document.querySelector('button[type=submit]').disabled`)
 })
 
+// The other way of naming the bastion: the Name tag, which outlives the ID.
+// Picking from the list has to fill that in instead, and the form has to say
+// what the name resolves to right now.
+await ev(`
+  (() => {
+    const select = [...document.querySelectorAll('select')].find(
+      (s) => [...s.options].some((o) => o.value === 'name')
+    )
+    select.value = 'name'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  })()
+`)
+await waitFor(`!!document.querySelector('input[placeholder="prod-bastion"]')`, 'bastion name field')
+await ev(`
+  (() => {
+    const select = document.querySelector('.instances__select')
+    select.value = [...select.options].map(o => o.value).find(v => v.startsWith('i-'))
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  })()
+`)
+await delay(300)
+steps.push({
+  step: 'bastion named',
+  name: await ev(`document.querySelector('input[placeholder="prod-bastion"]').value`),
+  hint: await ev(`document.querySelector('.instances .field__hint')?.textContent?.replace(/\\s+/g,' ').trim()`),
+  saveDisabled: await ev(`document.querySelector('button[type=submit]').disabled`)
+})
+await shot('04-bastion-named')
+
+// A name nothing answers to is the redeploy case, and must be called out here
+// rather than at the moment the connection is opened.
+await setInput('input[placeholder="prod-bastion"]', 'no-such-bastion')
+await delay(300)
+steps.push({
+  step: 'unknown name',
+  hints: await ev(`[...document.querySelectorAll('.instances .field__hint')].map(h => h.textContent.replace(/\\s+/g,' ').trim())`)
+})
+
+// Back to an ID for the rest of the run.
+await ev(`
+  (() => {
+    const select = [...document.querySelectorAll('select')].find(
+      (s) => [...s.options].some((o) => o.value === 'instance-id')
+    )
+    select.value = 'instance-id'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  })()
+`)
+await waitFor(`!!document.querySelector('input[placeholder="i-0123456789abcdef0"]')`, 'instance id field')
+
 // A region with nothing in it is a common mistake, and must say so rather than
 // leaving the last region's list on screen.
 await setInput('input[list="ssm-regions"]', 'us-east-1')

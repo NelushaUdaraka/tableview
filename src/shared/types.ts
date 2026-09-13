@@ -26,6 +26,9 @@ export interface SshConfig {
 /** How the SSM session reaches the database. */
 export type SsmMode = 'remote-host' | 'instance'
 
+/** How a connection points at its bastion: by ID, or by the Name tag. */
+export type SsmTarget = 'instance-id' | 'name'
+
 /** Where the AWS CLI should get its credentials for this connection. */
 export type SsmCredentialSource = 'cli' | 'pasted'
 
@@ -47,8 +50,25 @@ export interface SsmConfig {
    * when you copy a block out of the AWS access portal.
    */
   credentialSource: SsmCredentialSource
+  /**
+   * How the bastion is found.
+   *
+   * `instance-id` is the ID itself, which is exact and goes stale: a redeploy
+   * hands back a different one. `name` is the instance's Name tag, which
+   * survives the redeploy and is resolved to whatever is answering to it at
+   * the moment the connection opens. Absent means `instance-id`, so a
+   * connection saved before this existed keeps working.
+   */
+  target?: SsmTarget
   /** The bastion, e.g. i-0123456789abcdef0 (or an mi- managed instance). */
   instanceId: string
+  /**
+   * The Name tag to look the bastion up by, when `target` is `name`.
+   *
+   * Matched by EC2, so AWS's own `*` wildcards work. Where several instances
+   * answer to it, the one Systems Manager can reach is the one used.
+   */
+  instanceName?: string
   /**
    * `remote-host` relays through the bastion to the connection's host/port;
    * `instance` forwards to a port on the bastion itself.
@@ -550,7 +570,9 @@ export const DEFAULT_SQLSERVER_OPTIONS: SqlServerOptions = {
 export const DEFAULT_SSM_CONFIG: SsmConfig = {
   enabled: false,
   credentialSource: 'pasted',
+  target: 'instance-id',
   instanceId: '',
+  instanceName: '',
   mode: 'remote-host',
   startTimeoutMs: 30000
 }

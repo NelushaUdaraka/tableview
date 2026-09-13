@@ -26,11 +26,24 @@ interface WindowState {
 const DEFAULT_STATE: WindowState = { width: 1440, height: 900, maximized: false }
 /** Offset each new window so it does not land exactly on top of the last. */
 const CASCADE_STEP = 28
+/**
+ * How long geometry is held before it reaches disk.
+ *
+ * Dragging a window's edge raises `resize` continuously — dozens of times a
+ * second — and writing on each one replaces the file just as often: wasted
+ * work, and the surest way to collide with whatever else on the machine has
+ * that file open for a moment. Where the drag comes to rest is the part worth
+ * recording, and a short wait is enough to catch it.
+ */
+const WRITE_DELAY_MS = 400
 
 export class WindowManager {
   private readonly store: JsonStore<WindowState>
   private readonly windows = new Set<BrowserWindow>()
   private lastFocused: BrowserWindow | null = null
+  /** Geometry seen but not yet written; `null` once it has reached disk. */
+  private pendingState: WindowState | null = null
+  private writeTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(private readonly userDataDir: string) {
     this.store = new JsonStore(path.join(userDataDir, 'window-state.json'), () => ({
@@ -104,7 +117,12 @@ export class WindowManager {
     const announce = (): void => sendChromeState(window)
     window.on('resize', persist)
     window.on('move', persist)
-    window.on('close', persist)
+    // The last thing a window does is worth writing straight away: there is no
+    // later event to carry it, and by the next tick the window is gone.
+    window.on('close', () => {
+      this.persistState(window)
+      this.flushState()
+    })
     window.on('maximize', announce)
     window.on('unmaximize', announce)
     window.on('enter-full-screen', announce)
@@ -126,7 +144,10 @@ export class WindowManager {
 
   /** Clamps a restored position so a window from an unplugged monitor is visible. */
   private restoreState(): WindowState {
-    const state = { ...DEFAULT_STATE, ...this.store.read() }
+    // Geometry on its way to disk is still the most recent there is, so a
+    // window opened during that wait cascades from it rather than from the
+    // position before it.
+    const state = { ...DEFAULT_STATE, ...(this.pendingState ?? this.store.read()) }
     if (state.x === undefined || state.y === undefined) return state
 
     const visible = screen.getAllDisplays().some((display) => {
@@ -142,22 +163,71 @@ export class WindowManager {
     return visible ? state : { ...state, x: undefined, y: undefined }
   }
 
+  /**
+   * Notes a window's geometry, and asks for it to be written before long.
+   *
+   * Reading the bounds is cheap and has to happen now — the window is still
+   * there to ask. Writing them is neither, so it waits: see `WRITE_DELAY_MS`.
+   */
   private persistState(window: BrowserWindow): void {
-    if (window.isDestroyed()) return
+    // A minimized window reports a position off the edge of every display,
+    // which is not somewhere to reopen it.
+    if (window.isDestroyed() || window.isMinimized()) return
     const maximized = window.isMaximized()
     // A maximized window reports the screen bounds; keep the restore size.
     if (maximized) {
-      this.store.write({ ...this.store.read(), maximized })
-      return
+      this.pendingState = { ...(this.pendingState ?? this.store.read()), maximized }
+    } else {
+      const bounds = window.getBounds()
+      this.pendingState = {
+        width: bounds.width,
+        height: bounds.height,
+        x: bounds.x,
+        y: bounds.y,
+        maximized
+      }
     }
-    const bounds = window.getBounds()
-    this.store.write({
-      width: bounds.width,
-      height: bounds.height,
-      x: bounds.x,
-      y: bounds.y,
-      maximized
-    })
+    this.scheduleWrite()
+  }
+
+  /**
+   * One write per burst of events, rather than one per event.
+   *
+   * The timer is left to run once set: a drag that goes on for a while still
+   * gets its first position recorded partway through, rather than nothing at
+   * all until it ends.
+   */
+  private scheduleWrite(): void {
+    if (this.writeTimer) return
+    this.writeTimer = setTimeout(() => {
+      this.writeTimer = null
+      this.flushState()
+    }, WRITE_DELAY_MS)
+    // Geometry alone should never hold the process open.
+    this.writeTimer.unref?.()
+  }
+
+  /**
+   * Writes whatever geometry is waiting.
+   *
+   * Where the file cannot be replaced — on Windows a scanner or an indexer
+   * can hold it open — the window's size is not worth failing over: the next
+   * move or resize will try again, and the app opens at its old size at worst.
+   */
+  flushState(): void {
+    if (this.writeTimer) {
+      clearTimeout(this.writeTimer)
+      this.writeTimer = null
+    }
+    const state = this.pendingState
+    if (!state) return
+    this.pendingState = null
+    try {
+      this.store.write(state)
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('[window] could not save the window geometry:', error)
+    }
   }
 }
 

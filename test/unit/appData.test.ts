@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppData } from '../../src/main/storage/appData'
 import { DEFAULT_SSH_CONFIG, DEFAULT_SSM_CONFIG } from '../../src/shared/types'
 import { LocalKeyVault } from '../../src/main/storage/crypto'
@@ -50,6 +50,46 @@ describe('JsonStore', () => {
     const store = new JsonStore<{ n: number }>(path.join(dir, 'u.json'), () => ({ n: 0 }))
     expect(store.update((current) => ({ n: current.n + 5 }))).toEqual({ n: 5 })
     expect(store.read()).toEqual({ n: 5 })
+  })
+
+  // Windows hands out EPERM when a scanner or an indexer has either file open
+  // for the moment; the lock goes away on its own.
+  it('retries a rename the filesystem refuses', () => {
+    const file = path.join(dir, 'locked.json')
+    const real = fs.renameSync
+    const rename = vi.spyOn(fs, 'renameSync')
+    rename
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('EPERM'), { code: 'EPERM' })
+      })
+      .mockImplementationOnce((from, to) => real(from, to))
+
+    new JsonStore(file, () => ({ a: 0 })).write({ a: 7 })
+    rename.mockRestore()
+
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ a: 7 })
+  })
+
+  it('writes in place when the rename never goes through', () => {
+    const file = path.join(dir, 'stubborn.json')
+    const rename = vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+      throw Object.assign(new Error('EPERM'), { code: 'EPERM' })
+    })
+
+    new JsonStore(file, () => ({ a: 0 })).write({ a: 9 })
+    rename.mockRestore()
+
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ a: 9 })
+  })
+
+  it('leaves no temp file behind when a write cannot be committed', () => {
+    // A directory standing where the file should be: nothing can be renamed
+    // onto it and nothing can be written over it either.
+    const file = path.join(dir, 'in-the-way.json')
+    fs.mkdirSync(file)
+
+    expect(() => new JsonStore(file, () => ({ a: 0 })).write({ a: 1 })).toThrow()
+    expect(fs.readdirSync(dir).filter((name) => name.includes('.tmp-'))).toEqual([])
   })
 })
 

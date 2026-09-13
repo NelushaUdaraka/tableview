@@ -81,6 +81,9 @@ app.on('window-all-closed', () => {
 
 // Close pools and SSH/SSM tunnels before the process exits.
 app.on('before-quit', (event) => {
+  // Quitting with connections open exits the process outright, so no window
+  // gets a close event to write its geometry with; do it here instead.
+  windows?.flushState()
   if (registry.openCount === 0) return
   event.preventDefault()
   void registry.closeAll().finally(() => app.exit(0))

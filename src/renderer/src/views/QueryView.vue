@@ -15,6 +15,7 @@ import { useToastStore } from '../stores/toasts'
 import { useConnectionStore } from '../stores/connections'
 import { useCredentialsStore } from '../stores/credentials'
 import { useLibraryStore } from '../stores/library'
+import { useRowPanel } from '../lib/rowPanel'
 import { api } from '../lib/api'
 
 const props = defineProps<{ tab: QueryTab }>()
@@ -34,6 +35,9 @@ const library = useLibraryStore()
 const editor = ref<InstanceType<typeof SqlEditor> | null>(null)
 const editorHeight = ref(336)
 const cursor = ref(0)
+
+/** The results' row panel, which belongs to this tab and not to the window. */
+const showRowPanel = useRowPanel(() => props.tab)
 
 const sql = computed({
   get: () => props.tab.sql,
@@ -207,6 +211,9 @@ watch(
 
 defineExpose({
   run: () => run(),
+  toggleRowPanel: () => {
+    showRowPanel.value = !showRowPanel.value
+  },
   runSelection,
   runCurrent,
   cancel,
@@ -267,6 +274,7 @@ defineExpose({
 
       <template #second>
         <ResultsPanel
+          v-model:show-row-panel="showRowPanel"
           :result="tab.result"
           :running="tab.running"
           @export="(columns, rows) => emit('export', columns, rows)"

@@ -11,7 +11,9 @@ export const useSettingsStore = defineStore('settings', () => {
 
   // A plain matchMedia call inside the computed would not be a reactive
   // dependency, so `theme: 'system'` would never follow an OS theme change.
-  const systemQuery = window.matchMedia?.('(prefers-color-scheme: light)')
+  // Reached through globalThis because the store is also built where there is
+  // no window at all: the unit tests run in Node.
+  const systemQuery = globalThis.window?.matchMedia?.('(prefers-color-scheme: light)')
   const systemPrefersLight = ref(systemQuery?.matches ?? false)
   systemQuery?.addEventListener?.('change', (event) => {
     systemPrefersLight.value = event.matches

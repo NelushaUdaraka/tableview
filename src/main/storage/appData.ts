@@ -18,6 +18,7 @@ import {
   SavedConnection,
   SavedQuery
 } from '../../shared/types'
+import { normalizeHex } from '../../shared/accent'
 import { JsonStore } from './store'
 import { SecretVault, isEncrypted } from './crypto'
 import {
@@ -99,7 +100,11 @@ export class AppData {
     const merged: ConnectionConfig = {
       id: existing?.id ?? input.id ?? randomUUID(),
       name: input.name,
-      color: input.color ?? existing?.color,
+      // Omitted leaves the stored colour alone; empty clears it — the same
+      // contract as a secret, because the picker has to be able to take a
+      // colour back off a connection as well as put one on.
+      color:
+        input.color === undefined ? existing?.color : (normalizeHex(input.color) ?? undefined),
       engine: 'sqlserver',
       host: input.host ?? existing?.host ?? 'localhost',
       port: input.port ?? existing?.port ?? 1433,

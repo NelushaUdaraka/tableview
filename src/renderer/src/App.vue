@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { MenuAction } from '@shared/menu'
 import ConnectionScreen from './views/ConnectionScreen.vue'
 import TitleBar from './components/TitleBar.vue'
@@ -12,6 +12,7 @@ import { useSettingsStore } from './stores/settings'
 import { useTabStore } from './stores/tabs'
 import { useToastStore } from './stores/toasts'
 import { dispatchMenuAction } from './lib/menuBus'
+import { applyAccent } from './lib/accent'
 import { api } from './lib/api'
 
 const connections = useConnectionStore()
@@ -59,6 +60,20 @@ async function openDetachedTab(): Promise<void> {
   }
   detached.value = true
 }
+
+/**
+ * The window takes the colour of the connection open in it.
+ *
+ * A window is one connection, so the accent can say which one at a glance —
+ * production and staging side by side stop looking alike. The theme is in it
+ * because one of the shades the accent produces is a tint that has to sit on
+ * whichever ground is underneath.
+ */
+watch(
+  () => [connections.active?.color, settings.resolvedTheme] as const,
+  ([colour, theme]) => applyAccent(colour, theme),
+  { immediate: true }
+)
 
 let unsubscribeMenu: (() => void) | null = null
 

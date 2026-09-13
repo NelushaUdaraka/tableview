@@ -11,7 +11,8 @@ TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind
 ## What's in phase 1
 
 **Connections**
-- Saved connections with name, colour tag, host/port, default database and a most-recently-used list
+- Saved connections with name, host/port, default database and a most-recently-used list — each with
+  a colour that becomes the whole window's accent, so production never looks like staging
 - SQL Server logins, Windows/NTLM (with domain), and Azure AD password auth
 - TLS options: `encrypt`, `trustServerCertificate`, named instances, `ApplicationIntent=ReadOnly`,
   connect/request timeouts, pool sizing, application name
@@ -234,6 +235,20 @@ tabs and schema tree; connections are namespaced per window, so two windows open
 connection get their own pool and tunnel rather than evicting one another. Closing a window closes
 what it opened. Saved connections and settings are shared, since one process owns those files.
 
+**A connection's colour is the window's accent**
+
+One colour runs through this UI — the button that acts, the tab that is showing, the key badges, the
+focus ring — so giving a connection a colour colours the window it is open in, and two windows side
+by side stop looking alike. It is not the theme: dark and light are still yours to choose, and the
+connection tints whichever one you are in.
+
+The connection stores one hex value. Everything else is derived from it: the hover shade, the tint
+the SQL keywords take (lighter on the dark theme, darker on the light one), and whether text on top
+of the accent should be white or ink — which is what keeps a pale colour readable rather than
+leaving a button nobody can read. The swatches offered are chosen to carry at least 3:1 against both
+grounds, since the accent is used as text as well as as a fill. A connection with no colour is the
+app's own red, exactly as the stylesheet defines it.
+
 **Everything else**
 - Export result sets or whole tables to CSV, TSV, JSON, JSON Lines, SQL `INSERT`s or Markdown —
   with a live preview — to a file or the clipboard
@@ -380,6 +395,7 @@ src/
 │   ├── foreignKeys.ts        which cells carry an arrow, and what it filters on
 │   ├── aws/credentials.ts    parses the AWS portal's credential blocks
 │   ├── aws/regions.ts        the region list the connection form offers
+│   ├── accent.ts             a connection's colour, and the shades derived from it
 │   ├── sql/                  identifier escaping, T-SQL lexer, query builders
 │   ├── serialize.ts          driver values ⇄ IPC-safe cell values
 │   ├── export.ts             CSV/JSON/SQL/Markdown

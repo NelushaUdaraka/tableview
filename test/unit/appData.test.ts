@@ -105,6 +105,27 @@ describe('connections', () => {
     expect(appData.listConnections()).toHaveLength(1)
   })
 
+  /**
+   * The colour is the accent the whole window takes while the connection is
+   * open, so taking one back off has to be possible — and an omitted field
+   * still has to mean "leave what is stored alone", which is how every other
+   * caller saves a connection without touching it.
+   */
+  it('keeps, clears and tidies the connection colour', () => {
+    const saved = appData.saveConnection({ name: 'Prod', color: '1971C2' })
+    expect(saved.color).toBe('#1971c2')
+
+    const untouched = appData.saveConnection({ id: saved.id, name: 'Prod' })
+    expect(untouched.color).toBe('#1971c2')
+
+    const cleared = appData.saveConnection({ id: saved.id, name: 'Prod', color: '' })
+    expect(cleared.color).toBeUndefined()
+
+    // Anything that is not a colour is not stored as one.
+    const nonsense = appData.saveConnection({ id: saved.id, name: 'Prod', color: 'chartreuse' })
+    expect(nonsense.color).toBeUndefined()
+  })
+
   it('never returns a password to the renderer', () => {
     appData.saveConnection({ name: 'Prod', username: 'sa', password: 'hunter2', savePassword: true })
     const listed = appData.listConnections()[0]

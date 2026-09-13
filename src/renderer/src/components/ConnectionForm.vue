@@ -9,6 +9,7 @@ import {
   type SsmTarget
 } from '@shared/types'
 import type { SsmInstance, SsmPreflight } from '@shared/ipc'
+import { ACCENT_SWATCHES } from '@shared/accent'
 import { parseAwsCredentials } from '@shared/aws/credentials'
 import { isLoopbackHost } from '@shared/hosts'
 import { AWS_REGIONS, describeRegion, isRegionLike } from '@shared/aws/regions'
@@ -38,8 +39,6 @@ const instancesWarning = ref('')
 const instancesError = ref('')
 const instancesLoaded = ref(false)
 const loadingInstances = ref(false)
-
-const COLORS = ['', '#f0a91d', '#58a6ff', '#3fb950', '#f85149', '#bc8cff', '#ff7b72']
 
 function blank(): Partial<ConnectionConfig> & { name: string } {
   return {
@@ -453,7 +452,9 @@ function payload(): Partial<ConnectionConfig> & { name: string } {
     host: form.host?.trim(),
     port: Number(form.port) || 1433,
     database: form.database?.trim() || undefined,
-    color: form.color || undefined,
+    // Always a string, so picking the default swatch clears a stored colour
+    // rather than reading as "leave it alone".
+    color: form.color ?? '',
     ssh
   }
   if (!passwordTouched.value) delete out.password
@@ -494,19 +495,27 @@ async function browseForKey(): Promise<void> {
           <span v-if="nameError" class="field__hint error-text">{{ nameError }}</span>
         </label>
         <div class="field" style="flex: 0 0 auto">
+          <!-- Not decoration: this is the accent the whole window takes while
+               the connection is open, so production never looks like staging. -->
           <span class="field__label">Colour</span>
           <div class="swatches">
             <button
-              v-for="color in COLORS"
-              :key="color || 'none'"
+              v-for="swatch in ACCENT_SWATCHES"
+              :key="swatch.hex || 'none'"
               type="button"
               class="swatch"
-              :class="{ 'swatch--active': form.color === color, 'swatch--none': !color }"
-              :style="color ? { background: color } : {}"
-              :title="color || 'None'"
-              @click="form.color = color"
+              :class="{
+                'swatch--active': (form.color ?? '') === swatch.hex,
+                'swatch--none': !swatch.hex
+              }"
+              :style="swatch.hex ? { background: swatch.hex } : {}"
+              :title="swatch.label"
+              :aria-label="swatch.label"
+              :aria-pressed="(form.color ?? '') === swatch.hex"
+              @click="form.color = swatch.hex"
             ></button>
           </div>
+          <span class="field__hint">Accents the window this connection opens in.</span>
         </div>
       </div>
 

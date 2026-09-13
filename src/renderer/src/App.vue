@@ -19,6 +19,14 @@ const settings = useSettingsStore()
 const tabs = useTabStore()
 const toasts = useToastStore()
 const ready = ref(false)
+/**
+ * Whether this window was opened to hold one tab dragged out of another.
+ *
+ * Such a window is that tab and nothing else — no schema tree beside it, the
+ * way a dragged-out editor opens in its own window with none of the workbench
+ * around it. Everything is still a keystroke away; none of it is in the way.
+ */
+const detached = ref(false)
 
 /**
  * Opens the tab this window was created for, if it was created for one.
@@ -49,6 +57,7 @@ async function openDetachedTab(): Promise<void> {
   } else {
     await tabs.openQuery(pending.connectionId, pending.sql ?? '', pending.title)
   }
+  detached.value = true
 }
 
 let unsubscribeMenu: (() => void) | null = null
@@ -82,7 +91,7 @@ onBeforeUnmount(() => unsubscribeMenu?.())
       </div>
       <!-- The session, not the socket: a connection being reopened keeps its
            tabs rather than dropping back to the connection screen. -->
-      <WorkspaceView v-else-if="connections.inSession" />
+      <WorkspaceView v-else-if="connections.inSession" :detached="detached" />
       <ConnectionScreen v-else />
     </div>
     <ToastHost />

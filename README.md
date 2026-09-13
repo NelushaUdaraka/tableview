@@ -133,7 +133,8 @@ connect, and holding only one of them still produces a usable list.
 - **Row panel** beside the grid (`Ctrl+I`): the selected row as one field per line, with room for
   the values a 26px cell cannot show, editable in place and moving with the selection. The same
   panel sits beside query results, read-only, and "View row details" on any row's menu opens it
-  there
+  there. It belongs to the tab, not to the window — two tables side by side in a split each show or
+  hide their own fields, and the last choice made is how the next tab opens
 - **Follow a foreign key**: a `›` at the end of a referencing cell opens the referenced table in its
   own tab, filtered to the row it points at — composite keys included
 
@@ -197,6 +198,12 @@ entirely** to open in a window of their own (also on the tab's menu, and File �
 Window). Nothing is carried across but a description of what to open — the new window has its own
 connection pool, so it connects for itself, which needs the connection's password to be saved.
 Staged edits stay with the window they were made in: a tab that is holding them asks before it goes.
+
+A window opened that way **is that one tab**: it opens onto the tab alone, with no schema tree
+beside it, the way a dragged-out editor opens in a window of its own with none of the workbench
+around it. The tree is not merely hidden, it is not built — though the schema behind it is still
+read, so a query tab in that window still completes table and column names. `Ctrl+B` brings the
+tree in for anyone who wants it, and it stays once it is there.
 
 **Windows and connections**
 
@@ -387,6 +394,15 @@ process turns it into an Electron `Menu` (which macOS shows and which supplies t
 every platform) and the title bar draws the same items in the window. Items the renderer cannot
 carry out itself — clipboard, zoom, dev tools, closing the window — name an Electron role and come
 back over IPC.
+
+**App data is written new-file-then-rename, and the rename retries.** A crash mid-write then leaves
+the previous copy intact rather than half of the new one. On Windows that rename is not guaranteed
+to go through first time — a virus scanner or the search indexer holding either file open comes back
+`EPERM` — so `JsonStore` retries, and falls back to writing over the file directly. Window geometry
+takes the same route but is also *coalesced*: dragging a window's edge raises `resize` dozens of
+times a second, and one write per event is both wasted work and the surest way to meet that lock.
+One write per burst, one more when the window closes, and a geometry write that cannot be made is
+logged rather than thrown — it is not worth failing the app over.
 
 **A tab belongs to a pane, and only a pane's active tab is mounted.** The tab store holds one flat
 list of tabs and one or two panes naming which of them they hold. Because only the mounted tab can be

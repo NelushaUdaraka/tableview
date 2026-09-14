@@ -84,7 +84,18 @@ function indexTitle(index: TableIndex): string {
     <template v-else-if="tree">
       <template v-for="folder in STRUCTURE_FOLDERS" :key="folder">
         <button class="folder" @click="toggle(folder)">
-          <span class="folder__chevron">{{ isOpen(folder) ? '▾' : '▸' }}</span>
+          <span class="folder__chevron" :class="{ 'folder__chevron--open': isOpen(folder) }">
+            <svg viewBox="0 0 12 12" aria-hidden="true">
+              <path
+                d="M4 2.4 7.8 6 4 9.6"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </span>
           <span class="folder__name">{{ FOLDER_LABELS[folder] }}</span>
           <span class="folder__count">{{ count(folder) }}</span>
         </button>
@@ -198,11 +209,23 @@ function indexTitle(index: TableIndex): string {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
+/* The same mark as the table's own twisty, a level in: drawn rather than
+   typed, and turned a quarter when the folder is open. */
 .folder__chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
-  width: 8px;
-  font-size: 8px;
-  color: var(--text-muted);
+  width: 10px;
+  color: var(--text-secondary);
+}
+.folder__chevron svg {
+  width: 9px;
+  height: 9px;
+  transition: transform var(--transition);
+}
+.folder__chevron--open svg {
+  transform: rotate(90deg);
 }
 .folder__name {
   flex: 1;
@@ -242,8 +265,8 @@ function indexTitle(index: TableIndex): string {
 .leaf__mark {
   flex: 0 0 auto;
   width: 8px;
-  font-size: 8px;
-  color: var(--text-dim);
+  font-size: 9px;
+  color: var(--text-muted);
 }
 /* What identifies a row, marked the way the grid marks it: in the accent. */
 .leaf__mark--key {

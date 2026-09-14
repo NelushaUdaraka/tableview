@@ -314,9 +314,14 @@ defineExpose({ focusFilter, refresh })
                   @contextmenu.prevent="openMenu($event, object.schema, object.name, object.type)"
                 >
                   <!-- Inside the row rather than beside it, so the whole line
-                       still opens the table: only the twisty itself expands. -->
+                       still opens the table: only the twisty itself expands.
+                       Drawn rather than typed — a glyph this small is at the
+                       mercy of whichever font the platform falls back to. -->
                   <span
                     class="item__chevron"
+                    :class="{
+                      'item__chevron--open': schema.isObjectExpanded(object.schema, object.name)
+                    }"
                     :title="
                       schema.isObjectExpanded(object.schema, object.name)
                         ? 'Hide the structure'
@@ -324,7 +329,16 @@ defineExpose({ focusFilter, refresh })
                     "
                     @click.stop="expand(object)"
                   >
-                    {{ schema.isObjectExpanded(object.schema, object.name) ? '▾' : '▸' }}
+                    <svg viewBox="0 0 12 12" aria-hidden="true">
+                      <path
+                        d="M4 2.4 7.8 6 4 9.6"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
                   </span>
                   <span class="item__icon" :class="{ 'item__icon--view': object.type === 'view' }">
                     {{ objectIcon(object) }}
@@ -670,7 +684,7 @@ defineExpose({ focusFilter, refresh })
 }
 /* The twisty is part of the row, so it takes its own clicks and leaves the
    rest of the line to open the table. It is the full height of the row for the
-   same reason a checkbox has a label: 8px of glyph is not a target. */
+   same reason a checkbox has a label: a 10px mark is not a target. */
 .item__chevron {
   display: flex;
   align-items: center;
@@ -678,8 +692,16 @@ defineExpose({ focusFilter, refresh })
   align-self: stretch;
   flex: 0 0 auto;
   width: 14px;
-  font-size: 8px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
+}
+.item__chevron svg {
+  width: 10px;
+  height: 10px;
+  transition: transform var(--transition);
+}
+/* Open is the same mark turned a quarter, which is what says it can be shut. */
+.item__chevron--open svg {
+  transform: rotate(90deg);
 }
 .item__chevron:hover {
   color: var(--text-primary);

@@ -32,6 +32,14 @@ import { api } from '../lib/api'
 
 type PaneView = InstanceType<typeof TabPaneView>
 
+const props = withDefaults(
+  defineProps<{
+    /** Set when the window was opened to hold one tab dragged out of another. */
+    detached?: boolean
+  }>(),
+  { detached: false }
+)
+
 const connections = useConnectionStore()
 const schema = useSchemaStore()
 const settings = useSettingsStore()
@@ -76,7 +84,20 @@ watch(
     if (split && width > 0) splitWidth.value = Math.round(width / 2)
   }
 )
-const sidebarCollapsed = ref(false)
+/**
+ * A window opened for one dragged-out tab opens as that tab and nothing else.
+ *
+ * The schema tree belongs to the workspace, not to the tab, so it stays out of
+ * the way — and out of the document, since a tree nobody is looking at is a
+ * few thousand nodes of nothing. `Ctrl+B` brings it in, and it stays from then
+ * on: putting it away again should not rebuild it.
+ */
+const sidebarCollapsed = ref(props.detached)
+const sidebarMounted = ref(!props.detached)
+watch(sidebarCollapsed, (collapsed) => {
+  if (!collapsed) sidebarMounted.value = true
+})
+
 const showSettings = ref(false)
 const showShortcuts = ref(false)
 const exportPayload = ref<{ columns: ColumnMeta[]; rows: CellValue[][]; name?: string } | null>(
@@ -226,7 +247,8 @@ function handleAction(action: string): void {
       sidebarCollapsed.value = !sidebarCollapsed.value
       break
     case 'view:toggle-row-panel':
-      void settings.update({ showRowPanel: !settings.settings.showRowPanel })
+      // The tab owns its row panel, so this is the focused pane's tab alone.
+      focusedView.value?.toggleRowPanel()
       break
     case 'view:toggle-theme':
       settings.toggleTheme()
@@ -297,6 +319,23 @@ function onStatusChanged(status: ConnectionStatus): void {
 let unsubscribeMenu: (() => void) | null = null
 let unsubscribeStatus: (() => void) | null = null
 
+/**
+ * Reads the connection's schema, and reads it again for the next connection.
+ *
+ * The workspace owns this rather than the tree that draws it: the editor's
+ * autocomplete reads the same store, and a window opened for one dragged-out
+ * tab has no tree on screen — its query tabs should still complete table and
+ * column names.
+ */
+watch(
+  connectionId,
+  (id, previous) => {
+    if (previous) schema.reset()
+    if (id) void schema.loadAll(id)
+  },
+  { immediate: true }
+)
+
 onMounted(() => {
   document.addEventListener('keydown', onKeydown)
   unsubscribeMenu = onMenuAction(handleAction)
@@ -322,6 +361,7 @@ onBeforeUnmount(() => {
     >
       <template #first>
         <AppSidebar
+          v-if="sidebarMounted"
           ref="sidebar"
           @open-table="(s, t, type) => openTable(s, t, type, 'data')"
           @open-structure="(s, t, type) => openTable(s, t, type, 'structure')"
@@ -351,6 +391,7 @@ onBeforeUnmount(() => {
               <TabPaneView
                 ref="primaryPane"
                 :pane="tabs.panes[0]"
+                :has-sidebar="sidebarMounted && !sidebarCollapsed"
                 @new-query="newQueryTab"
                 @export="(columns, rows, name) => (exportPayload = { columns, rows, name })"
                 @open-sql="openSql"
@@ -363,6 +404,7 @@ onBeforeUnmount(() => {
                 v-if="tabs.panes[1]"
                 ref="secondaryPane"
                 :pane="tabs.panes[1]"
+                :has-sidebar="sidebarMounted && !sidebarCollapsed"
                 @new-query="newQueryTab"
                 @export="(columns, rows, name) => (exportPayload = { columns, rows, name })"
                 @open-sql="openSql"

@@ -71,7 +71,16 @@ const IAM_ACTION: Record<LookupKind, string> = {
 export function buildInstanceListCommand(
   config: SsmConfig,
   kind: LookupKind,
-  region?: string
+  region?: string,
+  /**
+   * Narrows the EC2 lookup to one Name tag.
+   *
+   * Filtering at the API rather than over the answer matters for the lookup
+   * that runs on connect: `--max-items` would otherwise let a large account
+   * cut the list short before the bastion appears in it. AWS matches the value
+   * itself, so its `*` wildcards work.
+   */
+  nameTag?: string
 ): CliInvocation {
   const args =
     kind === 'ec2'
@@ -82,6 +91,10 @@ export function buildInstanceListCommand(
           `Name=instance-state-name,Values=${LIVE_STATES}`
         ]
       : ['ssm', 'describe-instance-information']
+
+  if (kind === 'ec2' && nameTag?.trim()) {
+    args.push(`Name=tag:Name,Values=${nameTag.trim()}`)
+  }
 
   args.push('--max-items', String(MAX_ITEMS), '--output', 'json')
 
@@ -405,4 +418,83 @@ export async function listSsmInstances(
     instances: mergeInstances(described.instances, information.managed),
     warning: warnings.length ? warnings.join(' ') : undefined
   }
+}
+
+/**
+ * Finds the bastion a connection names.
+ *
+ * An instance ID is exact and perishable: every redeploy hands back a new one,
+ * and the connection that was saved with the old one points at something that
+ * no longer exists. A Name tag survives the redeploy, so a connection can name
+ * the bastion instead and have the ID looked up each time it opens.
+ *
+ * EC2 does the matching, which is what makes AWS's `*` wildcards work and what
+ * keeps a large account from cutting the answer short before the bastion is in
+ * it. Several instances can answer to one name — an autoscaled pair, a
+ * half-finished replacement — so reachability decides between them, and that
+ * second lookup only runs when there is actually something to decide.
+ */
+export async function resolveInstanceByName(
+  config: SsmConfig,
+  credentialEnv: Record<string, string> = {},
+  run: CliRunner = runCli
+): Promise<{ instance: SsmInstance; alternatives: SsmInstance[] }> {
+  const name = config.instanceName?.trim()
+  if (!name) {
+    throw new InstanceLookupError(
+      'This connection finds its bastion by name, but no name is set. Put the instance’s Name tag in the connection, or point it at an instance ID instead.'
+    )
+  }
+
+  const region = resolveRegion(config, credentialEnv)
+  if (!region && config.credentialSource === 'pasted') {
+    throw new InstanceLookupError(
+      'Choose an AWS region first — a bastion is looked up one region at a time.'
+    )
+  }
+
+  const ec2 = buildInstanceListCommand(config, 'ec2', region, name)
+  const result = await run(ec2.command, ec2.args, credentialEnv)
+  if (result.code !== 0) {
+    throw new InstanceLookupError(
+      classifyInstanceLookupFailure(`${result.stderr} ${result.stdout}`, result.code, 'ec2')
+    )
+  }
+
+  const { instances } = parseDescribeInstances(result.stdout)
+  const where = region ? `in ${region}` : 'in this region'
+  if (instances.length === 0) {
+    throw new InstanceLookupError(
+      `No instance ${where} has the Name tag “${name}”. Check the name, the region and the account — or pick the bastion from the list in the connection settings.`
+    )
+  }
+
+  // One match needs no ranking, and reachability is what `start-session` will
+  // report anyway; skip the second call rather than spend it on every connect.
+  let ranked = sortInstances(instances)
+  if (instances.length > 1) {
+    const ssm = buildInstanceListCommand(config, 'ssm', region)
+    const info = await run(ssm.command, ssm.args, credentialEnv)
+    if (info.code === 0) {
+      try {
+        ranked = mergeInstances(instances, parseInstanceInformation(info.stdout).managed)
+      } catch {
+        // Reachability is a tie-breaker, not a requirement: an unreadable
+        // answer leaves the EC2 order rather than failing the connection.
+      }
+    }
+  }
+
+  const [instance, ...alternatives] = ranked
+  if (instance.state !== 'running' && instance.state !== 'unknown') {
+    const which =
+      alternatives.length > 0
+        ? `No instance named “${name}” ${where} is running`
+        : `The instance named “${name}” ${where} is ${instance.state}`
+    throw new InstanceLookupError(
+      `${which}, so a session cannot start on it. Start the bastion, or point the connection at one that is up.`
+    )
+  }
+
+  return { instance, alternatives }
 }

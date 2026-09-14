@@ -11,7 +11,8 @@ TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind
 ## What's in phase 1
 
 **Connections**
-- Saved connections with name, colour tag, host/port, default database and a most-recently-used list
+- Saved connections with name, host/port, default database and a most-recently-used list — each with
+  a colour that becomes the whole window's accent, so production never looks like staging
 - SQL Server logins, Windows/NTLM (with domain), and Azure AD password auth
 - TLS options: `encrypt`, `trustServerCertificate`, named instances, `ApplicationIntent=ReadOnly`,
   connect/request timeouts, pool sizing, application name
@@ -22,6 +23,8 @@ TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind
 - **Bastion picked from the account, not remembered** — paste credentials, choose a region, and the
   connection form lists the instances in it with their Name tags and whether Systems Manager can
   actually reach them
+- **…or named rather than picked** — a connection can hold the bastion's *Name tag* instead of its
+  ID and resolve it on every connect, so a redeployed bastion needs no edit at all
 - Passwords and SSH secrets encrypted at rest — the OS keystore via Electron `safeStorage` where
   available, AES-256-GCM under a `0600` key file otherwise. Secrets never reach the renderer.
 - Test-connection button that reports the server edition and version
@@ -60,6 +63,25 @@ whether a session can start at all. The reachable ones sort first, `mi-` managed
 not EC2 are included, and either call being denied by IAM degrades to the other's list with a note
 rather than to nothing. Reopen a saved connection, fetch, and an ID the region no longer knows about
 is called out as replaced.
+
+**Or name it, and stop picking.** *Find the bastion by* switches the connection from an ID to the
+instance's **Name tag**, which is the half of the pair that survives a redeploy. Nothing is stored
+but the name; the ID is looked up each time the connection opens, so an instance replaced overnight
+needs no edit in the morning. The form still lists the account's instances — picking one fills the
+name in — and shows what the name resolves to right now:
+
+```
+Find the bastion by  [ Name tag ▾ ]   Bastion name  [ prod-bastion ]
+
+“prod-bastion” is i-0ba5711000fee1dad · running · 10.0.2.11 · SSM Online
+```
+
+EC2 does the matching, so its `*` wildcards work (`prod-bastion-*`), and filtering there rather than
+over the answer is what keeps a large account from cutting the bastion off the end of the list.
+Where several instances answer to one name — an autoscaled pair, a half-finished replacement — the
+one Systems Manager can reach is used, and that second lookup only runs when there is something to
+decide. Nothing answering to the name, or nothing running, fails the connection with that sentence
+rather than with a session timeout.
 
 The list is per region, so the region field is the one that has to be right; it is prefilled from
 the pasted block when that names one. You can still type an ID by hand — the field stays editable,
@@ -133,7 +155,8 @@ connect, and holding only one of them still produces a usable list.
 - **Row panel** beside the grid (`Ctrl+I`): the selected row as one field per line, with room for
   the values a 26px cell cannot show, editable in place and moving with the selection. The same
   panel sits beside query results, read-only, and "View row details" on any row's menu opens it
-  there
+  there. It belongs to the tab, not to the window — two tables side by side in a split each show or
+  hide their own fields, and the last choice made is how the next tab opens
 - **Follow a foreign key**: a `›` at the end of a referencing cell opens the referenced table in its
   own tab, filtered to the row it points at — composite keys included
 
@@ -198,6 +221,12 @@ Window). Nothing is carried across but a description of what to open — the new
 connection pool, so it connects for itself, which needs the connection's password to be saved.
 Staged edits stay with the window they were made in: a tab that is holding them asks before it goes.
 
+A window opened that way **is that one tab**: it opens onto the tab alone, with no schema tree
+beside it, the way a dragged-out editor opens in a window of its own with none of the workbench
+around it. The tree is not merely hidden, it is not built — though the schema behind it is still
+read, so a query tab in that window still completes table and column names. `Ctrl+B` brings the
+tree in for anyone who wants it, and it stays once it is there.
+
 **Windows and connections**
 
 One connection is active per window, and **File → New Window** (`Ctrl+N`) opens as many as you like
@@ -205,6 +234,20 @@ One connection is active per window, and **File → New Window** (`Ctrl+N`) open
 tabs and schema tree; connections are namespaced per window, so two windows opening the *same* saved
 connection get their own pool and tunnel rather than evicting one another. Closing a window closes
 what it opened. Saved connections and settings are shared, since one process owns those files.
+
+**A connection's colour is the window's accent**
+
+One colour runs through this UI — the button that acts, the tab that is showing, the key badges, the
+focus ring — so giving a connection a colour colours the window it is open in, and two windows side
+by side stop looking alike. It is not the theme: dark and light are still yours to choose, and the
+connection tints whichever one you are in.
+
+The connection stores one hex value. Everything else is derived from it: the hover shade, the tint
+the SQL keywords take (lighter on the dark theme, darker on the light one), and whether text on top
+of the accent should be white or ink — which is what keeps a pale colour readable rather than
+leaving a button nobody can read. The swatches offered are chosen to carry at least 3:1 against both
+grounds, since the accent is used as text as well as as a fill. A connection with no colour is the
+app's own red, exactly as the stylesheet defines it.
 
 **Everything else**
 - Export result sets or whole tables to CSV, TSV, JSON, JSON Lines, SQL `INSERT`s or Markdown —
@@ -321,7 +364,7 @@ The suites:
   checks the filter and the row it lands on, opens the expanding cell editor, and hides the panel
 - **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block,
   fetches the account's instances and picks the bastion from the list (including the empty answer a
-  wrong region gives), runs the prerequisite check in both its failing and passing states, saves,
+  wrong region gives), switches the connection to finding that bastion by its Name tag and back, runs the prerequisite check in both its failing and passing states, saves,
   reopens the connection to confirm the stored summary appears while the secret never reaches the
   renderer, and opens a second window. `scripts/e2e.sh` writes stand-ins for `aws` and
   `session-manager-plugin` into `.tmp/bin`, so it needs no AWS account.
@@ -339,7 +382,8 @@ src/
 │   │   ├── registry.ts       live client per connection
 │   │   └── sqlserver/        client, config mapping, catalog queries, type mapping
 │   ├── tunnel/               ssh.ts, ssm.ts (AWS Session Manager), ec2Instances.ts
-│   │                         (the bastion picker's lookup), shared contract
+│   │                         (the bastion picker's lookup, and the name a
+│   │                         connection resolves on connect), shared contract
 │   ├── storage/              JSON stores + credential vault
 │   ├── ipc/                  handlers, each wrapped in a result envelope
 │   ├── menu.ts, window.ts    native menu + roles, frameless windows and their state
@@ -351,6 +395,7 @@ src/
 │   ├── foreignKeys.ts        which cells carry an arrow, and what it filters on
 │   ├── aws/credentials.ts    parses the AWS portal's credential blocks
 │   ├── aws/regions.ts        the region list the connection form offers
+│   ├── accent.ts             a connection's colour, and the shades derived from it
 │   ├── sql/                  identifier escaping, T-SQL lexer, query builders
 │   ├── serialize.ts          driver values ⇄ IPC-safe cell values
 │   ├── export.ts             CSV/JSON/SQL/Markdown
@@ -387,6 +432,15 @@ process turns it into an Electron `Menu` (which macOS shows and which supplies t
 every platform) and the title bar draws the same items in the window. Items the renderer cannot
 carry out itself — clipboard, zoom, dev tools, closing the window — name an Electron role and come
 back over IPC.
+
+**App data is written new-file-then-rename, and the rename retries.** A crash mid-write then leaves
+the previous copy intact rather than half of the new one. On Windows that rename is not guaranteed
+to go through first time — a virus scanner or the search indexer holding either file open comes back
+`EPERM` — so `JsonStore` retries, and falls back to writing over the file directly. Window geometry
+takes the same route but is also *coalesced*: dragging a window's edge raises `resize` dozens of
+times a second, and one write per event is both wasted work and the surest way to meet that lock.
+One write per burst, one more when the window closes, and a geometry write that cannot be made is
+logged rather than thrown — it is not worth failing the app over.
 
 **A tab belongs to a pane, and only a pane's active tab is mounted.** The tab store holds one flat
 list of tabs and one or two panes naming which of them they hold. Because only the mounted tab can be
@@ -432,9 +486,8 @@ Deliberately out of scope for phase 1, in rough priority order for phase 2:
 - **Expiry is only known when the block says so.** The portal's environment-variable format carries
   no expiry, so the app can tell you the credentials *are* temporary but not when they lapse; it
   reports the failure when they do.
-- **The bastion is still stored as an instance ID.** The picker resolves Name tags at the moment you
-  fetch, but what the connection saves is the ID it produced, so a redeploy still means fetching the
-  list again and picking the new instance — the form tells you when the saved ID has gone.
+- **A named bastion needs `ec2:DescribeInstances`.** Names are matched by EC2, so an identity that
+  can start a session but cannot describe instances has to point the connection at an ID instead.
 - **The renderer bundle is ~1.7 MB** (CodeMirror and the SQL formatter dominate). Fine for a desktop
   app; worth code-splitting if startup time ever matters.
 - **Query results are capped** at `maxResultRows` (50 000 by default). Rows past the cap are counted

@@ -20,7 +20,8 @@ const tableTab: TableTab = {
   view: 'structure',
   pendingEdits: 3,
   filters: [{ column: 'id', operator: '=', value: '7' }],
-  filterRevision: 2
+  filterRevision: 2,
+  showRowPanel: true
 }
 
 const queryTab: QueryTab = {
@@ -35,7 +36,8 @@ const queryTab: QueryTab = {
   executionId: 'exec-1',
   activeResultIndex: 1,
   dirty: true,
-  statementLine: 1
+  statementLine: 1,
+  showRowPanel: false
 }
 
 describe('detachedTabFrom', () => {

@@ -5,9 +5,11 @@ import {
   DEFAULT_SQLSERVER_OPTIONS,
   DEFAULT_SSH_CONFIG,
   DEFAULT_SSM_CONFIG,
-  SavedConnection
+  SavedConnection,
+  type SsmTarget
 } from '@shared/types'
 import type { SsmInstance, SsmPreflight } from '@shared/ipc'
+import { ACCENT_SWATCHES } from '@shared/accent'
 import { parseAwsCredentials } from '@shared/aws/credentials'
 import { isLoopbackHost } from '@shared/hosts'
 import { AWS_REGIONS, describeRegion, isRegionLike } from '@shared/aws/regions'
@@ -37,8 +39,6 @@ const instancesWarning = ref('')
 const instancesError = ref('')
 const instancesLoaded = ref(false)
 const loadingInstances = ref(false)
-
-const COLORS = ['', '#f0a91d', '#58a6ff', '#3fb950', '#f85149', '#bc8cff', '#ff7b72']
 
 function blank(): Partial<ConnectionConfig> & { name: string } {
   return {
@@ -212,6 +212,13 @@ function instanceLabel(instance: SsmInstance): string {
   return parts.join(' · ')
 }
 
+/** The same description, minus a name the sentence around it already gave. */
+function instanceDetail(instance: SsmInstance): string {
+  const prefix = instance.name ? `${instance.name} — ` : ''
+  const label = instanceLabel(instance)
+  return prefix && label.startsWith(prefix) ? label.slice(prefix.length) : label
+}
+
 /** A region carried by the pasted block, which the CLI would use anyway. */
 const pastedRegion = computed(() => {
   const text = credentialText.value.trim()
@@ -237,19 +244,82 @@ const fetchBlockedReason = computed(() => {
   return ''
 })
 
+/**
+ * How the bastion is found.
+ *
+ * Absent means by ID, which is what every connection saved before naming
+ * existed meant. Written back explicitly so the choice is stored once made.
+ */
+const ssmTarget = computed<SsmTarget>({
+  get: () => form.ssm!.target ?? 'instance-id',
+  set: (value) => {
+    form.ssm!.target = value
+  }
+})
+const findsByName = computed(() => ssmTarget.value === 'name')
+
+/** AWS matches its own wildcards; anything holding one is left to it. */
+const nameLooksLikeAPattern = computed(() => {
+  const name = form.ssm!.instanceName?.trim() ?? ''
+  return name.includes('*') || name.includes('?')
+})
+
 const selectedInstance = computed(
   () =>
     instances.value.find((instance) => instance.instanceId === form.ssm!.instanceId?.trim()) ??
     null
 )
 
+/**
+ * What the name in the field matches in the list that was fetched.
+ *
+ * The same answer the connection will get when it opens, so it is matched the
+ * way EC2 matches it: exactly, case and all. A pattern is left to AWS rather
+ * than half-reproduced here — better to say nothing than something the lookup
+ * will not agree with.
+ */
+const nameMatches = computed<SsmInstance[]>(() => {
+  const name = form.ssm!.instanceName?.trim()
+  if (!name || nameLooksLikeAPattern.value) return []
+  return instances.value.filter((instance) => instance.name?.trim() === name)
+})
+
+/**
+ * A name that is right but for its case, which EC2 will not match.
+ *
+ * Worth calling out by itself: it is the one wrong name that looks right, and
+ * the connection fails at the moment it is opened rather than here.
+ */
+const nameCaseMismatch = computed(() => {
+  const name = form.ssm!.instanceName?.trim().toLowerCase()
+  if (!name || nameLooksLikeAPattern.value || nameMatches.value.length > 0) return null
+  return (
+    instances.value.find((instance) => instance.name?.trim().toLowerCase() === name)?.name ?? null
+  )
+})
+
+/** The one a session would start on: reachable first, then running. */
+const nameMatch = computed(() => nameMatches.value[0] ?? null)
+
 /** The redeploy case: a saved ID that the region no longer knows about. */
 const instanceIdMissing = computed(
   () =>
+    !findsByName.value &&
     instancesLoaded.value &&
     instances.value.length > 0 &&
     Boolean(form.ssm!.instanceId?.trim()) &&
     !selectedInstance.value
+)
+
+/** Its twin for a named bastion: a name nothing in the region answers to. */
+const instanceNameMissing = computed(
+  () =>
+    findsByName.value &&
+    instancesLoaded.value &&
+    instances.value.length > 0 &&
+    Boolean(form.ssm!.instanceName?.trim()) &&
+    !nameLooksLikeAPattern.value &&
+    !nameMatch.value
 )
 
 /**
@@ -260,14 +330,32 @@ const instanceIdMissing = computed(
  * blank, and choosing the prompt does not wipe an ID typed by hand.
  */
 const pickedInstanceId = computed({
-  get: () => (selectedInstance.value ? selectedInstance.value.instanceId : ''),
+  get: () => {
+    if (findsByName.value) return nameMatch.value?.instanceId ?? ''
+    return selectedInstance.value ? selectedInstance.value.instanceId : ''
+  },
   set: (value: string) => {
-    if (value) form.ssm!.instanceId = value
+    const instance = instances.value.find((entry) => entry.instanceId === value)
+    if (!instance) return
+    // Picking from the list sets whichever of the two the connection is going
+    // to be saved with — a name the bastion will still answer to after it is
+    // replaced, or the ID of the instance that is there now.
+    if (!findsByName.value) {
+      form.ssm!.instanceId = instance.instanceId
+      return
+    }
+    // An instance with no Name tag cannot be named; its option is disabled.
+    if (instance.name?.trim()) form.ssm!.instanceName = instance.name.trim()
   }
 })
 
+/** The instance this connection would actually start a session on. */
+const targetInstance = computed(() =>
+  findsByName.value ? nameMatch.value : selectedInstance.value
+)
+
 const selectedInstanceWarning = computed(() => {
-  const instance = selectedInstance.value
+  const instance = targetInstance.value
   if (!instance) return ''
   if (!instance.ssmManaged) {
     return 'Systems Manager does not know this instance, so a session cannot start on it. Check the SSM agent and the instance profile.'
@@ -331,6 +419,9 @@ const ssmError = computed(() => {
   if (usesPastedCredentials.value && !hasCredentials.value) {
     return 'Paste your AWS credentials below, or switch to letting the AWS CLI resolve them'
   }
+  if (findsByName.value) {
+    return form.ssm!.instanceName?.trim() ? '' : 'A bastion name is required'
+  }
   if (!form.ssm!.instanceId?.trim()) return 'An instance ID is required'
   if (!/^(i|mi)-[0-9a-f]{8,17}$/i.test(form.ssm!.instanceId.trim())) {
     return 'Expected an ID like i-0123456789abcdef0'
@@ -361,7 +452,9 @@ function payload(): Partial<ConnectionConfig> & { name: string } {
     host: form.host?.trim(),
     port: Number(form.port) || 1433,
     database: form.database?.trim() || undefined,
-    color: form.color || undefined,
+    // Always a string, so picking the default swatch clears a stored colour
+    // rather than reading as "leave it alone".
+    color: form.color ?? '',
     ssh
   }
   if (!passwordTouched.value) delete out.password
@@ -402,19 +495,27 @@ async function browseForKey(): Promise<void> {
           <span v-if="nameError" class="field__hint error-text">{{ nameError }}</span>
         </label>
         <div class="field" style="flex: 0 0 auto">
+          <!-- Not decoration: this is the accent the whole window takes while
+               the connection is open, so production never looks like staging. -->
           <span class="field__label">Colour</span>
           <div class="swatches">
             <button
-              v-for="color in COLORS"
-              :key="color || 'none'"
+              v-for="swatch in ACCENT_SWATCHES"
+              :key="swatch.hex || 'none'"
               type="button"
               class="swatch"
-              :class="{ 'swatch--active': form.color === color, 'swatch--none': !color }"
-              :style="color ? { background: color } : {}"
-              :title="color || 'None'"
-              @click="form.color = color"
+              :class="{
+                'swatch--active': (form.color ?? '') === swatch.hex,
+                'swatch--none': !swatch.hex
+              }"
+              :style="swatch.hex ? { background: swatch.hex } : {}"
+              :title="swatch.label"
+              :aria-label="swatch.label"
+              :aria-pressed="(form.color ?? '') === swatch.hex"
+              @click="form.color = swatch.hex"
             ></button>
           </div>
+          <span class="field__hint">Accents the window this connection opens in.</span>
         </div>
       </div>
 
@@ -586,7 +687,28 @@ async function browseForKey(): Promise<void> {
         </div>
 
         <div class="row">
-          <label class="field" style="flex: 2">
+          <label class="field" style="flex: 0 0 auto">
+            <span class="field__label">Find the bastion by</span>
+            <select v-model="ssmTarget" class="select">
+              <option value="instance-id">Instance ID</option>
+              <option value="name">Name tag</option>
+            </select>
+          </label>
+          <label v-if="findsByName" class="field" style="flex: 2">
+            <span class="field__label">Bastion name</span>
+            <input
+              v-model="form.ssm!.instanceName"
+              class="input"
+              placeholder="prod-bastion"
+              spellcheck="false"
+            />
+            <span v-if="ssmError" class="field__hint error-text">{{ ssmError }}</span>
+            <span v-else class="field__hint">
+              The instance's Name tag, looked up each time this connection opens — so a
+              redeployed bastion needs no edit here.
+            </span>
+          </label>
+          <label v-else class="field" style="flex: 2">
             <span class="field__label">Bastion instance ID</span>
             <input
               v-model="form.ssm!.instanceId"
@@ -624,8 +746,10 @@ async function browseForKey(): Promise<void> {
                 v-for="instance in instances"
                 :key="instance.instanceId"
                 :value="instance.instanceId"
+                :disabled="findsByName && !instance.name"
               >
                 {{ instanceLabel(instance) }}
+                <template v-if="findsByName && !instance.name"> — no Name tag</template>
               </option>
             </select>
             <button
@@ -646,10 +770,30 @@ async function browseForKey(): Promise<void> {
           </span>
           <span v-else-if="instanceIdMissing" class="field__hint warn-text">
             {{ form.ssm!.instanceId }} is not in this region any more — it was probably replaced.
-            Pick the current bastion from the list.
+            Pick the current bastion from the list, or find it by its Name tag instead.
+          </span>
+          <span v-else-if="nameCaseMismatch" class="field__hint warn-text">
+            Name tags match exactly — this region has “{{ nameCaseMismatch }}”, not
+            “{{ form.ssm!.instanceName }}”.
+          </span>
+          <span v-else-if="instanceNameMissing" class="field__hint warn-text">
+            Nothing here is named “{{ form.ssm!.instanceName }}”. Pick the bastion from the list to
+            fill the name in, or check the region.
           </span>
           <span v-else-if="selectedInstanceWarning" class="field__hint warn-text">
             {{ selectedInstanceWarning }}
+          </span>
+          <!-- In name mode the list is what the name resolves to today, which is
+               the same answer the connection will get when it opens. -->
+          <span v-else-if="findsByName && nameMatch" class="field__hint">
+            “{{ form.ssm!.instanceName }}” is {{ instanceDetail(nameMatch) }}
+            <template v-if="nameMatches.length > 1">
+              — and {{ nameMatches.length - 1 }} other{{ nameMatches.length > 2 ? 's' : '' }}
+              answer to it; the one a session can reach is used.
+            </template>
+          </span>
+          <span v-else-if="findsByName && nameLooksLikeAPattern" class="field__hint">
+            AWS matches the pattern when the connection opens, so this cannot be shown here.
           </span>
           <span v-else-if="selectedInstance" class="field__hint">
             Selected {{ instanceLabel(selectedInstance) }}
@@ -657,6 +801,9 @@ async function browseForKey(): Promise<void> {
           <span v-else-if="instancesLoaded && !instances.length" class="field__hint">
             Nothing in this region. Check the region and that the credentials belong to the right
             account.
+          </span>
+          <span v-else-if="findsByName" class="field__hint">
+            Fetch the list and pick the bastion to fill its name in.
           </span>
           <span v-else class="field__hint">
             Instance IDs change whenever the bastion is redeployed — fetch the list and pick it by

@@ -28,6 +28,7 @@ import TableViewSwitch from '../components/TableViewSwitch.vue'
 import { exportRows } from '@shared/export'
 import { columnMenuItems } from '../lib/columnMenu'
 import { reindexStagedEdits } from '../lib/stagedRows'
+import { useRowPanel } from '../lib/rowPanel'
 import { foreignKeyFilterValue, foreignKeyFilters, foreignKeyTargets } from '@shared/foreignKeys'
 import { useBusyStore } from '../stores/busy'
 import { useSettingsStore } from '../stores/settings'
@@ -315,7 +316,8 @@ watch(
 
 // --- the selected row -------------------------------------------------------
 
-const showRowPanel = computed(() => settings.settings.showRowPanel)
+/** The row panel answers to this tab, not to the window. */
+const showRowPanel = useRowPanel(() => props.tab)
 const rowPanelWidth = ref(settings.settings.rowPanelWidth)
 
 /**
@@ -331,7 +333,7 @@ async function selectFirstRow(): Promise<void> {
 }
 
 function toggleRowPanel(): void {
-  void settings.update({ showRowPanel: !settings.settings.showRowPanel })
+  showRowPanel.value = !showRowPanel.value
 }
 
 /**
@@ -342,7 +344,7 @@ function toggleRowPanel(): void {
  */
 function showRowDetails(rowIndex: number, columnIndex: number): void {
   grid.value?.selectCell(rowIndex, columnIndex)
-  if (!settings.settings.showRowPanel) void settings.update({ showRowPanel: true })
+  showRowPanel.value = true
 }
 
 // Dragging the divider emits on every mouse move; only the resting width is
@@ -1026,6 +1028,7 @@ async function copyAs(format: ExportFormat, rowIndexes: number[] | null): Promis
 
 defineExpose({
   refresh: () => withPendingEdits(() => load()),
+  toggleRowPanel,
   focusFilter: () => {
     showFilters.value = true
   },

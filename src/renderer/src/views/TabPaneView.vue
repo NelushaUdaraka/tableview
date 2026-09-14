@@ -15,7 +15,14 @@ import TableView from './TableView.vue'
 import { useTabStore } from '../stores/tabs'
 import type { QueryTab, TableTab, TabPane } from '../stores/tabs'
 
-const props = defineProps<{ pane: TabPane }>()
+const props = withDefaults(
+  defineProps<{
+    pane: TabPane
+    /** False in a window opened for one dragged-out tab, where there is none. */
+    hasSidebar?: boolean
+  }>(),
+  { hasSidebar: true }
+)
 const emit = defineEmits<{
   (event: 'export', columns: ColumnMeta[], rows: CellValue[][], name?: string): void
   (event: 'open-sql', sql: string, title: string): void
@@ -44,7 +51,12 @@ defineExpose({
   openFile: () => void queryView.value?.openFile(),
   refresh: () => tableView.value?.refresh(),
   focusFilter: () => tableView.value?.focusFilter(),
-  exportRows: () => tableView.value?.exportRows()
+  exportRows: () => tableView.value?.exportRows(),
+  // Both kinds of tab have one, so whichever is mounted takes it.
+  toggleRowPanel: () => {
+    queryView.value?.toggleRowPanel()
+    tableView.value?.toggleRowPanel()
+  }
 })
 </script>
 
@@ -76,7 +88,9 @@ defineExpose({
       />
       <div v-else class="empty-state">
         <div class="empty-state__title">No open tabs</div>
-        <p>Pick a table on the left, or open a query tab.</p>
+        <p v-if="hasSidebar">Pick a table on the left, or open a query tab.</p>
+        <!-- No tree to pick from in a detached window, so say where it is. -->
+        <p v-else>Open a query tab, or bring the schema tree in with Ctrl+B.</p>
         <button class="btn btn--primary" @click="emit('new-query')">New query tab</button>
       </div>
     </div>

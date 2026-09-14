@@ -293,7 +293,12 @@ describe('SsmTunnel against a stand-in CLI', () => {
     rmSync(argsFile, { force: true })
   })
 
-  function makeTunnel(overrides: Partial<SsmConfig> = {}, scenario = 'ok'): SsmTunnel {
+  function makeTunnel(
+    overrides: Partial<SsmConfig> = {},
+    scenario = 'ok',
+    /** Stands in for the account when the bastion is named rather than given. */
+    resolve?: (config: SsmConfig) => Promise<string>
+  ): SsmTunnel {
     process.env.FAKE_AWS_SCENARIO = scenario
     process.env.FAKE_AWS_UPSTREAM_PORT = String(upstreamPort)
     process.env.FAKE_AWS_ARGS_FILE = argsFile
@@ -305,7 +310,8 @@ describe('SsmTunnel against a stand-in CLI', () => {
       ((command: string, args: string[], options: object) => {
         const { spawn } = require('node:child_process')
         return spawn(command, [FAKE_CLI, ...args], options)
-      }) as never
+      }) as never,
+      resolve
     )
     tunnels.push(tunnel)
     return tunnel
@@ -330,6 +336,46 @@ describe('SsmTunnel against a stand-in CLI', () => {
       socket.on('error', reject)
     })
     expect(echoed).toBe('SELECT 1')
+  })
+
+  /**
+   * A bastion named rather than given: the ID is looked up on every open,
+   * which is the point — the name outlives the instance that answers to it.
+   */
+  it('starts the session on whatever the name resolves to', async () => {
+    let asked = 0
+    const tunnel = makeTunnel(
+      { target: 'name', instanceName: 'prod-bastion', instanceId: '' },
+      'ok',
+      async () => {
+        asked += 1
+        return 'i-0aaa1111bbbb2222c'
+      }
+    )
+
+    await tunnel.open()
+
+    const recorded = JSON.parse(readFileSync(argsFile, 'utf8'))
+    expect(recorded.args[recorded.args.indexOf('--target') + 1]).toBe('i-0aaa1111bbbb2222c')
+    expect(asked).toBe(1)
+    // The saved connection is untouched: the ID belongs to this session.
+    expect(tunnel.droppedConnectionHint).toContain('prod-bastion')
+  })
+
+  it('fails the connection with what the lookup said, not a bare session error', async () => {
+    const tunnel = makeTunnel({ target: 'name', instanceName: 'gone', instanceId: '' }, 'ok', () =>
+      Promise.reject(new Error('No instance in eu-west-2 has the Name tag “gone”.'))
+    )
+
+    await expect(tunnel.open()).rejects.toThrow(/has the Name tag/)
+  })
+
+  it('offers a fresh block when the lookup ran out of credentials', async () => {
+    const tunnel = makeTunnel({ target: 'name', instanceName: 'prod', instanceId: '' }, 'ok', () =>
+      Promise.reject(new Error('Your AWS credentials have expired. Paste a fresh block.'))
+    )
+
+    await expect(tunnel.open()).rejects.toMatchObject({ code: SSM_CREDENTIALS_EXPIRED })
   })
 
   it('invokes the CLI with the arguments we expect', async () => {

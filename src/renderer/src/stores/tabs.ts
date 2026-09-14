@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import type { QueryExecutionResult, SchemaObjectType, TableFilter } from '@shared/types'
+import { useSettingsStore } from './settings'
 
 export interface QueryTab {
   id: string
@@ -18,6 +19,15 @@ export interface QueryTab {
   dirty: boolean
   /** Line the statement under the cursor starts on, reported by the status bar. */
   statementLine: number | null
+  /**
+   * Whether the selected row's fields are shown beside the results.
+   *
+   * Per tab, not per window: two tables side by side in a split are being
+   * compared, and one of them wanting its fields spelled out says nothing
+   * about the other. A new tab opens the way the setting says; from then on
+   * the tab is the only thing that answers for it.
+   */
+  showRowPanel: boolean
 }
 
 export interface TableTab {
@@ -38,6 +48,8 @@ export interface TableTab {
    * the view needs a signal that the filters are new even when the tab is not.
    */
   filterRevision: number
+  /** As on a query tab: the row panel belongs to the tab showing it. */
+  showRowPanel: boolean
 }
 
 export type Tab = QueryTab | TableTab
@@ -136,6 +148,17 @@ export const useTabStore = defineStore('tabs', () => {
     if (paneById(paneId)) focusedPaneId.value = paneId
   }
 
+  /**
+   * How a tab opens, for the things a tab can then change for itself.
+   *
+   * Read once, when the tab is made: the setting is the app's default, and a
+   * later change to it is for tabs opened after it, not for the ones already
+   * on screen.
+   */
+  function openingDefaults(): { showRowPanel: boolean } {
+    return { showRowPanel: useSettingsStore().settings.showRowPanel }
+  }
+
   function addTab(tab: Tab, paneId: string): void {
     const pane = paneById(paneId) ?? panes.value[0]
     tabs.value = [...tabs.value, tab]
@@ -170,7 +193,8 @@ export const useTabStore = defineStore('tabs', () => {
         executionId: null,
         activeResultIndex: 0,
         dirty: false,
-        statementLine: null
+        statementLine: null,
+        ...openingDefaults()
       },
       focusedPaneId.value
     )
@@ -221,7 +245,8 @@ export const useTabStore = defineStore('tabs', () => {
         view,
         pendingEdits: 0,
         filters,
-        filterRevision: filters ? 1 : 0
+        filterRevision: filters ? 1 : 0,
+        ...openingDefaults()
       },
       focusedPaneId.value
     )

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { RoutineObject, SchemaObject } from '@shared/types'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
 import { useConnectionStore } from '../stores/connections'
@@ -41,14 +41,9 @@ watch(panel, (next) => {
   if (next === 'saved') void library.loadSavedQueries()
 })
 
-onMounted(() => {
-  if (connectionId.value) void schema.loadAll(connectionId.value)
-})
-
-watch(connectionId, (id) => {
-  schema.reset()
-  if (id) void schema.loadAll(id)
-})
+// Reading the schema is the workspace's job, not this tree's: the editor's
+// autocomplete reads the same store, and a window showing one dragged-out tab
+// has no tree on screen at all. What is left here is asking for it again.
 
 async function refresh(): Promise<void> {
   if (!connectionId.value) return

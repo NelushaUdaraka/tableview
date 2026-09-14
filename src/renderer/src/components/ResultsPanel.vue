@@ -23,9 +23,14 @@ import { api } from '../lib/api'
 const props = defineProps<{
   result: QueryExecutionResult | null
   running: boolean
+  /** Owned by the tab this panel belongs to, so a split toggles one side only. */
+  showRowPanel: boolean
 }>()
 
-const emit = defineEmits<{ (event: 'export', columns: ColumnMeta[], rows: CellValue[][]): void }>()
+const emit = defineEmits<{
+  (event: 'export', columns: ColumnMeta[], rows: CellValue[][]): void
+  (event: 'update:showRowPanel', visible: boolean): void
+}>()
 
 const settings = useSettingsStore()
 const toasts = useToastStore()
@@ -132,11 +137,6 @@ watch(activeIndex, () => {
 
 // --- the selected row -------------------------------------------------------
 
-/**
- * The row panel follows the same setting the table browser's does, so Ctrl+I
- * and the View menu mean one thing across the app rather than one per view.
- */
-const showRowPanel = computed(() => settings.settings.showRowPanel)
 const rowPanelWidth = ref(settings.settings.rowPanelWidth)
 
 // Dragging the divider emits on every mouse move; only the resting width is
@@ -174,13 +174,13 @@ const rowLabel = computed(() => {
 })
 
 function toggleRowPanel(): void {
-  void settings.update({ showRowPanel: !settings.settings.showRowPanel })
+  emit('update:showRowPanel', !props.showRowPanel)
 }
 
 /** Opens the panel on a named row, rather than toggling it. */
 function showRowDetails(rowIndex: number, columnIndex: number): void {
   grid.value?.selectCell(rowIndex, columnIndex)
-  if (!settings.settings.showRowPanel) void settings.update({ showRowPanel: true })
+  if (!props.showRowPanel) emit('update:showRowPanel', true)
 }
 
 /** Moves the grid's selection, which moves the panel with it. */

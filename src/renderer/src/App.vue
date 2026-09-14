@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { MenuAction } from '@shared/menu'
 import ConnectionScreen from './views/ConnectionScreen.vue'
 import TitleBar from './components/TitleBar.vue'
@@ -12,6 +12,7 @@ import { useSettingsStore } from './stores/settings'
 import { useTabStore } from './stores/tabs'
 import { useToastStore } from './stores/toasts'
 import { dispatchMenuAction } from './lib/menuBus'
+import { applyAccent } from './lib/accent'
 import { api } from './lib/api'
 
 const connections = useConnectionStore()
@@ -19,6 +20,14 @@ const settings = useSettingsStore()
 const tabs = useTabStore()
 const toasts = useToastStore()
 const ready = ref(false)
+/**
+ * Whether this window was opened to hold one tab dragged out of another.
+ *
+ * Such a window is that tab and nothing else — no schema tree beside it, the
+ * way a dragged-out editor opens in its own window with none of the workbench
+ * around it. Everything is still a keystroke away; none of it is in the way.
+ */
+const detached = ref(false)
 
 /**
  * Opens the tab this window was created for, if it was created for one.
@@ -49,7 +58,22 @@ async function openDetachedTab(): Promise<void> {
   } else {
     await tabs.openQuery(pending.connectionId, pending.sql ?? '', pending.title)
   }
+  detached.value = true
 }
+
+/**
+ * The window takes the colour of the connection open in it.
+ *
+ * A window is one connection, so the accent can say which one at a glance —
+ * production and staging side by side stop looking alike. The theme is in it
+ * because one of the shades the accent produces is a tint that has to sit on
+ * whichever ground is underneath.
+ */
+watch(
+  () => [connections.active?.color, settings.resolvedTheme] as const,
+  ([colour, theme]) => applyAccent(colour, theme),
+  { immediate: true }
+)
 
 let unsubscribeMenu: (() => void) | null = null
 
@@ -82,7 +106,7 @@ onBeforeUnmount(() => unsubscribeMenu?.())
       </div>
       <!-- The session, not the socket: a connection being reopened keeps its
            tabs rather than dropping back to the connection screen. -->
-      <WorkspaceView v-else-if="connections.inSession" />
+      <WorkspaceView v-else-if="connections.inSession" :detached="detached" />
       <ConnectionScreen v-else />
     </div>
     <ToastHost />

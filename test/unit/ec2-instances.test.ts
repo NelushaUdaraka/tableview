@@ -14,6 +14,7 @@ import {
   mergeInstances,
   parseDescribeInstances,
   parseInstanceInformation,
+  resolveInstanceByName,
   resolveRegion,
   sortInstances,
   type CliRun,
@@ -315,6 +316,122 @@ describe('classifyInstanceLookupFailure', () => {
       'something odd happened'
     )
     expect(classifyInstanceLookupFailure('   ', 3, 'ec2')).toContain('without explaining why')
+  })
+})
+
+/**
+ * Naming the bastion instead of giving its ID: the lookup that turns the name
+ * into whatever is answering to it at the moment the connection opens.
+ */
+describe('resolveInstanceByName', () => {
+  const named = (name: string, overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    ...BASTION,
+    Tags: [{ Key: 'Name', Value: name }],
+    ...overrides
+  })
+
+  it('asks EC2 for the name and returns what answered to it', async () => {
+    const { run, calls } = runner({ ec2: { stdout: describeInstances([BASTION]) } })
+
+    const { instance } = await resolveInstanceByName(
+      config({ target: 'name', instanceName: 'prod-bastion' }),
+      { AWS_ACCESS_KEY_ID: 'ASIA' },
+      run
+    )
+
+    expect(instance.instanceId).toBe(BASTION.InstanceId)
+    // Filtered by AWS rather than over the answer, so a big account cannot cut
+    // the bastion off the end of the list.
+    expect(calls[0].args).toContain('Name=tag:Name,Values=prod-bastion')
+    // One match needs no ranking, so reachability is not looked up at all.
+    expect(calls).toHaveLength(1)
+  })
+
+  it('picks the one a session can reach when several answer to the name', async () => {
+    const replacement = named('prod-bastion', { InstanceId: 'i-0fff9999aaaa8888b' })
+    const { run, calls } = runner({
+      ec2: { stdout: describeInstances([named('prod-bastion'), replacement]) },
+      ssm: {
+        stdout: JSON.stringify({
+          InstanceInformationList: [
+            { InstanceId: replacement.InstanceId, PingStatus: 'Online' }
+          ]
+        })
+      }
+    })
+
+    const { instance, alternatives } = await resolveInstanceByName(
+      config({ target: 'name', instanceName: 'prod-bastion' }),
+      {},
+      run
+    )
+
+    expect(instance.instanceId).toBe(replacement.InstanceId)
+    expect(alternatives.map((entry) => entry.instanceId)).toEqual([BASTION.InstanceId])
+    expect(calls).toHaveLength(2)
+  })
+
+  it('connects anyway when reachability cannot be read', async () => {
+    const { run } = runner({
+      ec2: { stdout: describeInstances([named('prod-bastion'), named('prod-bastion', { InstanceId: 'i-0fff9999aaaa8888b' })]) },
+      ssm: { code: 254, stderr: 'An error occurred (AccessDeniedException)' }
+    })
+
+    const { instance } = await resolveInstanceByName(
+      config({ target: 'name', instanceName: 'prod-bastion' }),
+      {},
+      run
+    )
+    expect(instance.instanceId).toBe(BASTION.InstanceId)
+  })
+
+  it('says so when nothing answers to the name', async () => {
+    const { run } = runner({ ec2: { stdout: describeInstances([]) } })
+    await expect(
+      resolveInstanceByName(config({ target: 'name', instanceName: 'gone' }), {}, run)
+    ).rejects.toThrow(/No instance in eu-west-2 has the Name tag/)
+  })
+
+  it('says so when the only instance with that name is stopped', async () => {
+    const { run } = runner({
+      ec2: { stdout: describeInstances([named('prod-bastion', { State: { Name: 'stopped' } })]) }
+    })
+    await expect(
+      resolveInstanceByName(config({ target: 'name', instanceName: 'prod-bastion' }), {}, run)
+    ).rejects.toThrow(/is stopped, so a session cannot start on it/)
+  })
+
+  it('needs a name to look one up by', async () => {
+    const { run, calls } = runner({})
+    await expect(
+      resolveInstanceByName(config({ target: 'name', instanceName: '  ' }), {}, run)
+    ).rejects.toThrow(/no name is set/)
+    expect(calls).toHaveLength(0)
+  })
+
+  it('names the permission the lookup needs when it is denied', async () => {
+    const { run } = runner({
+      ec2: {
+        code: 254,
+        stderr:
+          'An error occurred (UnauthorizedOperation) when calling the DescribeInstances operation'
+      }
+    })
+    await expect(
+      resolveInstanceByName(config({ target: 'name', instanceName: 'prod-bastion' }), {}, run)
+    ).rejects.toThrow(/ec2:DescribeInstances/)
+  })
+
+  it('asks for a region before running anything, with pasted credentials', async () => {
+    const { run, calls } = runner({})
+    await expect(
+      resolveInstanceByName(
+        config({ target: 'name', instanceName: 'prod-bastion', region: '' }),
+        {},
+        run
+      )
+    ).rejects.toThrow(/Choose an AWS region/)
+    expect(calls).toHaveLength(0)
   })
 })
 

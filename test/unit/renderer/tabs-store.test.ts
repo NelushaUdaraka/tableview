@@ -8,7 +8,8 @@
 import { computed, nextTick, watch } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useTabStore, type QueryTab } from '../../../src/renderer/src/stores/tabs'
+import { useSettingsStore } from '../../../src/renderer/src/stores/settings'
+import { useTabStore, type QueryTab, type TableTab } from '../../../src/renderer/src/stores/tabs'
 
 beforeEach(() => setActivePinia(createPinia()))
 
@@ -75,6 +76,55 @@ describe('tab store updates', () => {
 
     expect(runs).toBeLessThan(5)
     expect((tabs.tabs[0] as QueryTab).statementLine).toBe('SELECT 1'.length)
+  })
+})
+
+/**
+ * The row panel belongs to the tab showing it, not to the window: a split is
+ * two things being compared, and spelling one of them out field by field says
+ * nothing about the other.
+ */
+describe('the row panel', () => {
+  it('opens a tab the way the setting says', async () => {
+    const tabs = useTabStore()
+    const settings = useSettingsStore()
+
+    await tabs.openQuery('c1', 'SELECT 1')
+    expect((tabs.tabs[0] as QueryTab).showRowPanel).toBe(settings.settings.showRowPanel)
+
+    settings.settings.showRowPanel = false
+    await tabs.openTable('c1', 'dbo', 'customers')
+    expect((tabs.tabs[1] as TableTab).showRowPanel).toBe(false)
+    // The tab that was already open keeps its own answer.
+    expect((tabs.tabs[0] as QueryTab).showRowPanel).toBe(true)
+  })
+
+  it('is answered by one tab without answering for the other', async () => {
+    const tabs = useTabStore()
+    await tabs.openTable('c1', 'dbo', 'customers')
+    await tabs.openTable('c1', 'dbo', 'orders')
+    const [first, second] = tabs.tabs.map((tab) => tab.id)
+
+    await tabs.splitTab(second)
+    tabs.update<TableTab>(second, { showRowPanel: false })
+
+    expect((tabs.tabs.find((tab) => tab.id === first) as TableTab).showRowPanel).toBe(true)
+    expect((tabs.tabs.find((tab) => tab.id === second) as TableTab).showRowPanel).toBe(false)
+  })
+
+  it('gives a second view of a tab the same starting answer', async () => {
+    const tabs = useTabStore()
+    await tabs.openTable('c1', 'dbo', 'customers')
+    const only = tabs.activeId!
+    tabs.update<TableTab>(only, { showRowPanel: false })
+
+    await tabs.splitTab(only)
+    const copy = tabs.activeIdIn(tabs.panes[1].id)!
+
+    expect((tabs.tabs.find((tab) => tab.id === copy) as TableTab).showRowPanel).toBe(false)
+    // ...and from there the two are independent.
+    tabs.update<TableTab>(copy, { showRowPanel: true })
+    expect((tabs.tabs.find((tab) => tab.id === only) as TableTab).showRowPanel).toBe(false)
   })
 })
 

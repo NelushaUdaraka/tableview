@@ -17,7 +17,9 @@ const dataView = ref<InstanceType<typeof TableDataView> | null>(null)
 defineExpose({
   refresh: () => dataView.value?.refresh(),
   focusFilter: () => dataView.value?.focusFilter(),
-  exportRows: () => dataView.value?.exportRows()
+  exportRows: () => dataView.value?.exportRows(),
+  // Nothing to toggle on the structure view, which has no rows to detail.
+  toggleRowPanel: () => dataView.value?.toggleRowPanel()
 })
 </script>
 

@@ -137,8 +137,36 @@ connect, and holding only one of them still produces a usable list.
 **Schema explorer**
 - Database switcher (system databases hidden by default), schema/table/view/procedure/function tree
 - Row-count estimates, live filter box, pinned tables, per-schema collapse
+- **Tables open where they stand** into what is in them — `columns`, `keys`, `foreign keys`,
+  `indexes`, each with its count — so "what was that column called" costs a twisty rather than a tab
 - Context menu: open data, open structure, generate `SELECT`/`INSERT`/`UPDATE`/`DELETE`/`CREATE TABLE`,
   copy qualified name, show routine definition, truncate, drop
+
+**A table, opened in the tree**
+
+The structure tab spells everything out in tables; the tree has one line per thing, which is the
+right shape for finding a name. Clicking a table's twisty reads its structure once, keeps it, and
+opens it into the four folders that say what is in it:
+
+```
+▾ ▤ com_set_DefaultLocalization                 148
+    ▾ COLUMNS                                     9
+        ◆ id                        uniqueidentifier
+        ▪ locale_code                  nvarchar(10)
+        ▪ language_name               nvarchar(100)
+        ▪ is_system_default                     bit
+    ▸ KEYS                                        3
+    ▸ FOREIGN KEYS                                0
+    ▸ INDEXES                                     3
+```
+
+The primary key is marked in the accent, as it is everywhere else; a foreign key names what it
+points at and opens that table when it is clicked. "Keys" is the primary key and the unique ones,
+each shown once however the DDL declared it — SQL Server backs a `PRIMARY KEY` and a `UNIQUE`
+constraint with an index of the same name, so the same key is reported two or three ways. The
+structure is the schema store's copy, the one the structure tab and the statement builders already
+read, so opening a table twice costs one query, and refreshing the schema re-reads what is open
+rather than folding it away.
 
 **Table browser**
 - Virtualised grid — only visible rows are rendered, so large results scroll smoothly

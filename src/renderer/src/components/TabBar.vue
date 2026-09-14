@@ -5,7 +5,8 @@
  * A split workspace has one of these per pane, so the strip is told which pane
  * it belongs to rather than reading "the" tab list. Tabs can be dragged: within
  * a strip to reorder, onto the other pane's strip to move there, and out of the
- * window entirely to open in a window of their own.
+ * window entirely — onto another window to move into it, or onto nothing at all
+ * to open in a window of their own.
  */
 import { computed, ref } from 'vue'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
@@ -16,6 +17,7 @@ const props = defineProps<{ pane: TabPane }>()
 const emit = defineEmits<{
   (event: 'new-query'): void
   (event: 'detach', tabId: string, position: { x: number; y: number }): void
+  (event: 'drop-out', tabId: string, point: { x: number; y: number }): void
 }>()
 
 const tabs = useTabStore()
@@ -112,11 +114,14 @@ function onDrop(event: DragEvent): void {
 }
 
 /**
- * A tab let go outside the window asks for a window of its own.
+ * A tab let go outside the window leaves it.
  *
- * There is no drop target out there to tell us, so the pointer's position at
- * the end of the drag is what says it: `screenX`/`screenY` against the window's
- * own frame. A drag that landed on a strip has already been dealt with.
+ * There is no drop target out there to tell us — a drag does not cross from
+ * one window's document into another's — so the pointer's position at the end
+ * of the drag is all there is to go on: `screenX`/`screenY` against this
+ * window's own frame says it left, and where it went is for the main process
+ * to say, since only it knows where the other windows are. A drag that landed
+ * on a strip has already been dealt with.
  */
 function onDragEnd(event: DragEvent, tabId: string): void {
   dropIndex.value = null
@@ -130,7 +135,7 @@ function onDragEnd(event: DragEvent, tabId: string): void {
     event.screenY > window.screenY + window.outerHeight
   // Some platforms report 0,0 for a cancelled drag; that is not "outside".
   if (!outside || (event.screenX === 0 && event.screenY === 0)) return
-  emit('detach', tabId, { x: event.screenX - 120, y: event.screenY - 20 })
+  emit('drop-out', tabId, { x: event.screenX, y: event.screenY })
 }
 </script>
 

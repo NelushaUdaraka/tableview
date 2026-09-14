@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { DetachedTab } from '@shared/ipc'
 import type { MenuAction } from '@shared/menu'
 import ConnectionScreen from './views/ConnectionScreen.vue'
 import TitleBar from './components/TitleBar.vue'
@@ -30,35 +31,65 @@ const ready = ref(false)
 const detached = ref(false)
 
 /**
+ * Opens a tab this window has been handed by another one.
+ *
+ * A tab that arrives from elsewhere is a description, not state: windows share
+ * no connection pool, so this one opens its own — unless it already holds that
+ * connection, which is what a tab dragged *back* into the window it came from
+ * finds, and reopening it would pull the pool and the tunnel out from under
+ * the tabs already here.
+ */
+async function openIncomingTab(incoming: DetachedTab): Promise<boolean> {
+  if (connections.statusFor(incoming.connectionId).state === 'connected') {
+    connections.activeId = incoming.connectionId
+  } else {
+    const status = await connections.connect(incoming.connectionId)
+    if (status.state !== 'connected') {
+      toasts.error('Could not open that tab in this window', status.error?.message)
+      return false
+    }
+  }
+
+  if (incoming.kind === 'table' && incoming.schema && incoming.table) {
+    await tabs.openTable(
+      incoming.connectionId,
+      incoming.schema,
+      incoming.table,
+      incoming.objectType ?? 'table',
+      incoming.view ?? 'data'
+    )
+  } else {
+    await tabs.openQuery(incoming.connectionId, incoming.sql ?? '', incoming.title)
+  }
+  return true
+}
+
+/**
  * Opens the tab this window was created for, if it was created for one.
  *
- * A tab dragged out of another window arrives as a description, not as state:
- * this window has its own connection pool, so it connects for itself before it
- * can show anything. Done before the workspace is shown, so it opens onto the
- * tab rather than onto a blank query.
+ * Done before the workspace is shown, so the window opens onto the tab rather
+ * than onto a blank query.
  */
 async function openDetachedTab(): Promise<void> {
   const pending = await api.takePendingTab()
   if (!pending) return
+  if (await openIncomingTab(pending)) detached.value = true
+}
 
-  const status = await connections.connect(pending.connectionId)
-  if (status.state !== 'connected') {
-    toasts.error('Could not open that tab in this window', status.error?.message)
-    return
+/**
+ * A tab dragged out of another window and let go over this one.
+ *
+ * Nothing about it is settled when it arrives: this window may be on another
+ * connection, or on none at all and still showing the connection screen, so
+ * opening it is the same job as opening the tab a detached window was made
+ * for — only later, and without making this window a detached one.
+ */
+async function adoptTab(incoming: DetachedTab): Promise<void> {
+  try {
+    await openIncomingTab(incoming)
+  } catch (error) {
+    toasts.fromError('Could not open that tab in this window', error)
   }
-
-  if (pending.kind === 'table' && pending.schema && pending.table) {
-    await tabs.openTable(
-      pending.connectionId,
-      pending.schema,
-      pending.table,
-      pending.objectType ?? 'table',
-      pending.view ?? 'data'
-    )
-  } else {
-    await tabs.openQuery(pending.connectionId, pending.sql ?? '', pending.title)
-  }
-  detached.value = true
 }
 
 /**
@@ -76,11 +107,14 @@ watch(
 )
 
 let unsubscribeMenu: (() => void) | null = null
+let unsubscribeAttach: (() => void) | null = null
 
 onMounted(async () => {
   // Actions from the native menu join the ones the title bar raises, so views
   // only ever subscribe to the bus.
   unsubscribeMenu = api.onMenuAction((action) => dispatchMenuAction(action as MenuAction))
+  // Tabs can arrive at any moment: another window is only ever a drag away.
+  unsubscribeAttach = api.onAttachTab((incoming) => void adoptTab(incoming))
   try {
     await settings.load()
     await connections.load()
@@ -92,7 +126,10 @@ onMounted(async () => {
   }
 })
 
-onBeforeUnmount(() => unsubscribeMenu?.())
+onBeforeUnmount(() => {
+  unsubscribeMenu?.()
+  unsubscribeAttach?.()
+})
 </script>
 
 <template>

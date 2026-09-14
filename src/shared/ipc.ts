@@ -50,6 +50,24 @@ export interface DetachRequest {
   position?: { x: number; y: number }
 }
 
+/**
+ * A tab let go outside the strip it was dragged from.
+ *
+ * A renderer can see its own window and nothing else, so it reports where the
+ * pointer was and the main process decides what that meant: a window under
+ * that point takes the tab, and when there is none a window opens for it.
+ */
+export interface TabDropRequest {
+  tab: DetachedTab
+  /** Pointer position in screen coordinates when the drag ended. */
+  point: { x: number; y: number }
+}
+
+export interface TabDropResult {
+  /** True when an open window took the tab, false when one was opened for it. */
+  attached: boolean
+}
+
 /** Result of the AWS SSM readiness check; mirrors `main/tunnel/ssmPreflight`. */
 export interface SsmCheckResult {
   ok: boolean
@@ -112,6 +130,7 @@ export const CHANNELS = {
 
   windowNew: 'window:new',
   windowDetachTab: 'window:detachTab',
+  windowDropTab: 'window:dropTab',
   windowPendingTab: 'window:pendingTab',
   windowMinimize: 'window:minimize',
   windowToggleMaximize: 'window:toggleMaximize',
@@ -161,7 +180,8 @@ export const CHANNELS = {
   eventStatusChanged: 'event:statusChanged',
   eventServerMessage: 'event:serverMessage',
   eventMenuAction: 'event:menuAction',
-  eventWindowChrome: 'event:windowChrome'
+  eventWindowChrome: 'event:windowChrome',
+  eventAttachTab: 'event:attachTab'
 } as const
 
 /**
@@ -203,6 +223,13 @@ export interface RendererApi {
   openNewWindow(): Promise<void>
   /** Opens a window showing one tab, for a tab dragged out of this one. */
   detachTab(request: DetachRequest): Promise<void>
+  /**
+   * Hands a dragged tab to whichever window was under the pointer.
+   *
+   * Where no window was, it opens one — so a tab dragged onto another window
+   * moves into it and a tab dragged onto the desktop still gets its own.
+   */
+  dropTab(request: TabDropRequest): Promise<TabDropResult>
   /**
    * The tab this window was opened to show, if it was opened for one.
    *
@@ -269,6 +296,8 @@ export interface RendererApi {
   onStatusChanged(handler: (status: ConnectionStatus) => void): () => void
   onMenuAction(handler: (action: string) => void): () => void
   onWindowChrome(handler: (state: WindowChromeState) => void): () => void
+  /** A tab dragged onto this window from another one. */
+  onAttachTab(handler: (tab: DetachedTab) => void): () => void
 }
 
 declare global {

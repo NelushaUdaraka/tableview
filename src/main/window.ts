@@ -39,7 +39,14 @@ const WRITE_DELAY_MS = 400
 
 export class WindowManager {
   private readonly store: JsonStore<WindowState>
-  private readonly windows = new Set<BrowserWindow>()
+  /**
+   * Every open window, most recently focused first.
+   *
+   * The order is what answers "which window is that point over" when two of
+   * them overlap: there is no z-order to ask Electron about, and raising a
+   * window focuses it, so the most recently focused is the one on top.
+   */
+  private readonly windows: BrowserWindow[] = []
   private lastFocused: BrowserWindow | null = null
   /** Geometry seen but not yet written; `null` once it has reached disk. */
   private pendingState: WindowState | null = null
@@ -60,11 +67,45 @@ export class WindowManager {
   }
 
   get all(): BrowserWindow[] {
-    return [...this.windows].filter((window) => !window.isDestroyed())
+    return this.windows.filter((window) => !window.isDestroyed())
   }
 
   get count(): number {
     return this.all.length
+  }
+
+  /**
+   * The window a point on the screen is over, if any.
+   *
+   * This is what lets a tab dragged out of one window be dropped into another:
+   * the renderer only ever sees its own window, so it reports where the drag
+   * ended and this decides whose frame that was. `exclude` is the window the
+   * tab came from, which is never the answer — a tab let go over its own
+   * window has already been dealt with by the strip it was dropped on.
+   */
+  windowAt(point: { x: number; y: number }, exclude?: BrowserWindow | null): BrowserWindow | null {
+    for (const window of this.all) {
+      // A minimized window is not on screen, whatever bounds it reports.
+      if (window === exclude || window.isMinimized()) continue
+      const bounds = window.getBounds()
+      if (
+        point.x >= bounds.x &&
+        point.x < bounds.x + bounds.width &&
+        point.y >= bounds.y &&
+        point.y < bounds.y + bounds.height
+      ) {
+        return window
+      }
+    }
+    return null
+  }
+
+  /** Moves a window to the front of the focus order. */
+  private raise(window: BrowserWindow): void {
+    const index = this.windows.indexOf(window)
+    if (index === 0) return
+    if (index > 0) this.windows.splice(index, 1)
+    this.windows.unshift(window)
   }
 
   /**
@@ -74,7 +115,7 @@ export class WindowManager {
    */
   create(preloadPath: string, position?: { x: number; y: number }): BrowserWindow {
     const state = this.restoreState()
-    const offset = this.windows.size * CASCADE_STEP
+    const offset = this.windows.length * CASCADE_STEP
     const isMac = process.platform === 'darwin'
     const dropped = position ? clampToDisplay(position, state.width, state.height) : null
 
@@ -110,7 +151,7 @@ export class WindowManager {
     // Only the first window inherits "maximized"; later ones cascade instead.
     // A window opened at a dropped position is never maximised — the point of
     // the drop was to put it somewhere.
-    if (state.maximized && this.windows.size === 0 && !dropped) window.maximize()
+    if (state.maximized && this.windows.length === 0 && !dropped) window.maximize()
     window.once('ready-to-show', () => window.show())
 
     const persist = (): void => this.persistState(window)
@@ -130,14 +171,16 @@ export class WindowManager {
     window.on('blur', announce)
     window.on('focus', () => {
       this.lastFocused = window
+      this.raise(window)
       announce()
     })
     window.on('closed', () => {
-      this.windows.delete(window)
+      const index = this.windows.indexOf(window)
+      if (index >= 0) this.windows.splice(index, 1)
       if (this.lastFocused === window) this.lastFocused = null
     })
 
-    this.windows.add(window)
+    this.windows.unshift(window)
     this.lastFocused = window
     return window
   }

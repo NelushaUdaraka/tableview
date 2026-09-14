@@ -216,16 +216,26 @@ same thing rather than leaving an empty pane behind. `Ctrl+Shift+\` folds the sp
 every tab.
 
 Tabs drag: within a strip to reorder, onto the other strip to move pane, and **out of the window
-entirely** to open in a window of their own (also on the tab's menu, and File → Move Tab to New
-Window). Nothing is carried across but a description of what to open — the new window has its own
-connection pool, so it connects for itself, which needs the connection's password to be saved.
-Staged edits stay with the window they were made in: a tab that is holding them asks before it goes.
+entirely** — onto another window to move into it, or onto nothing at all to open in a window of
+their own (also on the tab's menu, and File → Move Tab to New Window, which always opens a new one).
+Nothing is carried across but a description of what to open — a window has its own connection pool,
+so the one that takes the tab connects for itself, which needs the connection's password to be
+saved, unless it already holds that connection and can simply show the tab. Staged edits stay with
+the window they were made in: a tab that is holding them asks before it goes.
+
+**A drag does not cross windows**, which is why the main process decides where one ends: a drag
+event belongs to the document it started in, so the strip cannot be told it was dropped over another
+window. What the renderer can say is where the pointer was — `screenX`/`screenY` at the end of the
+drag — and the window manager turns that back into a window, taking the most recently focused of any
+that cover the point, since raising a window is what focuses it. The window under it is sent the
+tab; when there is none, a window is opened for it.
 
 A window opened that way **is that one tab**: it opens onto the tab alone, with no schema tree
 beside it, the way a dragged-out editor opens in a window of its own with none of the workbench
 around it. The tree is not merely hidden, it is not built — though the schema behind it is still
 read, so a query tab in that window still completes table and column names. `Ctrl+B` brings the
-tree in for anyone who wants it, and it stays once it is there.
+tree in for anyone who wants it, and it stays once it is there. Drag that tab back into the window
+it came from and the empty frame goes with it: the window *was* the tab.
 
 **Windows and connections**
 

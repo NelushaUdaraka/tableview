@@ -6,7 +6,13 @@
  * real Errors that keep the SQL Server error number, line and procedure.
  */
 import { contextBridge, ipcRenderer } from 'electron'
-import { CHANNELS, IpcResult, RendererApi, WindowChromeState } from '../shared/ipc'
+import {
+  CHANNELS,
+  DetachedTab,
+  IpcResult,
+  RendererApi,
+  WindowChromeState
+} from '../shared/ipc'
 import type {
   ConnectionStatus,
   ExportRequest,
@@ -46,6 +52,7 @@ const api: RendererApi = {
     invoke(CHANNELS.ssmInstances, config, connectionId),
   openNewWindow: () => invoke(CHANNELS.windowNew),
   detachTab: (request) => invoke(CHANNELS.windowDetachTab, request),
+  dropTab: (request) => invoke(CHANNELS.windowDropTab, request),
   takePendingTab: () => invoke(CHANNELS.windowPendingTab),
   minimizeWindow: () => invoke(CHANNELS.windowMinimize),
   toggleMaximizeWindow: () => invoke(CHANNELS.windowToggleMaximize),
@@ -103,7 +110,9 @@ const api: RendererApi = {
   onMenuAction: (handler: (action: string) => void) =>
     subscribe(CHANNELS.eventMenuAction, handler as (payload: never) => void),
   onWindowChrome: (handler: (state: WindowChromeState) => void) =>
-    subscribe(CHANNELS.eventWindowChrome, handler as (payload: never) => void)
+    subscribe(CHANNELS.eventWindowChrome, handler as (payload: never) => void),
+  onAttachTab: (handler: (tab: DetachedTab) => void) =>
+    subscribe(CHANNELS.eventAttachTab, handler as (payload: never) => void)
 }
 
 contextBridge.exposeInMainWorld('api', api)

@@ -137,8 +137,36 @@ connect, and holding only one of them still produces a usable list.
 **Schema explorer**
 - Database switcher (system databases hidden by default), schema/table/view/procedure/function tree
 - Row-count estimates, live filter box, pinned tables, per-schema collapse
+- **Tables open where they stand** into what is in them — `columns`, `keys`, `foreign keys`,
+  `indexes`, each with its count — so "what was that column called" costs a twisty rather than a tab
 - Context menu: open data, open structure, generate `SELECT`/`INSERT`/`UPDATE`/`DELETE`/`CREATE TABLE`,
   copy qualified name, show routine definition, truncate, drop
+
+**A table, opened in the tree**
+
+The structure tab spells everything out in tables; the tree has one line per thing, which is the
+right shape for finding a name. Clicking a table's twisty reads its structure once, keeps it, and
+opens it into the four folders that say what is in it:
+
+```
+▾ ▤ com_set_DefaultLocalization                 148
+    ▾ COLUMNS                                     9
+        ◆ id                        uniqueidentifier
+        ▪ locale_code                  nvarchar(10)
+        ▪ language_name               nvarchar(100)
+        ▪ is_system_default                     bit
+    ▸ KEYS                                        3
+    ▸ FOREIGN KEYS                                0
+    ▸ INDEXES                                     3
+```
+
+The primary key is marked in the accent, as it is everywhere else; a foreign key names what it
+points at and opens that table when it is clicked. "Keys" is the primary key and the unique ones,
+each shown once however the DDL declared it — SQL Server backs a `PRIMARY KEY` and a `UNIQUE`
+constraint with an index of the same name, so the same key is reported two or three ways. The
+structure is the schema store's copy, the one the structure tab and the statement builders already
+read, so opening a table twice costs one query, and refreshing the schema re-reads what is open
+rather than folding it away.
 
 **Table browser**
 - Virtualised grid — only visible rows are rendered, so large results scroll smoothly
@@ -157,6 +185,12 @@ connect, and holding only one of them still produces a usable list.
   panel sits beside query results, read-only, and "View row details" on any row's menu opens it
   there. It belongs to the tab, not to the window — two tables side by side in a split each show or
   hide their own fields, and the last choice made is how the next tab opens
+- **A JSON document is shown as one.** SQL Server has no JSON type, so a document lives in an
+  `nvarchar(max)` column and comes back as one long line. Where a field holds an object or an array,
+  the row panel draws it as a tree instead — collapsible, two levels open to start with — and the
+  field's own `{4}` / `raw` switch gives back the stored text, which is what editing edits. Only
+  objects and arrays: a bare `42` or `"done"` is valid JSON too, and a tree of one line would say
+  nothing the field did not
 - **Follow a foreign key**: a `›` at the end of a referencing cell opens the referenced table in its
   own tab, filtered to the row it points at — composite keys included
 
@@ -216,16 +250,26 @@ same thing rather than leaving an empty pane behind. `Ctrl+Shift+\` folds the sp
 every tab.
 
 Tabs drag: within a strip to reorder, onto the other strip to move pane, and **out of the window
-entirely** to open in a window of their own (also on the tab's menu, and File → Move Tab to New
-Window). Nothing is carried across but a description of what to open — the new window has its own
-connection pool, so it connects for itself, which needs the connection's password to be saved.
-Staged edits stay with the window they were made in: a tab that is holding them asks before it goes.
+entirely** — onto another window to move into it, or onto nothing at all to open in a window of
+their own (also on the tab's menu, and File → Move Tab to New Window, which always opens a new one).
+Nothing is carried across but a description of what to open — a window has its own connection pool,
+so the one that takes the tab connects for itself, which needs the connection's password to be
+saved, unless it already holds that connection and can simply show the tab. Staged edits stay with
+the window they were made in: a tab that is holding them asks before it goes.
+
+**A drag does not cross windows**, which is why the main process decides where one ends: a drag
+event belongs to the document it started in, so the strip cannot be told it was dropped over another
+window. What the renderer can say is where the pointer was — `screenX`/`screenY` at the end of the
+drag — and the window manager turns that back into a window, taking the most recently focused of any
+that cover the point, since raising a window is what focuses it. The window under it is sent the
+tab; when there is none, a window is opened for it.
 
 A window opened that way **is that one tab**: it opens onto the tab alone, with no schema tree
 beside it, the way a dragged-out editor opens in a window of its own with none of the workbench
 around it. The tree is not merely hidden, it is not built — though the schema behind it is still
 read, so a query tab in that window still completes table and column names. `Ctrl+B` brings the
-tree in for anyone who wants it, and it stays once it is there.
+tree in for anyone who wants it, and it stays once it is there. Drag that tab back into the window
+it came from and the empty frame goes with it: the window *was* the tab.
 
 **Windows and connections**
 
@@ -403,9 +447,12 @@ src/
 └── renderer/src/             Vue 3 + Pinia
     ├── lib/api.ts            the only place that touches window.api
     ├── lib/menuBus.ts        menu actions, whichever menu raised them
+    ├── lib/schemaTree.ts     a table's structure as the sidebar tree shows it
+    ├── lib/jsonCell.ts       which cells hold a document, and what is inside one
     ├── stores/               connections, schema, tabs (and panes), library,
     │                         settings, toasts, busy (the window's progress bar)
-    ├── components/           title bar, grid, row panel, editor, sidebar, dialogs
+    ├── components/           title bar, grid, row panel (and its JSON tree),
+    │                         editor, sidebar (and its structure tree), dialogs
     └── views/                connection screen, workspace, pane, query, table
 ```
 

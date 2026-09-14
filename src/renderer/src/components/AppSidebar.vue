@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import type { RoutineObject, SchemaObject } from '@shared/types'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
+import ObjectStructureTree from './ObjectStructureTree.vue'
 import { useConnectionStore } from '../stores/connections'
 import { useLibraryStore } from '../stores/library'
 import { useSchemaStore } from '../stores/schema'
@@ -160,6 +161,18 @@ function openMenu(
   menu.value = { x: event.clientX, y: event.clientY, schema: schemaName, name, type }
 }
 
+/**
+ * Opens a table out into its structure, where it stands in the tree.
+ *
+ * The structure is read the first time and kept, so this is instant from then
+ * on — and it is the schema store's copy, the same one the structure tab and
+ * the statement builders read.
+ */
+function expand(object: SchemaObject): void {
+  if (!connectionId.value) return
+  schema.toggleObject(connectionId.value, object.schema, object.name)
+}
+
 function objectIcon(object: SchemaObject): string {
   return object.type === 'view' ? '◫' : '▤'
 }
@@ -290,20 +303,57 @@ defineExpose({ focusFilter, refresh })
             </button>
 
             <template v-if="schema.expanded[group.schema] !== false">
-              <button
+              <template
                 v-for="object in [...group.tables, ...group.views]"
                 :key="`${object.schema}.${object.name}`"
-                class="item"
-                :class="{ 'item--active': isActive(object.schema, object.name) }"
-                @click="emit('open-table', object.schema, object.name, object.type)"
-                @contextmenu.prevent="openMenu($event, object.schema, object.name, object.type)"
               >
-                <span class="item__icon" :class="{ 'item__icon--view': object.type === 'view' }">
-                  {{ objectIcon(object) }}
-                </span>
-                <span class="item__name truncate">{{ object.name }}</span>
-                <span class="item__count">{{ formatCount(object.rowCountEstimate) }}</span>
-              </button>
+                <button
+                  class="item"
+                  :class="{ 'item--active': isActive(object.schema, object.name) }"
+                  @click="emit('open-table', object.schema, object.name, object.type)"
+                  @contextmenu.prevent="openMenu($event, object.schema, object.name, object.type)"
+                >
+                  <!-- Inside the row rather than beside it, so the whole line
+                       still opens the table: only the twisty itself expands.
+                       Drawn rather than typed — a glyph this small is at the
+                       mercy of whichever font the platform falls back to. -->
+                  <span
+                    class="item__chevron"
+                    :class="{
+                      'item__chevron--open': schema.isObjectExpanded(object.schema, object.name)
+                    }"
+                    :title="
+                      schema.isObjectExpanded(object.schema, object.name)
+                        ? 'Hide the structure'
+                        : 'Show the structure'
+                    "
+                    @click.stop="expand(object)"
+                  >
+                    <svg viewBox="0 0 12 12" aria-hidden="true">
+                      <path
+                        d="M4 2.4 7.8 6 4 9.6"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <span class="item__icon" :class="{ 'item__icon--view': object.type === 'view' }">
+                    {{ objectIcon(object) }}
+                  </span>
+                  <span class="item__name truncate">{{ object.name }}</span>
+                  <span class="item__count">{{ formatCount(object.rowCountEstimate) }}</span>
+                </button>
+
+                <ObjectStructureTree
+                  v-if="schema.isObjectExpanded(object.schema, object.name)"
+                  :schema="object.schema"
+                  :table="object.name"
+                  @open-table="(s, t) => emit('open-table', s, t, 'table')"
+                />
+              </template>
 
               <button
                 v-for="routine in group.routines"
@@ -313,6 +363,8 @@ defineExpose({ focusFilter, refresh })
                 @mousedown="menu = { x: 0, y: 0, schema: routine.schema, name: routine.name, type: 'routine' }"
                 @contextmenu.prevent="openMenu($event, routine.schema, routine.name, 'routine')"
               >
+                <!-- Nothing to open out: a routine is its definition. -->
+                <span class="item__chevron item__chevron--blank"></span>
                 <span class="item__icon item__icon--routine">{{ routineIcon(routine) }}</span>
                 <span class="item__name truncate">{{ routine.name }}</span>
               </button>
@@ -620,7 +672,7 @@ defineExpose({ focusFilter, refresh })
   gap: 10px;
   width: 100%;
   height: 28px;
-  padding: 0 14px 0 26px;
+  padding: 0 14px 0 6px;
   border: none;
   background: transparent;
   color: var(--text-primary);
@@ -629,6 +681,34 @@ defineExpose({ focusFilter, refresh })
 }
 .item--flush {
   padding-left: 14px;
+}
+/* The twisty is part of the row, so it takes its own clicks and leaves the
+   rest of the line to open the table. It is the full height of the row for the
+   same reason a checkbox has a label: a 10px mark is not a target. */
+.item__chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  flex: 0 0 auto;
+  width: 14px;
+  color: var(--text-secondary);
+}
+.item__chevron svg {
+  width: 10px;
+  height: 10px;
+  transition: transform var(--transition);
+}
+/* Open is the same mark turned a quarter, which is what says it can be shut. */
+.item__chevron--open svg {
+  transform: rotate(90deg);
+}
+.item__chevron:hover {
+  color: var(--text-primary);
+}
+/* Holds the column open for rows that have nothing to open out. */
+.item__chevron--blank {
+  pointer-events: none;
 }
 .item:hover {
   background: var(--bg-hover);

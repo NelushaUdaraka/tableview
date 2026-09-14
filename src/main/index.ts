@@ -4,7 +4,7 @@ import { BrowserWindow, Menu, app, shell } from 'electron'
 import { ConnectionRegistry } from './db/registry'
 import { AppData } from './storage/appData'
 import { createVault } from './storage/crypto'
-import { registerIpcHandlers, scopeForWindow, setWindowFactory } from './ipc'
+import { registerIpcHandlers, scopeForWindow, setWindowFactory, setWindowLocator } from './ipc'
 import { buildMenu } from './menu'
 import { WindowManager } from './window'
 
@@ -58,6 +58,9 @@ void app.whenReady().then(async () => {
     getWindow: () => windows?.current ?? null
   })
   setWindowFactory(createWindow)
+  // A tab dragged out of one window and let go over another has to be matched
+  // to whichever window that was; only the manager knows where they are.
+  setWindowLocator((point, exclude) => windows?.windowAt(point, exclude) ?? null)
 
   Menu.setApplicationMenu(buildMenu(() => windows?.current ?? null, createWindow))
   createWindow()

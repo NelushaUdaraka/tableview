@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { DetachedTab } from '@shared/ipc'
 import type {
   CellValue,
   ColumnMeta,
@@ -153,14 +154,18 @@ async function generate(kind: string, schemaName: string, table: string): Promis
 }
 
 /**
- * Opens a tab in a window of its own, and closes it here.
+ * Hands a tab to another window, and closes it here.
  *
- * Windows do not share connections, so the new one reconnects for itself; what
- * travels is only what it takes to open the same thing again. The tab is asked
- * before it goes — a detach unmounts its view, and staged edits would go with
- * it — and put back if the window could not be opened.
+ * Windows do not share connections, so the window that takes it opens its own;
+ * what travels is only what it takes to open the same thing again. The tab is
+ * asked before it goes — leaving unmounts its view, and staged edits would go
+ * with it — and put back if nothing took it.
  */
-async function detachTab(tabId: string, position: { x: number; y: number }): Promise<void> {
+async function moveTabOut(
+  tabId: string,
+  hand: (payload: DetachedTab) => Promise<unknown>,
+  failure: string
+): Promise<void> {
   const tab = tabs.tabs.find((entry) => entry.id === tabId)
   if (!tab) return
 
@@ -169,16 +174,55 @@ async function detachTab(tabId: string, position: { x: number; y: number }): Pro
   if (!(await tabs.close(tabId))) return
 
   try {
-    await api.detachTab({ tab: payload, position })
+    await hand(payload)
+    closeIfEmptied()
   } catch (error) {
-    toasts.fromError('Could not open a window for that tab', error)
-    // Put it back rather than losing it to a window that never opened.
+    toasts.fromError(failure, error)
+    // Put it back rather than losing it to a window that never took it.
     if (payload.kind === 'table' && payload.schema && payload.table) {
       void tabs.openTable(payload.connectionId, payload.schema, payload.table, payload.objectType)
     } else {
       void tabs.openQuery(payload.connectionId, payload.sql ?? '', payload.title)
     }
   }
+}
+
+/** Opens a tab in a window of its own — the menu's "move to a new window". */
+async function detachTab(tabId: string, position: { x: number; y: number }): Promise<void> {
+  await moveTabOut(
+    tabId,
+    (payload) => api.detachTab({ tab: payload, position }),
+    'Could not open a window for that tab'
+  )
+}
+
+/**
+ * Gives up a tab let go somewhere outside this window.
+ *
+ * Where that was is not something a renderer can see — a drag stays inside the
+ * document it started in — so the pointer's last position goes to the main
+ * process, which knows where the windows are: one under it takes the tab, and
+ * with nothing there the tab gets a window of its own. Dragging a tab back
+ * into the window it came from is the same gesture in reverse, which is the
+ * whole point of asking rather than always opening a window.
+ */
+async function dropTab(tabId: string, point: { x: number; y: number }): Promise<void> {
+  await moveTabOut(
+    tabId,
+    (payload) => api.dropTab({ tab: payload, point }),
+    'Could not move that tab to another window'
+  )
+}
+
+/**
+ * A window opened for one dragged-out tab goes when that tab leaves again.
+ *
+ * Such a window *is* the tab: once it has been dragged back into another
+ * window, what is left is an empty frame nobody asked for. A window opened in
+ * its own right stays — it has a schema tree to open something else from.
+ */
+function closeIfEmptied(): void {
+  if (props.detached && tabs.tabs.length === 0) void api.closeWindow()
 }
 
 async function disconnect(): Promise<void> {
@@ -397,6 +441,7 @@ onBeforeUnmount(() => {
                 @open-sql="openSql"
                 @open-related="openRelated"
                 @detach="detachTab"
+                @drop-out="dropTab"
               />
             </template>
             <template #second>
@@ -410,6 +455,7 @@ onBeforeUnmount(() => {
                 @open-sql="openSql"
                 @open-related="openRelated"
                 @detach="detachTab"
+                @drop-out="dropTab"
               />
             </template>
           </SplitPane>

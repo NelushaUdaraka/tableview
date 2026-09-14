@@ -7,10 +7,17 @@
  * shows the same row down the side of the window where every value has room,
  * and edits made here are the *same* staged edits the grid makes: the parent
  * owns them, this only reports them.
+ *
+ * A field holding a JSON document gets more than room: it is shown as a tree,
+ * since what anyone wants of a document is its shape and one of its values,
+ * neither of which survives being printed as one long line. The text is still
+ * what is stored and still what is edited — *raw* switches to it.
  */
-import { nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { CellValue, ColumnMeta } from '@shared/types'
 import { formatCellFull, parseCellInput } from '@shared/serialize'
+import JsonTree from './JsonTree.vue'
+import { parseJsonCell, previewOf } from '../lib/jsonCell'
 
 export interface RowField {
   column: ColumnMeta
@@ -71,6 +78,31 @@ watch(
 
 function text(field: RowField): string {
   return field.value === null ? '' : formatCellFull(field.value)
+}
+
+/**
+ * The JSON each field is holding, or `null` where it is holding none.
+ *
+ * Parsed once per row rather than per render: `fields` is rebuilt whenever the
+ * row or a staged edit changes, which is exactly when an answer here could
+ * have changed too.
+ */
+const documents = computed(() => props.fields.map((field) => parseJsonCell(text(field))))
+
+/** Fields the reader has switched to raw text, by column name. */
+const asRaw = ref<Record<string, boolean>>({})
+
+function showsJson(index: number): boolean {
+  const field = props.fields[index]
+  return Boolean(field) && documents.value[index] !== null && !asRaw.value[field.column.name]
+}
+
+function toggleRaw(index: number): void {
+  const field = props.fields[index]
+  if (!field) return
+  asRaw.value = { ...asRaw.value, [field.column.name]: !asRaw.value[field.column.name] }
+  // A field switched back to text has to be sized to it, the way the rest were.
+  void nextTick(sizeAll)
 }
 
 function canEdit(field: RowField): boolean {
@@ -197,6 +229,14 @@ watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
           </button>
           <span class="rowpanel__type mono truncate">{{ field.column.dataType }}</span>
           <button
+            v-if="documents[index]"
+            class="rowpanel__mode"
+            :title="showsJson(index) ? 'Show the stored text' : 'Show it as JSON'"
+            @click="toggleRaw(index)"
+          >
+            {{ showsJson(index) ? 'raw' : previewOf(documents[index]!) }}
+          </button>
+          <button
             v-if="field.edited"
             class="rowpanel__revert"
             title="Undo this edit"
@@ -224,8 +264,17 @@ watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
           </button>
         </div>
 
+        <!-- Editing is editing the text, so the tree stands aside for it: a
+             field being read shows the document, `raw` shows what is stored. -->
+        <div
+          v-if="showsJson(index)"
+          class="rowpanel__value rowpanel__value--json"
+          @click="emit('select', index)"
+        >
+          <JsonTree :value="documents[index]!" />
+        </div>
         <textarea
-          v-if="canEdit(field)"
+          v-else-if="canEdit(field)"
           class="rowpanel__value"
           :value="text(field)"
           :placeholder="field.value === null ? 'NULL' : ''"
@@ -447,6 +496,31 @@ watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
 }
 .rowpanel__value--readonly {
   color: var(--text-secondary);
+}
+/* The tree brings its own rows; the box only has to hold them and scroll. */
+.rowpanel__value--json {
+  padding: 5px 7px;
+  cursor: default;
+}
+
+/* Says what the field is holding, and switches to the other way of reading it:
+   `{4}` over the text, `raw` over the tree. */
+.rowpanel__mode {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+.rowpanel__mode:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
 }
 .rowpanel__nullmark {
   color: var(--text-dim);

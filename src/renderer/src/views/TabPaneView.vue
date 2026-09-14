@@ -29,6 +29,7 @@ const emit = defineEmits<{
   (event: 'open-related', schema: string, table: string, filters: TableFilter[]): void
   (event: 'new-query'): void
   (event: 'detach', tabId: string, position: { x: number; y: number }): void
+  (event: 'drop-out', tabId: string, point: { x: number; y: number }): void
 }>()
 
 const tabs = useTabStore()
@@ -67,6 +68,7 @@ defineExpose({
       :pane="pane"
       @new-query="emit('new-query')"
       @detach="(tabId, position) => emit('detach', tabId, position)"
+      @drop-out="(tabId, point) => emit('drop-out', tabId, point)"
     />
 
     <div class="pane__content">

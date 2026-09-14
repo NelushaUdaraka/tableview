@@ -33,6 +33,8 @@ import {
   DetachRequest,
   DetachedTab,
   IpcResult,
+  TabDropRequest,
+  TabDropResult,
   WindowChromeState
 } from '../../shared/ipc'
 import { MenuRole } from '../../shared/menu'
@@ -129,6 +131,33 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (!newWindowFactory) throw new Error('Window creation is not available')
     const window = newWindowFactory(request.position)
     if (window) pendingTabs.set(window.webContents.id, request.tab)
+  })
+
+  /**
+   * Takes a tab let go outside the window it was dragged from.
+   *
+   * Which window that landed on is a question only this side can answer — a
+   * renderer sees its own window and nothing else — so the drop arrives as a
+   * point on the screen. A window under it takes the tab and is brought to the
+   * front; with nothing there, the tab gets a window of its own, which is the
+   * drag that pulls a tab *out*. Either way the sender has already let the tab
+   * go, so this must always end with it open somewhere.
+   */
+  handle(CHANNELS.windowDropTab, (call, request: TabDropRequest): TabDropResult => {
+    const target = windowLocator?.(request.point, call.window) ?? null
+    if (target && !target.isDestroyed()) {
+      target.webContents.send(CHANNELS.eventAttachTab, request.tab)
+      if (target.isMinimized()) target.restore()
+      target.focus()
+      return { attached: true }
+    }
+
+    if (!newWindowFactory) throw new Error('Window creation is not available')
+    // Opened a little up and to the left of the pointer, so the new window's
+    // strip lands under it rather than its top-left corner.
+    const window = newWindowFactory({ x: request.point.x - 120, y: request.point.y - 20 })
+    if (window) pendingTabs.set(window.webContents.id, request.tab)
+    return { attached: false }
   })
 
   handle(CHANNELS.windowPendingTab, (call): DetachedTab | null => {
@@ -403,6 +432,17 @@ export function registerIpcHandlers(context: IpcContext): void {
 /** Set by main/index.ts so the renderer can ask for another window. */
 let newWindowFactory: ((position?: { x: number; y: number }) => BrowserWindow | null) | null = null
 
+/**
+ * Set by main/index.ts: which window, if any, a point on the screen is over.
+ *
+ * Only the window manager knows where the windows are, and it must not be
+ * imported here — the handlers are what the renderer can reach, and they take
+ * what they need through these two hooks.
+ */
+let windowLocator:
+  | ((point: { x: number; y: number }, exclude: BrowserWindow | null) => BrowserWindow | null)
+  | null = null
+
 /** Tabs waiting for the window they were opened for to ask what it is showing. */
 const pendingTabs = new Map<number, DetachedTab>()
 
@@ -410,6 +450,12 @@ export function setWindowFactory(
   factory: (position?: { x: number; y: number }) => BrowserWindow | null
 ): void {
   newWindowFactory = factory
+}
+
+export function setWindowLocator(
+  locator: (point: { x: number; y: number }, exclude: BrowserWindow | null) => BrowserWindow | null
+): void {
+  windowLocator = locator
 }
 
 function showSaveDialog(

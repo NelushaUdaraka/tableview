@@ -185,6 +185,12 @@ rather than folding it away.
   panel sits beside query results, read-only, and "View row details" on any row's menu opens it
   there. It belongs to the tab, not to the window — two tables side by side in a split each show or
   hide their own fields, and the last choice made is how the next tab opens
+- **A JSON document is shown as one.** SQL Server has no JSON type, so a document lives in an
+  `nvarchar(max)` column and comes back as one long line. Where a field holds an object or an array,
+  the row panel draws it as a tree instead — collapsible, two levels open to start with — and the
+  field's own `{4}` / `raw` switch gives back the stored text, which is what editing edits. Only
+  objects and arrays: a bare `42` or `"done"` is valid JSON too, and a tree of one line would say
+  nothing the field did not
 - **Follow a foreign key**: a `›` at the end of a referencing cell opens the referenced table in its
   own tab, filtered to the row it points at — composite keys included
 
@@ -441,9 +447,12 @@ src/
 └── renderer/src/             Vue 3 + Pinia
     ├── lib/api.ts            the only place that touches window.api
     ├── lib/menuBus.ts        menu actions, whichever menu raised them
+    ├── lib/schemaTree.ts     a table's structure as the sidebar tree shows it
+    ├── lib/jsonCell.ts       which cells hold a document, and what is inside one
     ├── stores/               connections, schema, tabs (and panes), library,
     │                         settings, toasts, busy (the window's progress bar)
-    ├── components/           title bar, grid, row panel, editor, sidebar, dialogs
+    ├── components/           title bar, grid, row panel (and its JSON tree),
+    │                         editor, sidebar (and its structure tree), dialogs
     └── views/                connection screen, workspace, pane, query, table
 ```
 

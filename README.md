@@ -180,6 +180,13 @@ rather than folding it away.
 - **The rows stay while the next page loads.** Sorting or filtering leaves what is on screen where
   it is, dimmed and inert, until the replacements arrive; a thin bar under the title bar carries the
   wait for the whole window
+- **A tab keeps its page.** Picking another tab takes the browser down with it, so what a table tab
+  was showing — its rows, its sort, its filters, the page it was on, even where it was scrolled to —
+  is kept on the tab. Coming back draws it straight away and re-reads it *behind* the rows, with
+  only a "Checking for changes…" beside the row count to say so. The answer reaches the grid only
+  where it differs, so a table nobody has touched does not blink, and one that has changed updates
+  in place. A table opened for the first time shows the wait from the first frame rather than
+  flashing "No rows match" at it
 - **Row panel** beside the grid (`Ctrl+I`): the selected row as one field per line, with room for
   the values a 26px cell cannot show, editable in place and moving with the selection. The same
   panel sits beside query results, read-only, and "View row details" on any row's menu opens it
@@ -449,6 +456,7 @@ src/
     ├── lib/menuBus.ts        menu actions, whichever menu raised them
     ├── lib/schemaTree.ts     a table's structure as the sidebar tree shows it
     ├── lib/jsonCell.ts       which cells hold a document, and what is inside one
+    ├── lib/tableCache.ts     the page a table tab keeps, and what counts as it changing
     ├── stores/               connections, schema, tabs (and panes), library,
     │                         settings, toasts, busy (the window's progress bar)
     ├── components/           title bar, grid, row panel (and its JSON tree),
@@ -496,6 +504,18 @@ everything that would unmount a view — selecting another tab, closing one, mov
 pane, folding the split away, dragging it into a new window — asks the tabs that are about to go.
 The split pane is always rendered, collapsed rather than replaced when there is no second pane:
 swapping between two layouts would remount the first pane's view and take its staged edits with it.
+
+**A table tab keeps its last page, and re-reads it behind the rows.** Unmounting a view takes
+everything it was holding with it, so reselecting a tab used to mean an empty grid and a spinner for
+as long as the server took — to arrive at the rows it had a second earlier. The page it last drew is
+kept on the tab instead (`markRaw`, like a query tab's result, so a page of rows stays out of the
+reactivity graph), and the view is seeded from it during setup, before its first render. What
+follows is an ordinary read marked `background`: nothing is dimmed and nothing is blocked, and
+`lib/tableCache.ts` compares the answer against what is drawn so that only a real difference reaches
+the grid — handing it new columns resets the widths and the selection, and new rows lose the scroll
+position, which is a poor way to say "nothing has changed". Loads carry a token for the same reason:
+the reader can sort, filter or page while that read is in flight, and the last thing asked for is
+the one whose answer counts.
 
 **The renderer converts reactive state to plain data before the bridge.** `contextBridge` clones
 arguments with the structured clone algorithm, which refuses to clone a Proxy — which is exactly

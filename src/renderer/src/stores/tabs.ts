@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import type { QueryExecutionResult, SchemaObjectType, TableFilter } from '@shared/types'
+import type { TableCache } from '../lib/tableCache'
 import { useSettingsStore } from './settings'
 
 export interface QueryTab {
@@ -50,6 +51,13 @@ export interface TableTab {
   filterRevision: number
   /** As on a query tab: the row panel belongs to the tab showing it. */
   showRowPanel: boolean
+  /**
+   * The page the browser last had on screen, so reselecting this tab shows it
+   * again straight away and re-reads it behind the rows rather than in front
+   * of them. Written `markRaw`, like a query tab's result: it holds a page of
+   * rows and nothing here ever mutates it field by field.
+   */
+  cache?: TableCache
 }
 
 export type Tab = QueryTab | TableTab
@@ -389,7 +397,15 @@ export const useTabStore = defineStore('tabs', () => {
 
   // --- splitting -------------------------------------------------------------
 
-  /** A second view of the same thing: a new tab, none of the first one's state. */
+  /**
+   * A second view of the same thing: a new tab, none of the work the first one
+   * was holding.
+   *
+   * Its cached page does come along. A query tab's result cannot — nobody ran
+   * it in the new tab — but a table tab loads the moment it opens, so the copy
+   * is about to ask for those very rows and can just as well show them while
+   * it waits.
+   */
   function copyOf(tab: Tab): Tab {
     if (tab.kind === 'query') {
       return {

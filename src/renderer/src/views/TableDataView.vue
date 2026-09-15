@@ -61,7 +61,14 @@ const columns = shallowRef<ColumnMeta[]>([])
 // cross the IPC boundary).
 const loadedRows = shallowRef<CellValue[][]>([])
 const totalRows = ref<number | null>(null)
-const loading = ref(false)
+/**
+ * Whether the grid has nothing to show but the wait.
+ *
+ * True from the start, because mounting this view loads: starting at false
+ * drew "No rows match" over the empty grid for as long as the first read
+ * took, which is the one moment it is certainly wrong.
+ */
+const loading = ref(true)
 const durationMs = ref(0)
 const lastSql = ref('')
 const grid = ref<InstanceType<typeof DataGrid> | null>(null)

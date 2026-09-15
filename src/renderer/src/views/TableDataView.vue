@@ -7,13 +7,24 @@
  * key; a table without one falls back to matching on every column, which the
  * banner warns about because it can match more rows than intended.
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
+import {
+  computed,
+  markRaw,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  shallowRef,
+  watch
+} from 'vue'
 import type {
   CellValue,
   ColumnMeta,
   ExportFormat,
   TableChangeSet,
   TableColumn,
+  TableDataResponse,
   TableFilter,
   TableSort,
   TableStructure
@@ -27,6 +38,7 @@ import SplitPane from '../components/SplitPane.vue'
 import TableViewSwitch from '../components/TableViewSwitch.vue'
 import { exportRows } from '@shared/export'
 import { columnMenuItems } from '../lib/columnMenu'
+import { sameColumns, sameRows } from '../lib/tableCache'
 import { reindexStagedEdits } from '../lib/stagedRows'
 import { useRowPanel } from '../lib/rowPanel'
 import { foreignKeyFilterValue, foreignKeyFilters, foreignKeyTargets } from '@shared/foreignKeys'
@@ -54,16 +66,41 @@ const toasts = useToastStore()
 const connections = useConnectionStore()
 const credentials = useCredentialsStore()
 
+/**
+ * The page this tab had when it was last on screen.
+ *
+ * Read here in setup, before the first render, which is the whole of what
+ * makes coming back to a tab instant: the grid draws the rows the tab already
+ * had rather than an empty grid and a spinner. A page read before the tab was
+ * handed different filters answers a question nobody is asking any more, so
+ * it is not used.
+ */
+const cached =
+  props.tab.cache && props.tab.cache.filterRevision === props.tab.filterRevision
+    ? props.tab.cache
+    : null
+
 const structure = ref<TableStructure | null>(null)
-const columns = shallowRef<ColumnMeta[]>([])
+const columns = shallowRef<ColumnMeta[]>(cached?.columns ?? [])
 // shallowRef: the rows array is replaced wholesale, and its contents must not
 // be wrapped in reactive proxies (both for speed and because a proxy cannot
 // cross the IPC boundary).
-const loadedRows = shallowRef<CellValue[][]>([])
-const totalRows = ref<number | null>(null)
-const loading = ref(false)
-const durationMs = ref(0)
-const lastSql = ref('')
+const loadedRows = shallowRef<CellValue[][]>(cached?.rows ?? [])
+const totalRows = ref<number | null>(cached?.totalRows ?? null)
+/**
+ * Whether the grid has nothing to show but the wait.
+ *
+ * True from the start, because mounting this view loads: starting at false
+ * drew "No rows match" over the empty grid for as long as the first request
+ * took, which is the one moment it is certainly wrong. A tab that has a page
+ * cached starts false instead — it has rows, and its re-read happens behind
+ * them.
+ */
+const loading = ref(!cached)
+/** A re-read running behind rows that are already on screen. */
+const refreshing = ref(false)
+const durationMs = ref(cached?.durationMs ?? 0)
+const lastSql = ref(cached?.sql ?? '')
 const grid = ref<InstanceType<typeof DataGrid> | null>(null)
 /**
  * The open context menu.
@@ -77,13 +114,13 @@ const menu = ref<{ kind: 'row' | 'header'; x: number; y: number; row: number; co
 )
 const selection = ref<{ rowIndex: number; columnIndex: number } | null>(null)
 
-const offset = ref(0)
-const pageSize = ref(settings.settings.pageSize)
-const sorts = ref<TableSort[]>([])
-const filters = ref<TableFilter[]>([])
-const filterMode = ref<'builder' | 'raw'>('builder')
-const rawWhere = ref('')
-const showFilters = ref(false)
+const offset = ref(cached?.offset ?? 0)
+const pageSize = ref(cached?.pageSize ?? settings.settings.pageSize)
+const sorts = ref<TableSort[]>(cached?.sorts ?? [])
+const filters = ref<TableFilter[]>(cached?.filters ?? [])
+const filterMode = ref<'builder' | 'raw'>(cached?.filterMode ?? 'builder')
+const rawWhere = ref(cached?.rawWhere ?? '')
+const showFilters = ref(cached?.showFilters ?? false)
 
 /** Rows the grid has picked out; the focused row when nothing else is. */
 const selectedRows = ref<number[]>([])
@@ -224,15 +261,97 @@ async function loadStructure(): Promise<void> {
 }
 
 /**
+ * Puts a response on screen, replacing only what actually differs.
+ *
+ * Handing the grid a new `columns` array resets it — its widths, its
+ * selection, the row in the panel — and a new `rows` array loses the scroll
+ * position, so a read that came back with the page it already had must leave
+ * both alone. That is what makes the re-read behind a reselected tab
+ * invisible when nothing has changed, and why this compares rather than
+ * assigns.
+ */
+function accept(response: TableDataResponse): void {
+  const columnsChanged = !sameColumns(response.columns, columns.value)
+  if (columnsChanged) columns.value = response.columns
+  // Rows are positional, so a new shape means new rows whatever they hold.
+  if (columnsChanged || !sameRows(response.rows, loadedRows.value)) {
+    loadedRows.value = response.rows
+  }
+  totalRows.value = response.totalRows
+  durationMs.value = response.durationMs
+  lastSql.value = response.sql
+}
+
+/** Keeps this page on the tab, for the next time the tab is picked. */
+function remember(): void {
+  tabs.update<TableTab>(props.tab.id, {
+    cache: markRaw({
+      columns: columns.value,
+      rows: loadedRows.value,
+      totalRows: totalRows.value,
+      offset: offset.value,
+      pageSize: pageSize.value,
+      // Copied out of the live refs: nothing should be able to edit a page
+      // that has already been put away.
+      sorts: sorts.value.map((sort) => ({ ...sort })),
+      filters: filters.value.map((filter) => ({ ...filter })),
+      filterMode: filterMode.value,
+      rawWhere: rawWhere.value,
+      showFilters: showFilters.value,
+      durationMs: durationMs.value,
+      sql: lastSql.value,
+      scrollTop: grid.value?.scrollOffset() ?? 0,
+      filterRevision: props.tab.filterRevision
+    })
+  })
+}
+
+/**
+ * Writes down what the page picked up after it was read: where the reader
+ * scrolled to, and whether the filter bar is open.
+ *
+ * Everything else in the cache describes the rows and is written with them.
+ * Paging or sorting and then leaving before the answer arrives must not put
+ * the new question away beside the old rows — and a tab with no page cached
+ * at all is one whose first read has not landed, which is a spinner when it
+ * comes back, not an empty grid.
+ */
+function rememberView(): void {
+  const cache = props.tab.cache
+  if (!cache) return
+  const scrollTop = grid.value?.scrollOffset() ?? 0
+  if (cache.scrollTop === scrollTop && cache.showFilters === showFilters.value) return
+  tabs.update<TableTab>(props.tab.id, {
+    cache: markRaw({ ...cache, scrollTop, showFilters: showFilters.value })
+  })
+}
+
+/**
+ * Whichever load was asked for last is the one whose answer counts.
+ *
+ * A tab that comes back on screen re-reads its page in the background, and
+ * that read is still in flight when the reader sorts, filters or pages — its
+ * answer would otherwise land on top of theirs.
+ */
+let loadToken = 0
+
+/**
  * Fetches the current page.
  *
  * The rows already on screen are left alone until the new ones arrive: the
  * grid dims them and stops answering, and the window's progress bar carries
  * the wait. Sorting a table no longer empties it for the round trip.
+ *
+ * `background` is the re-read a tab does when it is picked again. Those rows
+ * are what the reader was looking at a moment ago, so nothing is dimmed and
+ * nothing is blocked; the answer reaches the grid only where it differs from
+ * what is already drawn.
  */
-async function load(resetOffset = false): Promise<void> {
+async function load(resetOffset = false, background = false): Promise<void> {
   if (resetOffset) offset.value = 0
-  loading.value = true
+  const token = ++loadToken
+  if (background) refreshing.value = true
+  else loading.value = true
   busy.begin()
   try {
     const response = await api.fetchTableData({
@@ -246,25 +365,36 @@ async function load(resetOffset = false): Promise<void> {
       filterMode: filterMode.value,
       rawWhere: rawWhere.value
     })
-    columns.value = response.columns
-    loadedRows.value = response.rows
-    totalRows.value = response.totalRows
-    durationMs.value = response.durationMs
-    lastSql.value = response.sql
-    discard()
+    if (token !== loadToken) return
+    // A background re-read never pulls rows out from under staged edits: they
+    // are keyed by row index, and the reader is in the middle of typing them.
+    // The page on screen stays the page, and Refresh still says otherwise.
+    if (background && pendingCount.value > 0) return
+    accept(response)
+    if (!background) discard()
+    remember()
   } catch (error) {
+    if (token !== loadToken) return
     // A session that ran out mid-browse is fixable in place; retry this load.
     const connection = connections.saved.find((entry) => entry.id === props.tab.connectionId)
-    if (!credentials.offerRefresh(connection, error, () => load(resetOffset))) {
+    if (!credentials.offerRefresh(connection, error, () => load(resetOffset, background))) {
       toasts.fromError('Could not load the table', error)
     }
   } finally {
-    loading.value = false
     busy.end()
+    // Only the newest load may put the indicators down; an overtaken one
+    // finishing later would clear the wait its successor is still in.
+    if (token === loadToken) {
+      loading.value = false
+      refreshing.value = false
+    }
   }
 }
 
 onBeforeUnmount(() => {
+  // The tab is about to be taken down: this is the last chance to write down
+  // where it had got to.
+  rememberView()
   tabs.setLeaveGuard(props.tab.id, null)
   // A dialog left waiting would keep its caller pending forever.
   if (pendingPrompt.value) answerPendingPrompt('cancel')
@@ -290,6 +420,17 @@ onMounted(async () => {
   // the store asks here first. Keyed by tab: a split workspace has a view
   // mounted per pane, each answering for its own tab.
   tabs.setLeaveGuard(props.tab.id, confirmLeave)
+
+  if (cached) {
+    // The rows are drawn already, and the sort and filters that produced them
+    // came back with them. Put the grid where the reader left it, then go and
+    // find out whether any of it is still true.
+    grid.value?.scrollTo(cached.scrollTop)
+    await loadStructure()
+    await load(false, true)
+    return
+  }
+
   await loadStructure()
   // A primary key gives a stable default order.
   const key = structure.value?.primaryKey ?? []
@@ -1048,6 +1189,13 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
         {{ tab.schema }}.<strong>{{ tab.table }}</strong>
       </span>
       <span v-if="rowCountLabel" class="data__rows mono">{{ rowCountLabel }}</span>
+      <!-- A tab picked again re-reads the page it already had. Nothing on
+           screen changes while it does, so this is the only thing that says
+           the rows are a moment old and being checked. -->
+      <span v-if="refreshing" class="data__refreshing">
+        <span class="spinner"></span>
+        Checking for changes…
+      </span>
 
       <div class="data__spacer"></div>
 
@@ -1279,6 +1427,14 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
   font-weight: 700;
 }
 .data__rows {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.data__refreshing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex: 0 0 auto;
   font-size: 11px;
   color: var(--text-dim);

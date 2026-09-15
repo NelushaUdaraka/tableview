@@ -10,6 +10,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useSettingsStore } from '../../../src/renderer/src/stores/settings'
 import { useTabStore, type QueryTab, type TableTab } from '../../../src/renderer/src/stores/tabs'
+import type { TableCache } from '../../../src/renderer/src/lib/tableCache'
 
 beforeEach(() => setActivePinia(createPinia()))
 
@@ -396,5 +397,88 @@ describe('split view', () => {
 
     expect(tabs.tabs.map((tab) => tab.connectionId)).toEqual(['c2'])
     expect(tabs.panes).toHaveLength(1)
+  })
+})
+
+/**
+ * Only a pane's active tab is mounted, so a tab that is not showing has no
+ * view to hold anything. The page it last had lives on the tab instead, which
+ * is what lets the browser draw it again before it has asked the server
+ * anything.
+ */
+describe('a tab\'s cached page', () => {
+  function page(over: Partial<TableCache> = {}): TableCache {
+    return {
+      columns: [
+        {
+          name: 'id',
+          index: 0,
+          dataType: 'int',
+          jsKind: 'number',
+          nullable: false,
+          isIdentity: true,
+          isReadOnly: false
+        }
+      ],
+      rows: [[1], [2]],
+      totalRows: 2,
+      offset: 0,
+      pageSize: 100,
+      sorts: [{ column: 'id', direction: 'asc' }],
+      filters: [],
+      filterMode: 'builder',
+      rawWhere: '',
+      showFilters: false,
+      durationMs: 12,
+      sql: 'SELECT * FROM [dbo].[customers]',
+      scrollTop: 240,
+      filterRevision: 0,
+      ...over
+    }
+  }
+
+  it('is still there when the tab is picked again', async () => {
+    const tabs = useTabStore()
+    await tabs.openTable('c1', 'dbo', 'customers')
+    const customers = tabs.activeId!
+    tabs.update<TableTab>(customers, { cache: page() })
+
+    await tabs.openTable('c1', 'dbo', 'orders')
+    await tabs.select(customers)
+
+    const cache = (tabs.tabs.find((tab) => tab.id === customers) as TableTab).cache
+    expect(cache?.rows).toEqual([[1], [2]])
+    expect(cache?.scrollTop).toBe(240)
+    expect(cache?.sorts).toEqual([{ column: 'id', direction: 'asc' }])
+  })
+
+  it('goes with the tab when it closes', async () => {
+    const tabs = useTabStore()
+    await tabs.openTable('c1', 'dbo', 'customers')
+    const customers = tabs.activeId!
+    tabs.update<TableTab>(customers, { cache: page() })
+
+    await tabs.close(customers)
+    expect(tabs.tabs).toHaveLength(0)
+  })
+
+  /**
+   * A query tab's result cannot come along — nobody ran it in the new tab —
+   * but a table tab loads the moment it opens, so the copy is about to ask for
+   * those very rows and may as well show them while it waits.
+   */
+  it('comes along when a lone tab is split into a second view', async () => {
+    const tabs = useTabStore()
+    await tabs.openTable('c1', 'dbo', 'customers')
+    const customers = tabs.activeId!
+    tabs.update<TableTab>(customers, { cache: page(), pendingEdits: 3 })
+
+    await tabs.splitTab(customers)
+
+    const copy = tabs.tabs.find((tab) => tab.id !== customers) as TableTab
+    expect(copy.table).toBe('customers')
+    expect(copy.cache?.rows).toEqual([[1], [2]])
+    // The staged edits do not: they belong to the view that is holding them.
+    expect(copy.pendingEdits).toBe(0)
   })
 })

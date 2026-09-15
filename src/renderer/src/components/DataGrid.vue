@@ -229,6 +229,20 @@ const totalWidth = computed(
   () => 48 + widths.value.reduce((sum, width) => sum + width, 0)
 )
 
+/**
+ * Puts the viewport back to a scroll position it had before.
+ *
+ * The browser clamps this to what there is to scroll, so a page that came
+ * back shorter than it went away simply lands at the bottom rather than
+ * nowhere.
+ */
+function scrollTo(top: number): void {
+  const element = viewport.value
+  if (!element) return
+  element.scrollTop = top
+  scrollTop.value = element.scrollTop
+}
+
 function onScroll(): void {
   if (!viewport.value) return
   scrollTop.value = viewport.value.scrollTop
@@ -716,7 +730,11 @@ defineExpose({
   },
   autoFit,
   autoFitAll,
-  focus: () => viewport.value?.focus()
+  focus: () => viewport.value?.focus(),
+  // Where the rows are scrolled to, for a parent that has to put the grid
+  // back the way it was — a tab reselected after being unmounted.
+  scrollOffset: () => viewport.value?.scrollTop ?? 0,
+  scrollTo
 })
 </script>
 

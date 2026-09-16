@@ -20,6 +20,14 @@ import {
 } from '../../shared/types'
 import { normalizeHex } from '../../shared/accent'
 import { copyNameFor } from '../../shared/copyName'
+import {
+  buildExport,
+  parseExportFile,
+  planImport,
+  toSaveInput,
+  type ConnectionExportFile,
+  type ImportSummary
+} from '../../shared/connectionTransfer'
 import { JsonStore } from './store'
 import { SecretVault, isEncrypted } from './crypto'
 import {
@@ -29,6 +37,13 @@ import {
 } from '../../shared/aws/credentials'
 
 const MAX_HISTORY = 2000
+
+/** A timestamp that can be trusted into a record, or nothing. */
+function validDate(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const time = Date.parse(value)
+  return Number.isNaN(time) ? undefined : new Date(time).toISOString()
+}
 
 interface ConnectionsFile {
   version: number
@@ -101,6 +116,9 @@ export class AppData {
     const merged: ConnectionConfig = {
       id: existing?.id ?? input.id ?? randomUUID(),
       name: input.name,
+      // Trimmed to nothing is ungrouped, so a group can be cleared by emptying
+      // the field rather than by a second control that means "no group".
+      group: (input.group === undefined ? existing?.group : input.group)?.trim() || undefined,
       // Omitted leaves the stored colour alone; empty clears it — the same
       // contract as a secret, because the picker has to be able to take a
       // colour back off a connection as well as put one on.
@@ -117,7 +135,9 @@ export class AppData {
       options: { ...DEFAULT_SQLSERVER_OPTIONS, ...existing?.options, ...input.options },
       ssh: { ...DEFAULT_SSH_CONFIG, ...existing?.ssh, ...input.ssh },
       ssm: { ...DEFAULT_SSM_CONFIG, ...existing?.ssm, ...input.ssm },
-      createdAt: existing?.createdAt ?? now,
+      // An import brings the day a connection was made with it; anything that
+      // is already here keeps its own, so this can never rewrite history.
+      createdAt: existing?.createdAt ?? validDate(input.createdAt) ?? now,
       updatedAt: now,
       lastUsedAt: existing?.lastUsedAt
     }
@@ -355,6 +375,41 @@ export class AppData {
     if (next.length === file.queries.length) return false
     this.queries.write({ ...file, queries: next })
     return true
+  }
+
+  // -- moving connections between machines ----------------------------------
+
+  /**
+   * The saved connections as a file, secrets left behind.
+   *
+   * Built from the same redacted records the renderer gets rather than from
+   * the stored ones, so there is no path here that has a secret in hand to
+   * begin with.
+   */
+  exportConnections(): ConnectionExportFile {
+    return buildExport(this.listConnections())
+  }
+
+  /**
+   * Adds the connections in an export file that are not saved here already.
+   *
+   * Nothing is overwritten: a name that is taken is reported back rather than
+   * merged into, because the two records behind one name may have nothing in
+   * common but the name.
+   */
+  importConnections(contents: string): ImportSummary {
+    const file = parseExportFile(contents)
+    const plan = planImport(file, this.listConnections())
+    const added: string[] = []
+    const needSecrets: string[] = []
+
+    for (const connection of plan.add) {
+      this.saveConnection(toSaveInput(connection))
+      added.push(connection.name)
+      if (connection.missingSecrets.length > 0) needSecrets.push(connection.name)
+    }
+
+    return { added, skipped: plan.skipped, needSecrets }
   }
 
   // -- settings -------------------------------------------------------------

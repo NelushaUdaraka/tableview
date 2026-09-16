@@ -20,6 +20,8 @@ const props = defineProps<{
   busy?: boolean
   /** Open with the name selected — what a fresh copy needs changed first. */
   selectName?: boolean
+  /** Groups already in use, offered beside the field that makes new ones. */
+  groups?: string[]
 }>()
 const emit = defineEmits<{
   (event: 'save', value: Partial<ConnectionConfig> & { name: string }): void
@@ -60,6 +62,7 @@ const loadingInstances = ref(false)
 function blank(): Partial<ConnectionConfig> & { name: string } {
   return {
     name: '',
+    group: '',
     color: '',
     host: 'localhost',
     port: 1433,
@@ -96,6 +99,7 @@ watch(
     Object.assign(form, {
       id: connection.id,
       name: connection.name,
+      group: connection.group ?? '',
       color: connection.color ?? '',
       host: connection.host,
       port: connection.port,
@@ -466,6 +470,9 @@ function payload(): Partial<ConnectionConfig> & { name: string } {
     ...form,
     ssm,
     name: form.name.trim(),
+    // Always a string, so emptying the field takes a connection out of its
+    // group rather than reading as "leave it where it was".
+    group: form.group?.trim() ?? '',
     host: form.host?.trim(),
     port: Number(form.port) || 1433,
     database: form.database?.trim() || undefined,
@@ -539,6 +546,25 @@ async function browseForKey(): Promise<void> {
           </div>
           <span class="field__hint">Accents the window this connection opens in.</span>
         </div>
+      </div>
+
+      <div class="row">
+        <label class="field" style="flex: 2">
+          <span class="field__label">Group</span>
+          <!-- A list of what exists, not a list of what is allowed: typing a
+               name no connection carries yet is how a group gets made. -->
+          <input
+            v-model="form.group"
+            class="input"
+            list="connection-groups"
+            placeholder="(none)"
+            autocomplete="off"
+          />
+          <datalist id="connection-groups">
+            <option v-for="name in groups ?? []" :key="name" :value="name"></option>
+          </datalist>
+          <span class="field__hint">Files this connection under a heading in the list.</span>
+        </label>
       </div>
 
       <div class="row">

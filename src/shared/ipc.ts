@@ -22,6 +22,7 @@ import {
   TableStructure,
   SchemaObjectType
 } from './types'
+import type { ImportSummary } from './connectionTransfer'
 import type { MenuRole } from './menu'
 
 /**
@@ -124,6 +125,8 @@ export const CHANNELS = {
   connectionsSave: 'connections:save',
   connectionsDelete: 'connections:delete',
   connectionsDuplicate: 'connections:duplicate',
+  connectionsExport: 'connections:export',
+  connectionsImport: 'connections:import',
   connectionsTest: 'connections:test',
   ssmCheck: 'ssm:check',
   ssmInstances: 'ssm:instances',
@@ -204,6 +207,13 @@ export interface AppInfo {
   userDataPath: string
 }
 
+/** What an export wrote, and where. */
+export interface ConnectionExportResult {
+  filePath: string
+  connections: number
+  groups: number
+}
+
 /** Uniform envelope so a thrown main-process error survives the IPC hop. */
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; error: SerializedError }
 
@@ -214,6 +224,10 @@ export interface RendererApi {
   saveConnection(input: Partial<ConnectionConfig> & { name: string }): Promise<SavedConnection>
   deleteConnection(id: string): Promise<boolean>
   duplicateConnection(id: string): Promise<SavedConnection | null>
+  /** Writes the saved connections to a file the user picks. Null if cancelled. */
+  exportConnections(): Promise<ConnectionExportResult | null>
+  /** Reads connections out of a file the user picks. Null if cancelled. */
+  importConnections(): Promise<ImportSummary | null>
   testConnection(input: Partial<ConnectionConfig>): Promise<ConnectionStatus>
   /** `connectionId` lets the check fall back to credentials already saved. */
   checkSsmPrerequisites(config: SsmConfig, connectionId?: string): Promise<SsmPreflight>

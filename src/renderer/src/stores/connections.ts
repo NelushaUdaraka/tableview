@@ -7,12 +7,15 @@ import type {
   ConnectionStatus,
   SavedConnection
 } from '@shared/types'
+import type { ConnectionExportResult } from '@shared/ipc'
+import type { ImportSummary } from '@shared/connectionTransfer'
 import {
   defaultDirectionFor,
   normaliseSortDirection,
   normaliseSortKey,
   sortConnections
 } from '../lib/sortConnections'
+import { groupNames } from '../lib/connectionGroups'
 import { useSettingsStore } from './settings'
 import { api } from '../lib/api'
 
@@ -68,6 +71,27 @@ export const useConnectionStore = defineStore('connections', () => {
     })
   }
 
+  /** The groups in use, for the form's list and the row menu's "Move to". */
+  const groups = computed(() => groupNames(saved.value))
+
+  /**
+   * Groups folded shut, by name.
+   *
+   * Kept for the session rather than in the settings: which groups are shut is
+   * where the reader is looking right now, not how they want the list set up,
+   * and a group that stayed shut across a restart would hide connections from
+   * someone who had forgotten they closed it.
+   */
+  const collapsed = ref<string[]>([])
+
+  const isCollapsed = (group: string): boolean => collapsed.value.includes(group)
+
+  function toggleGroup(group: string): void {
+    collapsed.value = isCollapsed(group)
+      ? collapsed.value.filter((name) => name !== group)
+      : [...collapsed.value, group]
+  }
+
   async function load(): Promise<void> {
     saved.value = await api.listConnections()
   }
@@ -98,6 +122,28 @@ export const useConnectionStore = defineStore('connections', () => {
     const copy = await api.duplicateConnection(id)
     await load()
     return copy
+  }
+
+  /**
+   * Files a connection under a group, or takes it out of one.
+   *
+   * A partial save: everything not named here is left as the store has it,
+   * which is what keeps a move from quietly clearing a password.
+   */
+  async function setGroup(connection: SavedConnection, group: string): Promise<void> {
+    await save({ id: connection.id, name: connection.name, group })
+  }
+
+  /** Writes the list to a file. Null when the save dialog was dismissed. */
+  function exportAll(): Promise<ConnectionExportResult | null> {
+    return api.exportConnections()
+  }
+
+  /** Reads connections out of a file. Null when the dialog was dismissed. */
+  async function importFile(): Promise<ImportSummary | null> {
+    const summary = await api.importConnections()
+    if (summary) await load()
+    return summary
   }
 
   async function connect(id: string, password?: string): Promise<ConnectionStatus> {
@@ -145,6 +191,13 @@ export const useConnectionStore = defineStore('connections', () => {
   return {
     saved,
     sorted,
+    groups,
+    collapsed,
+    isCollapsed,
+    toggleGroup,
+    setGroup,
+    exportAll,
+    importFile,
     sortKey,
     sortDirection,
     setSortKey,

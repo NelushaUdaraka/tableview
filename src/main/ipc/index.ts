@@ -30,6 +30,7 @@ import {
 import {
   AppInfo,
   CHANNELS,
+  ConnectionExportResult,
   DetachRequest,
   DetachedTab,
   IpcResult,
@@ -37,6 +38,7 @@ import {
   TabDropResult,
   WindowChromeState
 } from '../../shared/ipc'
+import { exportFileName, type ImportSummary } from '../../shared/connectionTransfer'
 import { MenuRole } from '../../shared/menu'
 import { EXPORT_EXTENSIONS, exportRows } from '../../shared/export'
 import { credentialsToEnv, parseAwsCredentials } from '../../shared/aws/credentials'
@@ -205,6 +207,49 @@ export function registerIpcHandlers(context: IpcContext): void {
     return appData.deleteConnection(id)
   })
   handle(CHANNELS.connectionsDuplicate, (_call, id: string) => appData.duplicateConnection(id))
+
+  /**
+   * Writes the connection list to a file, secrets left where they are.
+   *
+   * The payload is built in `appData` off the redacted records, so what is
+   * serialised here has never held a password to begin with.
+   */
+  handle(CHANNELS.connectionsExport, async (call): Promise<ConnectionExportResult | null> => {
+    const payload = appData.exportConnections()
+    const result = await showSaveDialog(call, {
+      title: 'Export connections',
+      defaultPath: exportFileName(),
+      filters: [
+        { name: 'JSON', extensions: ['json'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    })
+    if (result.canceled || !result.filePath) return null
+
+    await fs.writeFile(result.filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
+    return {
+      filePath: result.filePath,
+      connections: payload.connections.length,
+      groups: new Set(payload.connections.map((entry) => entry.group).filter(Boolean)).size
+    }
+  })
+
+  handle(CHANNELS.connectionsImport, async (call): Promise<ImportSummary | null> => {
+    const options = {
+      title: 'Import connections',
+      properties: ['openFile'] as ['openFile'],
+      filters: [
+        { name: 'JSON', extensions: ['json'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    }
+    const picked = call.window
+      ? await dialog.showOpenDialog(call.window, options)
+      : await dialog.showOpenDialog(options)
+    if (picked.canceled || !picked.filePaths[0]) return null
+
+    return appData.importConnections(await fs.readFile(picked.filePaths[0], 'utf8'))
+  })
 
   handle(CHANNELS.connectionsTest, (_call, input: Partial<ConnectionConfig>) =>
     registry.test(materialiseConfig(input, appData))

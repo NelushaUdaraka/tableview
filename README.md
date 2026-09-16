@@ -21,6 +21,21 @@ TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind
 - **One button per row, and a ⋮ for the rest** — *Connect* is what a row is for, so it is the only
   button on it; edit, duplicate and delete sit behind the row's ⋮, which raises the same menu a
   right-click always has
+- **Filed under groups** — a connection carries the name of a group ("Production", "Client work"),
+  and the list draws a heading for each one with the loose connections gathered under *Ungrouped* at
+  the end. Typing a name no connection carries yet is what creates a group; the row's ⋮ files others
+  under it, and taking the last connection out takes the group with it — there is no empty folder to
+  tidy up. Headings fold away, and a search reaches into the folded ones, because the connection
+  being typed for is exactly the one a closed heading would be hiding.
+- **Import and export, without the secrets** — *Export connections* writes the list to a JSON file
+  and *Import connections* reads one back, which is how a setup moves to a second machine. **No
+  password, SSH passphrase or AWS credential block is ever written to that file**: an export lands
+  in a downloads folder, goes out as an attachment and ends up in a backup, and none of those are
+  places for the key to production. What travels is the shape of each connection — including its
+  group, its colour and the day it was made — plus a note of which secrets it had, so the toast can
+  say how many will need a password entering rather than leaving it to be discovered at connect
+  time. A name already saved is left alone rather than imported beside itself, so re-importing the
+  same file to pick up one new connection does not leave you with two of everything.
 - SQL Server logins, Windows/NTLM (with domain), and Azure AD password auth
 - TLS options: `encrypt`, `trustServerCertificate`, named instances, `ApplicationIntent=ReadOnly`,
   connect/request timeouts, pool sizing, application name
@@ -468,6 +483,7 @@ src/
 │   ├── aws/regions.ts        the region list the connection form offers
 │   ├── accent.ts             a connection's colour, and the shades derived from it
 │   ├── copyName.ts           what a duplicated connection is called
+│   ├── connectionTransfer.ts the connection export file, and what it leaves out
 │   ├── sql/                  identifier escaping, T-SQL lexer, query builders
 │   ├── serialize.ts          driver values ⇄ IPC-safe cell values
 │   ├── export.ts             CSV/JSON/SQL/Markdown
@@ -479,6 +495,7 @@ src/
     ├── lib/jsonCell.ts       which cells hold a document, and what is inside one
     ├── lib/tableCache.ts     the page a table tab keeps, and what counts as it changing
     ├── lib/sortConnections.ts the orders the connection list can be read in
+    ├── lib/connectionGroups.ts the headings the list is filed under
     ├── stores/               connections, schema, tabs (and panes), library,
     │                         settings, toasts, busy (the window's progress bar)
     ├── components/           title bar, grid, row panel (and its JSON tree),

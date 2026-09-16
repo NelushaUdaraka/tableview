@@ -45,6 +45,8 @@ const api: RendererApi = {
   saveConnection: (input) => invoke(CHANNELS.connectionsSave, input),
   deleteConnection: (id) => invoke(CHANNELS.connectionsDelete, id),
   duplicateConnection: (id) => invoke(CHANNELS.connectionsDuplicate, id),
+  exportConnections: () => invoke(CHANNELS.connectionsExport),
+  importConnections: () => invoke(CHANNELS.connectionsImport),
   testConnection: (input) => invoke(CHANNELS.connectionsTest, input),
   checkSsmPrerequisites: (config, connectionId) =>
     invoke(CHANNELS.ssmCheck, config, connectionId),

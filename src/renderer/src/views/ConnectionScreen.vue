@@ -10,6 +10,7 @@ import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toasts'
 import { onMenuAction } from '../lib/menuBus'
 import { CONNECTION_SORT_OPTIONS, describeSort } from '../lib/sortConnections'
+import { groupConnections, hasGroups } from '../lib/connectionGroups'
 import { api } from '../lib/api'
 
 const connections = useConnectionStore()
@@ -23,7 +24,21 @@ const copiedFrom = ref<string | null>(null)
 const showForm = ref(false)
 const testing = ref(false)
 const search = ref('')
-const menu = ref<{ x: number; y: number; connection: SavedConnection } | null>(null)
+/**
+ * The one menu this screen opens, wherever it was opened from.
+ *
+ * A row's ⋮, a right-click and the header's ⋮ all raise the same component
+ * with different items, so what it holds travels with where it was opened —
+ * and `key` is what makes it remeasure its position when that moves.
+ */
+interface ScreenMenu {
+  x: number
+  y: number
+  key: string
+  items: MenuEntry[]
+  connection?: SavedConnection
+}
+const menu = ref<ScreenMenu | null>(null)
 const passwordPrompt = ref<{ connection: SavedConnection; value: string } | null>(null)
 
 const filtered = computed(() => {
@@ -36,6 +51,21 @@ const filtered = computed(() => {
       (entry.database ?? '').toLowerCase().includes(needle)
   )
 })
+
+/**
+ * The filtered list under its headings.
+ *
+ * A search reaches into folded groups: the connection someone is typing the
+ * name of is exactly the one a closed heading would be hiding, so while there
+ * is a search the folds are ignored rather than searched around.
+ */
+const searching = computed(() => search.value.trim().length > 0)
+const groupedRows = computed(() => groupConnections(filtered.value))
+const showHeadings = computed(() => hasGroups(connections.saved))
+
+function folded(group: string): boolean {
+  return !searching.value && connections.isCollapsed(group)
+}
 
 /** How the active order reads, for the control that flips it. */
 const sortDescription = computed(() =>
@@ -72,6 +102,8 @@ onMounted(() => {
   // File → New Connection has nowhere else to land while this screen is up.
   unsubscribeMenu = onMenuAction((action) => {
     if (action === 'connection:new') startNew()
+    else if (action === 'connections:import') void importConnections()
+    else if (action === 'connections:export') void exportConnections()
   })
 })
 
@@ -224,31 +256,156 @@ async function saveAsCopy(input: Partial<ConnectionConfig> & { name: string }): 
  * the one thing a menu button has to do is close the menu it opened.
  */
 function toggleRowMenu(connection: SavedConnection, event: MouseEvent): void {
-  if (menu.value?.connection.id === connection.id) {
+  if (menu.value?.connection?.id === connection.id) {
     menu.value = null
     return
   }
-  // Anchored to the button rather than the pointer; the menu nudges itself back
-  // on-screen from there, which near the right edge means tucking under it.
-  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  menu.value = { x: rect.right, y: rect.bottom + 4, connection }
+  openUnder(event, rowMenuItems(connection), connection)
 }
 
-const menuItems: MenuEntry[] = [
-  { label: 'Connect', action: 'connect' },
-  { label: 'Edit…', action: 'edit' },
-  { label: 'Duplicate…', action: 'duplicate' },
-  { separator: true, label: '' },
-  { label: 'Delete', action: 'delete', danger: true }
+/** The same menu, raised where the pointer is rather than under a button. */
+function openContextMenu(connection: SavedConnection, event: MouseEvent): void {
+  menu.value = {
+    x: event.clientX,
+    y: event.clientY,
+    key: `${connection.id}:${event.clientX}:${event.clientY}`,
+    items: rowMenuItems(connection),
+    connection
+  }
+}
+
+/** The header's ⋮ — what the whole list can do, rather than one row. */
+function toggleScreenMenu(event: MouseEvent): void {
+  if (menu.value && !menu.value.connection) {
+    menu.value = null
+    return
+  }
+  openUnder(event, transferItems)
+}
+
+/**
+ * Hangs a menu off the button that raised it.
+ *
+ * Anchored to the button rather than the pointer; the menu nudges itself back
+ * on-screen from there, which near the right edge means tucking under it.
+ */
+function openUnder(event: MouseEvent, items: MenuEntry[], connection?: SavedConnection): void {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  menu.value = {
+    x: rect.right,
+    y: rect.bottom + 4,
+    key: `${connection?.id ?? 'screen'}:${rect.right}:${rect.bottom}`,
+    items,
+    connection
+  }
+}
+
+/** Where a connection can be moved to, which is every group but its own. */
+function moveTargets(connection: SavedConnection): MenuEntry[] {
+  const current = connection.group?.trim() ?? ''
+  const targets: MenuEntry[] = connections.groups
+    .filter((name) => name !== current)
+    .map((name) => ({ label: name, action: `group:${name}` }))
+  // Somewhere to put it back, but only when it is in a group to begin with.
+  if (current) targets.unshift({ label: 'No group', action: 'group:' })
+  return targets
+}
+
+function rowMenuItems(connection: SavedConnection): MenuEntry[] {
+  const targets = moveTargets(connection)
+  return [
+    { label: 'Connect', action: 'connect' },
+    { label: 'Edit…', action: 'edit' },
+    { label: 'Duplicate…', action: 'duplicate' },
+    // No groups yet means nothing to move between; the form makes the first.
+    ...(targets.length > 0 ? [{ label: 'Move to', items: targets }] : []),
+    { separator: true, label: '' },
+    { label: 'Delete', action: 'delete', danger: true }
+  ]
+}
+
+const transferItems: MenuEntry[] = [
+  { label: 'Import connections…', action: 'import' },
+  { label: 'Export connections…', action: 'export' }
 ]
 
 async function onMenuSelect(action: string): Promise<void> {
+  if (action === 'import') return importConnections()
+  if (action === 'export') return exportConnections()
+
   const connection = menu.value?.connection
   if (!connection) return
   if (action === 'connect') await open(connection)
   else if (action === 'edit') startEdit(connection)
   else if (action === 'duplicate') await duplicate(connection)
   else if (action === 'delete') await remove(connection)
+  else if (action.startsWith('group:')) await moveToGroup(connection, action.slice(6))
+}
+
+async function moveToGroup(connection: SavedConnection, group: string): Promise<void> {
+  try {
+    await connections.setGroup(connection, group)
+    toasts.success(
+      group ? `Moved “${connection.name}” to ${group}` : `Took “${connection.name}” out of its group`
+    )
+  } catch (error) {
+    toasts.fromError('Could not move the connection', error)
+  }
+}
+
+/**
+ * Writes the connection list to a file.
+ *
+ * No secrets travel, so the toast says which of them will have to be typed
+ * again at the other end rather than leaving that to be found out on the
+ * first failed connect.
+ */
+async function exportConnections(): Promise<void> {
+  try {
+    const result = await connections.exportAll()
+    // Null is the save dialog dismissed; nothing happened and nothing is said.
+    if (!result) return
+    const needing = connections.saved.filter(
+      (entry) =>
+        entry.hasSavedPassword ||
+        entry.hasSavedSshPassword ||
+        entry.hasSavedSshPassphrase ||
+        entry.hasSavedAwsCredentials
+    ).length
+    const counted = `${result.connections} ${result.connections === 1 ? 'connection' : 'connections'}`
+    const grouped = result.groups > 0 ? `, ${result.groups} groups` : ''
+    toasts.success(
+      `Exported ${counted}${grouped}`,
+      needing > 0
+        ? `No passwords are in the file — ${needing} will need theirs entered again.`
+        : 'No passwords are in the file.'
+    )
+  } catch (error) {
+    toasts.fromError('Could not export the connections', error)
+  }
+}
+
+async function importConnections(): Promise<void> {
+  try {
+    const summary = await connections.importFile()
+    if (!summary) return
+    if (summary.added.length === 0 && summary.skipped.length > 0) {
+      toasts.info('Nothing new to import', `Already here: ${summary.skipped.join(', ')}`)
+      return
+    }
+    const detail = [
+      summary.skipped.length > 0 ? `${summary.skipped.length} already here` : '',
+      summary.needSecrets.length > 0
+        ? `${summary.needSecrets.length} need a password entering`
+        : ''
+    ].filter(Boolean)
+    toasts.success(
+      `Imported ${summary.added.length} ${summary.added.length === 1 ? 'connection' : 'connections'}`,
+      detail.join(' · ') || undefined
+    )
+  } catch (error) {
+    toasts.fromError('Could not import the connections', error)
+  }
 }
 
 function endpoint(connection: SavedConnection): string {
@@ -315,6 +472,17 @@ function relativeTime(iso?: string): string {
         <button class="screen__theme" title="Toggle theme" @click="settings.toggleTheme()">
           {{ settings.resolvedTheme === 'dark' ? '☀' : '☾' }}
         </button>
+        <button
+          class="screen__theme screen__more"
+          title="Import or export connections"
+          aria-label="Import or export connections"
+          aria-haspopup="menu"
+          :aria-expanded="Boolean(menu && !menu.connection)"
+          @mousedown.stop
+          @click.stop="toggleScreenMenu($event)"
+        >
+          ⋮
+        </button>
         <button class="btn btn--lg btn--primary" @click="startNew">New connection</button>
       </div>
     </header>
@@ -379,13 +547,33 @@ function relativeTime(iso?: string): string {
         </div>
 
         <div class="table__body">
+          <template v-for="group in groupedRows" :key="group.name || '(ungrouped)'">
+            <!-- Only once a group exists: one heading reading "Ungrouped" over
+                 a list that has never been filed is a heading about nothing. -->
+            <button
+              v-if="showHeadings"
+              type="button"
+              class="group"
+              :aria-expanded="!folded(group.name)"
+              @click="connections.toggleGroup(group.name)"
+            >
+              <span class="group__caret" aria-hidden="true">
+                {{ folded(group.name) ? '▸' : '▾' }}
+              </span>
+              <span class="group__name" :class="{ 'group__name--none': !group.name }">
+                {{ group.label }}
+              </span>
+              <span class="group__count mono">{{ group.connections.length }}</span>
+            </button>
+
+            <template v-if="!folded(group.name)">
           <div
-            v-for="connection in filtered"
+            v-for="connection in group.connections"
             :key="connection.id"
             class="row"
             :class="{ 'row--busy': connections.connectingId === connection.id }"
             @dblclick="open(connection)"
-            @contextmenu.prevent="menu = { x: $event.clientX, y: $event.clientY, connection }"
+            @contextmenu.prevent="openContextMenu(connection, $event)"
           >
             <span
               class="row__stripe"
@@ -435,7 +623,7 @@ function relativeTime(iso?: string): string {
                 title="Edit, duplicate, delete"
                 :aria-label="`More for ${connection.name}`"
                 aria-haspopup="menu"
-                :aria-expanded="menu?.connection.id === connection.id"
+                :aria-expanded="menu?.connection?.id === connection.id"
                 @mousedown.stop
                 @click.stop="toggleRowMenu(connection, $event)"
                 @dblclick.stop
@@ -444,6 +632,8 @@ function relativeTime(iso?: string): string {
               </button>
             </div>
           </div>
+            </template>
+          </template>
         </div>
       </div>
     </div>
@@ -475,6 +665,7 @@ function relativeTime(iso?: string): string {
       <ConnectionForm
         :connection="editing"
         :busy="testing"
+        :groups="connections.groups"
         :select-name="Boolean(copiedFrom)"
         @save="save"
         @duplicate="saveAsCopy"
@@ -521,10 +712,10 @@ function relativeTime(iso?: string): string {
     -->
     <ContextMenu
       v-if="menu"
-      :key="`${menu.connection.id}:${menu.x}:${menu.y}`"
+      :key="menu.key"
       :x="menu.x"
       :y="menu.y"
-      :items="menuItems"
+      :items="menu.items"
       @select="onMenuSelect"
       @close="menu = null"
     />
@@ -600,6 +791,14 @@ function relativeTime(iso?: string): string {
 }
 .screen__theme:hover {
   background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.screen__more {
+  font-size: 18px;
+  line-height: 1;
+}
+.screen__more[aria-expanded='true'] {
+  background: var(--bg-active);
   color: var(--text-primary);
 }
 .screen__head .btn--primary {
@@ -718,6 +917,55 @@ function relativeTime(iso?: string): string {
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+
+/* A heading, not a row: it spans the tracks instead of sitting in them. */
+.group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 14px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-app);
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.group:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.group__caret {
+  width: 10px;
+  font-size: 9px;
+  color: var(--text-muted);
+}
+.group__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The bucket rather than a group anyone named, so it is said more quietly. */
+.group__name--none {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.group__count {
+  color: var(--text-dim);
+  font-size: 10px;
+  letter-spacing: 0;
 }
 
 .row {

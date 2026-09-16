@@ -127,6 +127,15 @@ export interface SqlServerOptions {
 export interface ConnectionConfig {
   id: string
   name: string
+  /**
+   * The group this connection is filed under, or nothing for the loose ones.
+   *
+   * Flat and named rather than a tree of folders with an identity of their
+   * own: a group exists because a connection says it does, so there is no
+   * empty folder to tidy up and nothing to keep in step when one is renamed
+   * out of existence.
+   */
+  group?: string
   /** Optional accent colour shown in the UI to distinguish prod from dev. */
   color?: string
   engine: DbEngine

@@ -403,6 +403,115 @@ steps.push({ step: 'order after reload', sort: await sortState(), names: await s
 check('the order survives a reload', await sortState(), { key: 'name', direction: '↓' })
 check('and the rows come back in it', await shownNames(), (await nameOrder()).reverse())
 
+// --- groups ------------------------------------------------------------------
+// A group is a name a connection carries rather than a record of its own, so
+// the first one has to be typed into the form; once it exists the row menu can
+// file the others under it.
+const headings = () => ev(`
+  JSON.stringify([...document.querySelectorAll('.group')].map((g) => ({
+    name: g.querySelector('.group__name').textContent.trim(),
+    count: Number(g.querySelector('.group__count').textContent.trim()),
+    open: g.getAttribute('aria-expanded') === 'true'
+  })))
+`).then(JSON.parse)
+
+/** Files a connection under a group through its ⋮, submenu and all. */
+const moveToGroup = async (name, group) => {
+  await ev(`${row(name)}.querySelector('.row__menu').click()`)
+  await waitFor(`!!document.querySelector('.menu')`, `the ⋮ menu on ${name}`)
+  // "Move to" opens on hover rather than on a click, so the row is entered.
+  await ev(`
+    (() => {
+      const entry = [...document.querySelectorAll('.menu .menu__row')]
+        .find((r) => r.textContent.includes('Move to'))
+      entry.dispatchEvent(new MouseEvent('mouseenter'))
+    })()
+  `)
+  await waitFor(`!!document.querySelector('.menu--sub')`, 'the Move to submenu')
+  const clicked = await ev(`
+    (() => {
+      const item = [...document.querySelectorAll('.menu--sub .menu__item')]
+        .find((b) => b.textContent.trim() === ${JSON.stringify(group)})
+      if (!item) return null
+      item.click()
+      return item.textContent.trim()
+    })()
+  `)
+  if (!clicked) bail(`no “${group}” to move ${name} into`)
+}
+
+check('nothing is filed to begin with', await headings(), [])
+
+await rowMenu('Local dev', 'Edit')
+await waitFor(`!!document.querySelector('.form__tabs')`, 'the form, to name a group')
+await setInput('.form input[list="connection-groups"]', 'Everyday')
+await ev(`document.querySelector('.form button[type=submit]').click()`)
+await waitFor(`!document.querySelector('.form__tabs')`, 'form closed')
+await waitFor(`!!document.querySelector('.group')`, 'the first heading')
+steps.push({ step: 'first group', headings: await headings() })
+// Four connections were never filed, so they gather under one quiet heading.
+check('naming a group in the form makes one', await headings(), [
+  { name: 'Everyday', count: 1, open: true },
+  { name: 'Ungrouped', count: 4, open: true }
+])
+
+await moveToGroup('Staging reporting', 'Everyday')
+await waitFor(`${row('Staging reporting')} !== undefined`, 'the moved row')
+check('the ⋮ files another one under it', await headings(), [
+  { name: 'Everyday', count: 2, open: true },
+  { name: 'Ungrouped', count: 3, open: true }
+])
+
+const namesUnder = (group) => ev(`
+  (() => {
+    const heads = [...document.querySelectorAll('.table__body > *')]
+    const start = heads.findIndex((el) => el.classList.contains('group') &&
+      el.querySelector('.group__name').textContent.trim() === ${JSON.stringify(group)})
+    const names = []
+    for (const el of heads.slice(start + 1)) {
+      if (el.classList.contains('group')) break
+      names.push(el.querySelector('.row__name').textContent.trim())
+    }
+    return JSON.stringify(names)
+  })()
+`).then(JSON.parse)
+check('and the rows sit under their own heading', (await namesUnder('Everyday')).sort(), [
+  'Local dev',
+  'Staging reporting'
+])
+
+// A heading folds the group away, and says so to anything reading the screen.
+await clickOn(
+  `[...document.querySelectorAll('.group')].find((g) => g.querySelector('.group__name').textContent.trim() === 'Everyday')`,
+  'the Everyday heading'
+)
+await waitFor(`${ROWS}.length === 3`, 'the folded list')
+check('folding one hides its rows and nothing else', await headings(), [
+  { name: 'Everyday', count: 2, open: false },
+  { name: 'Ungrouped', count: 3, open: true }
+])
+await shot('06b-groups-folded')
+
+// Searching reaches into a folded group: the row being typed for is exactly
+// the one a closed heading would be hiding.
+await setInput('.screen__search-input', 'staging')
+await waitFor(`${ROWS}.length === 1`, 'the search result')
+check('a search reaches into the fold', await shownNames(), ['Staging reporting'])
+await setInput('.screen__search-input', '')
+await waitFor(`${ROWS}.length === 3`, 'the folded list again')
+
+// Taking the last one out of a group takes the group with it.
+await clickOn(
+  `[...document.querySelectorAll('.group')].find((g) => g.querySelector('.group__name').textContent.trim() === 'Everyday')`,
+  'the Everyday heading again'
+)
+await waitFor(`${ROWS}.length === 5`, 'the whole list')
+await moveToGroup('Local dev', 'No group')
+await moveToGroup('Staging reporting', 'No group')
+await waitFor(`document.querySelectorAll('.group').length === 0`, 'no headings left')
+steps.push({ step: 'groups emptied', headings: await headings() })
+check('emptying a group removes it', await headings(), [])
+
 // --- where the dismiss button sits ------------------------------------------
 // Reported from the app: with a short message the ✕ ended up adrift in the
 // middle of the toast, because the message rather than the toast was deciding

@@ -561,6 +561,131 @@ describe('saved queries', () => {
   })
 })
 
+describe('moving connections between machines', () => {
+  const PASSWORD = 'hunter2-the-real-one'
+  const SSH_PASSPHRASE = 'passphrase-of-the-key'
+
+  /** A connection with a secret of every kind the vault holds. */
+  function seed(): void {
+    appData.saveConnection({
+      name: 'Production reporting',
+      group: 'Production',
+      host: 'prod-sql.internal',
+      port: 1433,
+      database: 'Reporting',
+      username: 'svc_report',
+      password: PASSWORD,
+      savePassword: true,
+      color: '#d64545',
+      ssh: {
+        ...DEFAULT_SSH_CONFIG,
+        enabled: true,
+        host: 'bastion.internal',
+        port: 22,
+        username: 'deploy',
+        authMode: 'privateKey',
+        privateKeyPath: '~/.ssh/id_ed25519',
+        passphrase: SSH_PASSPHRASE
+      }
+    })
+    appData.saveConnection({ name: 'Local dev', host: 'localhost', port: 1433, username: 'sa' })
+  }
+
+  it('writes out what a connection is', () => {
+    seed()
+    const file = appData.exportConnections()
+
+    expect(file.connections.map((entry) => entry.name)).toEqual([
+      'Production reporting',
+      'Local dev'
+    ])
+    expect(file.connections[0]).toMatchObject({
+      group: 'Production',
+      host: 'prod-sql.internal',
+      database: 'Reporting',
+      username: 'svc_report',
+      color: '#d64545'
+    })
+    expect(file.connections[0].ssh.privateKeyPath).toBe('~/.ssh/id_ed25519')
+  })
+
+  it('writes out no secret of any kind', () => {
+    seed()
+    // Through the real vault: whatever is on disk is encrypted, and what comes
+    // out here must not be the plaintext or the ciphertext of it.
+    const stored = fs.readFileSync(path.join(dir, 'connections.json'), 'utf8')
+    const serialised = JSON.stringify(appData.exportConnections())
+
+    for (const secret of [PASSWORD, SSH_PASSPHRASE]) {
+      expect(stored).not.toContain(secret)
+      expect(serialised).not.toContain(secret)
+    }
+    expect(serialised).not.toContain('enc:')
+  })
+
+  it('says which connections will be asked for a password at the other end', () => {
+    seed()
+    const [reporting, local] = appData.exportConnections().connections
+    expect(reporting.missingSecrets).toEqual(['password', 'sshPassphrase'])
+    expect(local.missingSecrets).toEqual([])
+  })
+
+  it('imports into an empty app, group and all', () => {
+    seed()
+    const file = JSON.stringify(appData.exportConnections())
+
+    const elsewhere = new AppData(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'bk-import-')),
+      new LocalKeyVault(path.join(dir, 'other.key'))
+    )
+    const summary = elsewhere.importConnections(file)
+
+    expect(summary.added).toEqual(['Production reporting', 'Local dev'])
+    expect(summary.skipped).toEqual([])
+    expect(summary.needSecrets).toEqual(['Production reporting'])
+
+    const imported = elsewhere.listConnections()
+    expect(imported.map((entry) => entry.group)).toEqual(['Production', undefined])
+    expect(imported[0].ssh.host).toBe('bastion.internal')
+    // The setting travels; the secret does not, so it will be asked for.
+    expect(imported[0].savePassword).toBe(true)
+    expect(imported[0].hasSavedPassword).toBe(false)
+    expect(imported[0].hasSavedSshPassphrase).toBe(false)
+  })
+
+  it('keeps the day each connection was made', () => {
+    seed()
+    const before = appData.listConnections()[0].createdAt
+    const elsewhere = new AppData(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'bk-import-')),
+      new LocalKeyVault(path.join(dir, 'other.key'))
+    )
+    elsewhere.importConnections(JSON.stringify(appData.exportConnections()))
+    expect(elsewhere.listConnections()[0].createdAt).toBe(before)
+  })
+
+  it('leaves a name that is already here alone', () => {
+    seed()
+    const file = JSON.stringify(appData.exportConnections())
+
+    // Importing a machine's own export back into it: nothing new, nothing lost.
+    const summary = appData.importConnections(file)
+    expect(summary.added).toEqual([])
+    expect(summary.skipped).toEqual(['Production reporting', 'Local dev'])
+    expect(appData.listConnections()).toHaveLength(2)
+    // And the secrets the file never carried are still here.
+    expect(appData.listConnections()[0].hasSavedPassword).toBe(true)
+  })
+
+  it('refuses a file that is not an export, without touching the list', () => {
+    seed()
+    expect(() => appData.importConnections('{"kind":"something else"}')).toThrow(
+      /not a Beekeeper Clone/
+    )
+    expect(appData.listConnections()).toHaveLength(2)
+  })
+})
+
 describe('settings', () => {
   it('returns defaults', () => {
     expect(appData.getSettings().theme).toBe('dark')

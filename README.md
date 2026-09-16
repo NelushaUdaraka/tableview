@@ -18,6 +18,9 @@ TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind
   session's whim, so the list is in the same order tomorrow morning. A connection nobody has opened
   yet has no last-opened time at all, so it sorts *after* the ones that have rather than leaping to
   the top when the order is reversed.
+- **One button per row, and a ⋮ for the rest** — *Connect* is what a row is for, so it is the only
+  button on it; edit, duplicate and delete sit behind the row's ⋮, which raises the same menu a
+  right-click always has
 - SQL Server logins, Windows/NTLM (with domain), and Azure AD password auth
 - TLS options: `encrypt`, `trustServerCertificate`, named instances, `ApplicationIntent=ReadOnly`,
   connect/request timeouts, pool sizing, application name

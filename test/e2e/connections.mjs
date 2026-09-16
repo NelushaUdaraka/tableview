@@ -122,6 +122,57 @@ const ROWS = `document.querySelectorAll('.table__body .row')`
 const row = (name) =>
   `[...${ROWS}].find((r) => r.querySelector('.row__name').textContent.trim() === ${JSON.stringify(name)})`
 
+/**
+ * A click the way a mouse makes one — mousedown, then mouseup.
+ *
+ * `element.click()` dispatches neither, so anything that listens for a
+ * mousedown (a menu's click-away, for one) never sees it. Takes the same kind
+ * of expression `row()` builds rather than a selector.
+ */
+const clickOn = async (expression, label) => {
+  const at = await ev(`
+    (() => {
+      const el = ${expression}
+      if (!el) return null
+      const box = el.getBoundingClientRect()
+      const x = Math.round(box.left + box.width / 2)
+      const y = Math.round(box.top + box.height / 2)
+      // An open menu covers the rows under it, and a click that lands on one
+      // of its items instead is a confusing way to find that out.
+      const top = document.elementFromPoint(x, y)
+      return JSON.stringify({ x, y, hit: el === top || el.contains(top) })
+    })()
+  `).then((v) => (v ? JSON.parse(v) : null))
+  if (!at) bail('nothing to click for ' + label)
+  if (!at.hit) bail(`${label} is under something else`)
+  for (const type of ['mousePressed', 'mouseReleased']) {
+    await send('Input.dispatchMouseEvent', { x: at.x, y: at.y, type, button: 'left', clickCount: 1 })
+  }
+}
+
+/**
+ * Picks an item out of a row's ⋮ menu.
+ *
+ * Everything but Connect lives there now, so this is how the suite edits and
+ * duplicates. `.click()` dispatches no mousedown, which is what keeps the
+ * menu's own click-away from closing it before the item is chosen.
+ */
+const rowMenu = async (name, label) => {
+  await ev(`${row(name)}.querySelector('.row__menu').click()`)
+  await waitFor(`!!document.querySelector('.menu')`, `the ⋮ menu on ${name}`)
+  const clicked = await ev(`
+    (() => {
+      const item = [...document.querySelectorAll('.menu .menu__item')]
+        .find((b) => b.textContent.trim().startsWith(${JSON.stringify(label)}))
+      if (!item) return null
+      item.click()
+      return item.textContent.trim()
+    })()
+  `)
+  if (!clicked) bail(`no ${label} in the ⋮ menu on ${name}`)
+  return clicked
+}
+
 await send('Runtime.enable'); await send('Page.enable')
 await waitFor(`!!document.querySelector('.brand__title')`, 'connection screen')
 
@@ -145,9 +196,60 @@ await send('Runtime.enable')
 await waitFor(`${ROWS}.length === 2`, 'both rows')
 await shot('01-list')
 
+// --- what a row offers --------------------------------------------------
+// Connect is the one thing a row is for; the rest moved behind its ⋮, so what
+// that menu holds, and where it opens, is the row's whole vocabulary now.
+const menuOf = (name) => `${row(name)}.querySelector('.row__menu')`
+const menuItemLabels = () =>
+  ev(`JSON.stringify([...document.querySelectorAll('.menu .menu__item')].map((b) => b.textContent.trim()))`)
+    .then(JSON.parse)
+/** Where the open menu sits, relative to the button that opened it. */
+const menuAnchor = (name) => ev(`
+  (() => {
+    const button = ${menuOf(name)}.getBoundingClientRect()
+    const menu = document.querySelector('.menu').getBoundingClientRect()
+    return JSON.stringify({
+      below: menu.top >= button.bottom,
+      reaches: Math.round(menu.right - button.right) >= 0,
+      onScreen: menu.right <= window.innerWidth && menu.left >= 0 && menu.bottom <= window.innerHeight
+    })
+  })()
+`).then(JSON.parse)
+
+check('the row shows Connect and nothing else', await ev(`
+  JSON.stringify([...${row('Local dev')}.querySelectorAll('.row__buttons .btn')].map((b) => b.textContent.trim()))
+`).then(JSON.parse), ['Connect', '⋮'])
+
+await clickOn(menuOf('Local dev'), 'the ⋮ on Local dev')
+await waitFor(`!!document.querySelector('.menu')`, 'the ⋮ menu')
+const rowActions = await menuItemLabels()
+steps.push({ step: 'row menu', actions: rowActions, anchor: await menuAnchor('Local dev') })
+check('its ⋮ carries the rest', rowActions, ['Connect', 'Edit…', 'Duplicate…', 'Delete'])
+check('opened under the button that raised it', await menuAnchor('Local dev'), {
+  below: true, reaches: true, onScreen: true
+})
+await shot('01b-row-menu')
+
+// The button closes what it opened, rather than reopening it under itself.
+await clickOn(menuOf('Local dev'), 'the ⋮ again')
+await waitFor(`!document.querySelector('.menu')`, 'the menu closed')
+
+// Another row's ⋮ moves the menu to that row rather than leaving it where it
+// was. Opened from the lower row and moved up, because a menu hangs below the
+// button that raised it and would otherwise be sitting on the one clicked next.
+await clickOn(menuOf('Production reporting'), 'the ⋮ on Production reporting')
+await waitFor(`!!document.querySelector('.menu')`, 'that row\u2019s menu')
+await clickOn(menuOf('Local dev'), 'the ⋮ one row up')
+await waitFor(`!!document.querySelector('.menu')`, 'the menu again')
+check('another row re-anchors it', await menuAnchor('Local dev'), {
+  below: true, reaches: true, onScreen: true
+})
+await clickOn(menuOf('Local dev'), 'the ⋮ once more')
+await waitFor(`!document.querySelector('.menu')`, 'the menu closed again')
+
 // Duplicate from the list. The copy opens in the form with its name selected,
 // because renaming it is the first thing anyone does next.
-await ev(`${row('Production reporting')}.querySelector('.row__buttons .btn').click()`)
+await rowMenu('Production reporting', 'Duplicate')
 await waitFor(`!!document.querySelector('.form__tabs')`, 'form on the copy')
 const opened = {
   step: 'duplicated from the list',
@@ -187,7 +289,7 @@ await shot('03-list-after-save')
 
 // The other route: open a connection, change a field, and fork it from inside
 // the form. The edits land on the copy and nowhere else.
-await ev(`${row('Production reporting')}.querySelectorAll('.row__buttons .btn')[1].click()`)
+await rowMenu('Production reporting', 'Edit')
 await waitFor(`!!document.querySelector('.form__tabs')`, 'edit form')
 await ev(`
   (() => {
@@ -218,7 +320,7 @@ await shot('04-save-as-copy')
 // Copies of copies number rather than stack: never "Prod (copy) (copy)".
 await ev(`document.querySelector('.modal__close').click()`)
 await waitFor(`!document.querySelector('.form__tabs')`, 'form closed')
-await ev(`${row('Production reporting (copy)')}.querySelector('.row__buttons .btn').click()`)
+await rowMenu('Production reporting (copy)', 'Duplicate')
 await waitFor(`!!document.querySelector('.form__tabs')`, 'form on the third copy')
 const numbered = await ev(`document.querySelector('.form input.input').value`)
 steps.push({ step: 'copy of a copy', name: numbered })
@@ -306,7 +408,7 @@ check('and the rows come back in it', await shownNames(), (await nameOrder()).re
 // middle of the toast, because the message rather than the toast was deciding
 // where it went. Two toasts of very different lengths, side by side, is what
 // that looked like — so that is what this raises.
-await ev(`${row('Local dev')}.querySelector('.row__buttons .btn').click()`)
+await rowMenu('Local dev', 'Duplicate')
 await waitFor(`!!document.querySelector('.form__tabs')`, 'form on the Local dev copy')
 await ev(`document.querySelector('.form button[type=submit]').click()`)
 await waitFor(`document.querySelectorAll('.toast').length >= 2`, 'a long toast and a short one')

@@ -216,6 +216,24 @@ async function saveAsCopy(input: Partial<ConnectionConfig> & { name: string }): 
   }
 }
 
+/**
+ * Opens a row's menu under its ⋮, or closes it when that row's is already open.
+ *
+ * The button swallows its own mousedown so the menu's click-away does not fire
+ * first: without that, every click on ⋮ would close the menu and reopen it, and
+ * the one thing a menu button has to do is close the menu it opened.
+ */
+function toggleRowMenu(connection: SavedConnection, event: MouseEvent): void {
+  if (menu.value?.connection.id === connection.id) {
+    menu.value = null
+    return
+  }
+  // Anchored to the button rather than the pointer; the menu nudges itself back
+  // on-screen from there, which near the right edge means tucking under it.
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  menu.value = { x: rect.right, y: rect.bottom + 4, connection }
+}
+
 const menuItems: MenuEntry[] = [
   { label: 'Connect', action: 'connect' },
   { label: 'Edit…', action: 'edit' },
@@ -403,22 +421,26 @@ function relativeTime(iso?: string): string {
 
             <div class="row__buttons">
               <button
-                class="btn btn--sm btn--muted"
-                title="Copy this connection and edit the copy"
-                @click.stop="duplicate(connection)"
-              >
-                Duplicate
-              </button>
-              <button class="btn btn--sm btn--muted" @click.stop="startEdit(connection)">
-                Edit
-              </button>
-              <button
                 class="btn btn--sm btn--primary"
                 :disabled="connections.connectingId === connection.id"
                 @click.stop="open(connection)"
               >
                 <span v-if="connections.connectingId === connection.id" class="spinner"></span>
                 Connect
+              </button>
+              <!-- Connect is what a row is for; everything else it can do is
+                   behind here, and behind a right-click as it always was. -->
+              <button
+                class="btn btn--sm btn--muted row__menu"
+                title="Edit, duplicate, delete"
+                :aria-label="`More for ${connection.name}`"
+                aria-haspopup="menu"
+                :aria-expanded="menu?.connection.id === connection.id"
+                @mousedown.stop
+                @click.stop="toggleRowMenu(connection, $event)"
+                @dblclick.stop
+              >
+                ⋮
               </button>
             </div>
           </div>
@@ -492,8 +514,14 @@ function relativeTime(iso?: string): string {
       </template>
     </BaseModal>
 
+    <!--
+      Keyed on where it was opened: a right-click closes the open menu on its
+      way in, but the ⋮ button does not, and a menu that is patched rather than
+      remounted keeps the position it measured for the row above.
+    -->
     <ContextMenu
       v-if="menu"
+      :key="`${menu.connection.id}:${menu.x}:${menu.y}`"
       :x="menu.x"
       :y="menu.y"
       :items="menuItems"
@@ -506,7 +534,7 @@ function relativeTime(iso?: string): string {
 <style scoped>
 /* The seven tracks the header and every row share. */
 .screen {
-  --conn-cols: 6px minmax(0, 1.5fr) minmax(0, 2fr) 92px 92px 132px 240px;
+  --conn-cols: 6px minmax(0, 1.5fr) minmax(0, 2fr) 92px 92px 132px 148px;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -745,6 +773,18 @@ function relativeTime(iso?: string): string {
 }
 .row__buttons .btn {
   height: 30px;
+}
+/* Square, and the glyph centred in it rather than flush left like a label. */
+.row__menu {
+  width: 30px;
+  padding: 0;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+}
+.row__menu[aria-expanded='true'] {
+  background: var(--bg-active);
+  color: var(--text-primary);
 }
 
 .screen__foot {

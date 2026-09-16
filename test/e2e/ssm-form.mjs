@@ -345,7 +345,9 @@ steps.push({
 })
 
 // Reopen the saved connection: the summary should be there, the box empty.
-await ev(`[...document.querySelectorAll('.row__buttons .btn')].find(b => b.textContent.includes('Edit')).click()`)
+await ev(`document.querySelector('.row__menu').click()`)
+await waitFor(`!!document.querySelector('.menu')`, 'the row\u2019s ⋮ menu')
+await ev(`[...document.querySelectorAll('.menu .menu__item')].find(b => b.textContent.trim().startsWith('Edit')).click()`)
 await waitFor(`!!document.querySelector('.form__tabs')`, 'edit form')
 await ev(`[...document.querySelectorAll('.form__tab')].find(t => t.textContent.includes('Tunnel')).click()`)
 await waitFor(`!!document.querySelector('.creds__current')`, 'stored credential summary')

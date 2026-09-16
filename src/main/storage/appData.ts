@@ -19,6 +19,7 @@ import {
   SavedQuery
 } from '../../shared/types'
 import { normalizeHex } from '../../shared/accent'
+import { copyNameFor } from '../../shared/copyName'
 import { JsonStore } from './store'
 import { SecretVault, isEncrypted } from './crypto'
 import {
@@ -208,20 +209,43 @@ export class AppData {
     return true
   }
 
+  /**
+   * Copies a connection whole — secrets included — under a name of its own.
+   *
+   * The copy is what gets edited into the variant the user is after, so it
+   * carries the stored password, SSH key passphrase and AWS credentials with
+   * it: re-entering those to change a hostname would defeat the point. It also
+   * lands directly after its source, which is where someone comparing the two
+   * will look for it.
+   */
   duplicateConnection(id: string): SavedConnection | null {
-    const source = this.connections.read().connections.find((entry) => entry.id === id)
-    if (!source) return null
+    const file = this.connections.read()
+    const index = file.connections.findIndex((entry) => entry.id === id)
+    if (index < 0) return null
+
+    const source = file.connections[index]
     const now = new Date().toISOString()
     const copy: ConnectionConfig = {
       ...source,
+      // Nested objects are shared with the source until this is written out,
+      // so give the copy its own to edit.
+      options: { ...source.options },
+      ssh: { ...source.ssh },
+      ssm: { ...source.ssm },
       id: randomUUID(),
-      name: `${source.name} (copy)`,
+      name: copyNameFor(
+        source.name,
+        file.connections.map((entry) => entry.name)
+      ),
       createdAt: now,
       updatedAt: now,
+      // A copy has never been opened, whatever its source has been up to.
       lastUsedAt: undefined
     }
-    const file = this.connections.read()
-    this.connections.write({ ...file, connections: [...file.connections, copy] })
+
+    const next = [...file.connections]
+    next.splice(index + 1, 0, copy)
+    this.connections.write({ ...file, connections: next })
     return this.redact(copy)
   }
 

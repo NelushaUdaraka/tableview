@@ -3,7 +3,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppData } from '../../src/main/storage/appData'
-import { DEFAULT_SSH_CONFIG, DEFAULT_SSM_CONFIG } from '../../src/shared/types'
+import {
+  DEFAULT_SQLSERVER_OPTIONS,
+  DEFAULT_SSH_CONFIG,
+  DEFAULT_SSM_CONFIG
+} from '../../src/shared/types'
 import { LocalKeyVault } from '../../src/main/storage/crypto'
 import { JsonStore } from '../../src/main/storage/store'
 
@@ -424,6 +428,51 @@ describe('connections', () => {
     expect(copy.lastUsedAt).toBeUndefined()
     // The secret follows the copy, still encrypted.
     expect(appData.getConnectionWithSecrets(copy.id)?.password).toBe('p')
+  })
+
+  it('gives every copy a name of its own', () => {
+    const saved = appData.saveConnection({ name: 'Prod' })
+    const first = appData.duplicateConnection(saved.id)!
+    const second = appData.duplicateConnection(saved.id)!
+    // Duplicating the copy is where "(copy) (copy)" would come from.
+    const third = appData.duplicateConnection(first.id)!
+
+    expect([first.name, second.name, third.name]).toEqual([
+      'Prod (copy)',
+      'Prod (copy 2)',
+      'Prod (copy 3)'
+    ])
+  })
+
+  it('files the copy next to what it was copied from', () => {
+    const first = appData.saveConnection({ name: 'Alpha' })
+    appData.saveConnection({ name: 'Beta' })
+    appData.duplicateConnection(first.id)
+
+    // listConnections is storage order; the screen sorts it for display.
+    expect(appData.listConnections().map((entry) => entry.name)).toEqual([
+      'Alpha',
+      'Alpha (copy)',
+      'Beta'
+    ])
+  })
+
+  it('copies the tunnel settings rather than sharing them', () => {
+    const saved = appData.saveConnection({
+      name: 'Bastioned',
+      ssh: { ...DEFAULT_SSH_CONFIG, enabled: true, host: 'bastion', username: 'deploy' },
+      options: { ...DEFAULT_SQLSERVER_OPTIONS, poolMax: 7 }
+    })
+    const copy = appData.duplicateConnection(saved.id)!
+    appData.saveConnection({
+      id: copy.id,
+      name: copy.name,
+      ssh: { ...DEFAULT_SSH_CONFIG, enabled: true, host: 'other-bastion', username: 'deploy' }
+    })
+
+    expect(appData.getConnectionWithSecrets(saved.id)!.ssh.host).toBe('bastion')
+    expect(appData.getConnectionWithSecrets(copy.id)!.ssh.host).toBe('other-bastion')
+    expect(appData.getConnectionWithSecrets(copy.id)!.options.poolMax).toBe(7)
   })
 
   it('returns null when duplicating something that is not there', () => {

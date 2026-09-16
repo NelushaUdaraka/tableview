@@ -1,9 +1,23 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import type { ConnectionConfig, ConnectionStatus, SavedConnection } from '@shared/types'
+import type {
+  ConnectionConfig,
+  ConnectionSortDirection,
+  ConnectionSortKey,
+  ConnectionStatus,
+  SavedConnection
+} from '@shared/types'
+import {
+  defaultDirectionFor,
+  normaliseSortDirection,
+  normaliseSortKey,
+  sortConnections
+} from '../lib/sortConnections'
+import { useSettingsStore } from './settings'
 import { api } from '../lib/api'
 
 export const useConnectionStore = defineStore('connections', () => {
+  const settings = useSettingsStore()
   const saved = ref<SavedConnection[]>([])
   const statuses = ref<Record<string, ConnectionStatus>>({})
   const activeId = ref<string | null>(null)
@@ -24,15 +38,35 @@ export const useConnectionStore = defineStore('connections', () => {
    */
   const inSession = computed(() => activeId.value !== null)
 
-  /** Most-recently-used first, then alphabetical for never-used entries. */
-  const sorted = computed(() =>
-    [...saved.value].sort((a, b) => {
-      if (a.lastUsedAt && b.lastUsedAt) return b.lastUsedAt.localeCompare(a.lastUsedAt)
-      if (a.lastUsedAt) return -1
-      if (b.lastUsedAt) return 1
-      return a.name.localeCompare(b.name)
-    })
+  /**
+   * The order the list is read in, as the reader last left it.
+   *
+   * Kept in the settings rather than here so it survives a restart: a list
+   * that has to be re-sorted every morning is not sorted at all.
+   */
+  const sortKey = computed<ConnectionSortKey>(() =>
+    normaliseSortKey(settings.settings.connectionSort)
   )
+  const sortDirection = computed<ConnectionSortDirection>(() =>
+    normaliseSortDirection(settings.settings.connectionSortDirection)
+  )
+
+  const sorted = computed(() => sortConnections(saved.value, sortKey.value, sortDirection.value))
+
+  /** Sorts by `key`, opening it in the direction that key is worth reading in. */
+  function setSortKey(key: ConnectionSortKey): Promise<void> {
+    return settings.update({
+      connectionSort: key,
+      connectionSortDirection: defaultDirectionFor(key)
+    })
+  }
+
+  /** Reads the same key the other way round. */
+  function toggleSortDirection(): Promise<void> {
+    return settings.update({
+      connectionSortDirection: sortDirection.value === 'asc' ? 'desc' : 'asc'
+    })
+  }
 
   async function load(): Promise<void> {
     saved.value = await api.listConnections()
@@ -111,6 +145,10 @@ export const useConnectionStore = defineStore('connections', () => {
   return {
     saved,
     sorted,
+    sortKey,
+    sortDirection,
+    setSortKey,
+    toggleSortDirection,
     statuses,
     activeId,
     active,

@@ -217,7 +217,8 @@ steps.push({
 // what the name resolves to right now.
 await ev(`
   (() => {
-    const select = [...document.querySelectorAll('select')].find(
+    // Scoped to the form: the list screen behind it has pickers of its own.
+    const select = [...document.querySelectorAll('.form select')].find(
       (s) => [...s.options].some((o) => o.value === 'name')
     )
     select.value = 'name'
@@ -253,7 +254,8 @@ steps.push({
 // Back to an ID for the rest of the run.
 await ev(`
   (() => {
-    const select = [...document.querySelectorAll('select')].find(
+    // Scoped to the form: the list screen behind it has pickers of its own.
+    const select = [...document.querySelectorAll('.form select')].find(
       (s) => [...s.options].some((o) => o.value === 'instance-id')
     )
     select.value = 'instance-id'

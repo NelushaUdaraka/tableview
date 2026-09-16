@@ -11,8 +11,13 @@ TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind
 ## What's in phase 1
 
 **Connections**
-- Saved connections with name, host/port, default database and a most-recently-used list — each with
-  a colour that becomes the whole window's accent, so production never looks like staging
+- Saved connections with name, host/port and default database — each with a colour that becomes the
+  whole window's accent, so production never looks like staging
+- **Ordered the way you look for them** — the list opens on the connection made most recently and
+  re-sorts by name, last opened or endpoint, either way round. The choice is a setting rather than a
+  session's whim, so the list is in the same order tomorrow morning. A connection nobody has opened
+  yet has no last-opened time at all, so it sorts *after* the ones that have rather than leaping to
+  the top when the order is reversed.
 - SQL Server logins, Windows/NTLM (with domain), and Azure AD password auth
 - TLS options: `encrypt`, `trustServerCertificate`, named instances, `ApplicationIntent=ReadOnly`,
   connect/request timeouts, pool sizing, application name
@@ -470,6 +475,7 @@ src/
     ├── lib/schemaTree.ts     a table's structure as the sidebar tree shows it
     ├── lib/jsonCell.ts       which cells hold a document, and what is inside one
     ├── lib/tableCache.ts     the page a table tab keeps, and what counts as it changing
+    ├── lib/sortConnections.ts the orders the connection list can be read in
     ├── stores/               connections, schema, tabs (and panes), library,
     │                         settings, toasts, busy (the window's progress bar)
     ├── components/           title bar, grid, row panel (and its JSON tree),

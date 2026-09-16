@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { ConnectionConfig, SavedConnection } from '@shared/types'
+import type { ConnectionConfig, ConnectionSortKey, SavedConnection } from '@shared/types'
 import BaseModal from '../components/BaseModal.vue'
 import ConnectionForm from '../components/ConnectionForm.vue'
 import ContextMenu, { type MenuEntry } from '../components/ContextMenu.vue'
@@ -9,6 +9,7 @@ import { useCredentialsStore } from '../stores/credentials'
 import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toasts'
 import { onMenuAction } from '../lib/menuBus'
+import { CONNECTION_SORT_OPTIONS, describeSort } from '../lib/sortConnections'
 import { api } from '../lib/api'
 
 const connections = useConnectionStore()
@@ -35,6 +36,34 @@ const filtered = computed(() => {
       (entry.database ?? '').toLowerCase().includes(needle)
   )
 })
+
+/** How the active order reads, for the control that flips it. */
+const sortDescription = computed(() =>
+  describeSort(connections.sortKey, connections.sortDirection)
+)
+
+/**
+ * Re-sorts the list, and remembers the choice.
+ *
+ * The order is a setting, so changing it is a write that can fail; the list
+ * follows the setting, which means a failed write leaves the list as it was
+ * and the toast is the only way the reader would know.
+ */
+async function chooseSort(key: ConnectionSortKey): Promise<void> {
+  try {
+    await connections.setSortKey(key)
+  } catch (error) {
+    toasts.fromError('Could not change the sort order', error)
+  }
+}
+
+async function flipSortDirection(): Promise<void> {
+  try {
+    await connections.toggleSortDirection()
+  } catch (error) {
+    toasts.fromError('Could not change the sort order', error)
+  }
+}
 
 let unsubscribeMenu: (() => void) | null = null
 
@@ -228,6 +257,13 @@ function transportBadge(connection: SavedConnection): string | null {
   return null
 }
 
+/** The day a connection was made — the short form, since it sits under the row. */
+function createdOn(iso?: string): string | null {
+  if (!iso) return null
+  const time = Date.parse(iso)
+  return Number.isNaN(time) ? null : new Date(time).toLocaleDateString()
+}
+
 function relativeTime(iso?: string): string {
   if (!iso) return 'never opened'
   const delta = Date.now() - new Date(iso).getTime()
@@ -266,14 +302,39 @@ function relativeTime(iso?: string): string {
     </header>
 
     <div class="screen__body">
-      <div class="screen__search">
-        <span class="screen__search-glyph">⌕</span>
-        <input
-          v-model="search"
-          class="screen__search-input"
-          placeholder="Search connections…"
-          spellcheck="false"
-        />
+      <div class="screen__tools">
+        <div class="screen__search">
+          <span class="screen__search-glyph">⌕</span>
+          <input
+            v-model="search"
+            class="screen__search-input"
+            placeholder="Search connections…"
+            spellcheck="false"
+          />
+        </div>
+
+        <div class="screen__sort">
+          <label class="caps screen__sort-label" for="connection-sort">Sort by</label>
+          <select
+            id="connection-sort"
+            class="select screen__sort-select"
+            :value="connections.sortKey"
+            @change="chooseSort(($event.target as HTMLSelectElement).value as ConnectionSortKey)"
+          >
+            <option v-for="option in CONNECTION_SORT_OPTIONS" :key="option.key" :value="option.key">
+              {{ option.label }}
+            </option>
+          </select>
+          <!-- The caret says which way the list reads, and flips it. -->
+          <button
+            class="btn screen__sort-flip"
+            :title="sortDescription"
+            :aria-label="`Sort order: ${sortDescription}. Reverse it.`"
+            @click="flipSortDirection()"
+          >
+            {{ connections.sortDirection === 'asc' ? '↑' : '↓' }}
+          </button>
+        </div>
       </div>
 
       <div v-if="filtered.length === 0" class="empty-state">
@@ -334,7 +395,10 @@ function relativeTime(iso?: string): string {
             </div>
 
             <div class="row__cell row__cell--right row__time mono">
-              {{ relativeTime(connection.lastUsedAt) }}
+              <div class="truncate">{{ relativeTime(connection.lastUsedAt) }}</div>
+              <div v-if="createdOn(connection.createdAt)" class="row__sub truncate">
+                created {{ createdOn(connection.createdAt) }}
+              </div>
             </div>
 
             <div class="row__buttons">
@@ -442,7 +506,7 @@ function relativeTime(iso?: string): string {
 <style scoped>
 /* The seven tracks the header and every row share. */
 .screen {
-  --conn-cols: 6px minmax(0, 1.5fr) minmax(0, 2fr) 92px 92px 116px 254px;
+  --conn-cols: 6px minmax(0, 1.5fr) minmax(0, 2fr) 92px 92px 132px 240px;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -523,6 +587,13 @@ function relativeTime(iso?: string): string {
   padding: 24px 32px;
   overflow: hidden;
 }
+/* Search takes the width it is given; the sort control keeps its own. */
+.screen__tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+}
 .screen__search {
   display: flex;
   align-items: center;
@@ -532,7 +603,8 @@ function relativeTime(iso?: string): string {
   border: 1px solid var(--border-strong);
   background: var(--bg-input);
   max-width: 420px;
-  flex: 0 0 auto;
+  flex: 1 1 420px;
+  min-width: 0;
 }
 .screen__search:focus-within {
   border-color: var(--accent);
@@ -553,6 +625,34 @@ function relativeTime(iso?: string): string {
 }
 .screen__search-input::placeholder {
   color: var(--text-muted);
+}
+
+.screen__sort {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+.screen__sort-label {
+  white-space: nowrap;
+}
+.screen__sort-select {
+  width: auto;
+  min-width: 132px;
+  height: 38px;
+  font-family: var(--font-ui);
+}
+/* Square, and the search field's height: the three read as one strip. */
+.screen__sort-flip {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+.screen__sort-flip:hover:not(:disabled) {
+  color: var(--text-primary);
 }
 
 /* --- the connection table -------------------------------------------------- */

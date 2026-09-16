@@ -1,10 +1,13 @@
 /**
- * Duplicating a saved connection, in the real UI.
+ * The connection list screen, in the real UI.
  *
  * Duplicating exists to make editing easier — copy the connection that works,
- * change the one field that differs — so what this suite is really checking is
+ * change the one field that differs — so most of what this suite checks is
  * that the copy arrives ready to edit and that the original comes out of it
- * untouched. No database is needed: nothing here connects.
+ * untouched. The rest is what a list of five then needs: an order the reader
+ * chooses, which has to still be there after a restart, and a toast whose
+ * dismiss button is where they last saw it. No database is needed: nothing
+ * here connects.
  */
 import { spawn } from 'node:child_process'
 import { writeFileSync, mkdirSync } from 'node:fs'
@@ -235,6 +238,98 @@ check('cancelling leaves the copy alone', names, [
   'Staging reporting'
 ])
 await shot('05-final-list')
+
+// --- the order the list reads in -------------------------------------------
+// Five connections is the point at which "the order they were made in" stops
+// being the only order worth having. The picker is one setting, not one
+// session, which is what the reload at the end is for.
+const shownNames = () =>
+  ev(`JSON.stringify([...${ROWS}].map((r) => r.querySelector('.row__name').textContent.trim()))`)
+    .then(JSON.parse)
+
+/**
+ * Those same names in name order, sorted in the page.
+ *
+ * Collation is the browser's, not Node's: an expectation built out here would
+ * be testing that two ICU versions agree rather than that the screen sorted.
+ */
+const nameOrder = () => ev(`
+  JSON.stringify([...${ROWS}].map((r) => r.querySelector('.row__name').textContent.trim())
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })))
+`).then(JSON.parse)
+
+/** The names newest-made first — the order the list opens on. */
+const createdOrder = () => ev(`
+  (async () => JSON.stringify((await window.api.listConnections())
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .map((c) => c.name)))()
+`).then(JSON.parse)
+
+const pickSort = (key) => ev(`
+  (() => {
+    const el = document.querySelector('#connection-sort')
+    el.value = ${JSON.stringify(key)}
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+    return el.value
+  })()
+`)
+const sortState = async () => ({
+  key: await ev(`document.querySelector('#connection-sort').value`),
+  direction: await ev(`document.querySelector('.screen__sort-flip').textContent.trim()`)
+})
+
+steps.push({ step: 'default order', sort: await sortState(), names: await shownNames() })
+check('the list opens on the newest connection', await shownNames(), await createdOrder())
+check('and the picker says which order that is', await sortState(), { key: 'created', direction: '↓' })
+
+await pickSort('name')
+await waitFor(`document.querySelector('.screen__sort-flip').textContent.trim() === '↑'`, 'sorted by name')
+check('sorting by name reads A to Z', await shownNames(), await nameOrder())
+await shot('06-sorted-by-name')
+
+await ev(`document.querySelector('.screen__sort-flip').click()`)
+await waitFor(`document.querySelector('.screen__sort-flip').textContent.trim() === '↓'`, 'name order flipped')
+check('flipping it reads Z to A', await shownNames(), (await nameOrder()).reverse())
+
+// The order is a setting rather than a session: it is still there on the way
+// back in, which is the whole reason it is not kept in the store alone.
+await ev('location.reload()')
+await delay(1200)
+await send('Runtime.enable')
+await waitFor(`${ROWS}.length === 5`, 'the list again')
+steps.push({ step: 'order after reload', sort: await sortState(), names: await shownNames() })
+check('the order survives a reload', await sortState(), { key: 'name', direction: '↓' })
+check('and the rows come back in it', await shownNames(), (await nameOrder()).reverse())
+
+// --- where the dismiss button sits ------------------------------------------
+// Reported from the app: with a short message the ✕ ended up adrift in the
+// middle of the toast, because the message rather than the toast was deciding
+// where it went. Two toasts of very different lengths, side by side, is what
+// that looked like — so that is what this raises.
+await ev(`${row('Local dev')}.querySelector('.row__buttons .btn').click()`)
+await waitFor(`!!document.querySelector('.form__tabs')`, 'form on the Local dev copy')
+await ev(`document.querySelector('.form button[type=submit]').click()`)
+await waitFor(`document.querySelectorAll('.toast').length >= 2`, 'a long toast and a short one')
+const toasts = await ev(`
+  JSON.stringify([...document.querySelectorAll('.toast')].map((toast) => {
+    const box = toast.getBoundingClientRect()
+    const close = toast.querySelector('.toast__close').getBoundingClientRect()
+    return {
+      lines: toast.querySelector('.toast__message').textContent.trim().length,
+      width: Math.round(box.width),
+      fromRight: Math.round(box.right - close.right),
+      inside: close.right <= box.right && close.left >= box.left && close.top >= box.top
+    }
+  }))
+`).then(JSON.parse)
+steps.push({ step: 'toasts', toasts })
+check('the toasts are all one width', new Set(toasts.map((t) => t.width)).size, 1)
+check('so their dismiss buttons line up', new Set(toasts.map((t) => t.fromRight)).size, 1)
+check('and each one is inside its own toast', toasts.every((t) => t.inside), true)
+// Two messages of different lengths is the case that was wrong; if they came
+// out the same length this proved nothing.
+check('the two messages were different lengths', new Set(toasts.map((t) => t.lines)).size > 1, true)
+await shot('07-toasts')
 
 const rendererErrors = logs.join('').split('\n')
   .filter((l) => /ERROR|Uncaught/i.test(l))

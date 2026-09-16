@@ -524,6 +524,17 @@ export interface ExportRequest extends ExportOptions {
 // App preferences
 // ---------------------------------------------------------------------------
 
+/**
+ * What the connection screen orders the saved list by.
+ *
+ * A saved connection is found by the thing the reader remembers about it: the
+ * name they gave it, the last time they opened it, or simply that they made it
+ * this morning — which is why `created` is where the list starts.
+ */
+export type ConnectionSortKey = 'created' | 'name' | 'lastUsed' | 'host'
+
+export type ConnectionSortDirection = 'asc' | 'desc'
+
 export interface AppSettings {
   theme: 'dark' | 'light' | 'system'
   fontSize: number
@@ -538,6 +549,9 @@ export interface AppSettings {
   rowPanelWidth: number
   formatterKeywordCase: 'upper' | 'lower' | 'preserve'
   formatterIndent: number
+  /** How the connection screen sorts the saved list, and which way round. */
+  connectionSort: ConnectionSortKey
+  connectionSortDirection: ConnectionSortDirection
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -551,7 +565,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   showRowPanel: true,
   rowPanelWidth: 340,
   formatterKeywordCase: 'upper',
-  formatterIndent: 2
+  formatterIndent: 2,
+  connectionSort: 'created',
+  connectionSortDirection: 'desc'
 }
 
 export const DEFAULT_SQLSERVER_OPTIONS: SqlServerOptions = {

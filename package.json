@@ -24,6 +24,7 @@
     "test:watch": "vitest",
     "test:e2e": "scripts/e2e.sh all",
     "test:e2e:smoke": "scripts/e2e.sh smoke",
+    "test:e2e:connections": "scripts/e2e.sh connections",
     "test:e2e:workspace": "scripts/e2e.sh workspace",
     "test:e2e:editing": "scripts/e2e.sh editing",
     "test:e2e:table-ui": "scripts/e2e.sh table-ui",

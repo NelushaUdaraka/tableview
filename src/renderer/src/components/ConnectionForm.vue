@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
   ConnectionConfig,
   DEFAULT_SQLSERVER_OPTIONS,
@@ -15,15 +15,32 @@ import { isLoopbackHost } from '@shared/hosts'
 import { AWS_REGIONS, describeRegion, isRegionLike } from '@shared/aws/regions'
 import { api } from '../lib/api'
 
-const props = defineProps<{ connection: SavedConnection | null; busy?: boolean }>()
+const props = defineProps<{
+  connection: SavedConnection | null
+  busy?: boolean
+  /** Open with the name selected — what a fresh copy needs changed first. */
+  selectName?: boolean
+}>()
 const emit = defineEmits<{
   (event: 'save', value: Partial<ConnectionConfig> & { name: string }): void
+  /** Save these edits as a second connection, leaving this one as it was. */
+  (event: 'duplicate', value: Partial<ConnectionConfig> & { name: string }): void
   (event: 'test', value: Partial<ConnectionConfig>): void
   (event: 'cancel'): void
 }>()
 
 type Section = 'general' | 'tunnel' | 'advanced'
 const section = ref<Section>('general')
+
+const nameInput = ref<HTMLInputElement | null>(null)
+
+onMounted(() => {
+  if (!props.selectName) return
+  nameInput.value?.focus()
+  // Selected rather than just focused: "Prod (copy)" is a starting point to
+  // type over, not something to edit a word at a time.
+  nameInput.value?.select()
+})
 
 /** Exactly one transport is active; the radio keeps the flags in step. */
 type TunnelKind = 'none' | 'ssh' | 'ssm'
@@ -491,7 +508,12 @@ async function browseForKey(): Promise<void> {
       <div class="row">
         <label class="field" style="flex: 2">
           <span class="field__label">Connection name</span>
-          <input v-model="form.name" class="input" placeholder="Production reporting" />
+          <input
+            ref="nameInput"
+            v-model="form.name"
+            class="input"
+            placeholder="Production reporting"
+          />
           <span v-if="nameError" class="field__hint error-text">{{ nameError }}</span>
         </label>
         <div class="field" style="flex: 0 0 auto">
@@ -1018,6 +1040,16 @@ async function browseForKey(): Promise<void> {
         Test connection
       </button>
       <div style="flex: 1"></div>
+      <button
+        v-if="connection"
+        type="button"
+        class="btn btn--muted"
+        :disabled="!canSubmit"
+        title="Keep this connection as it is and save these settings as a second one"
+        @click="emit('duplicate', payload())"
+      >
+        Save as copy
+      </button>
       <button type="button" class="btn btn--muted" @click="emit('cancel')">Cancel</button>
       <button type="submit" class="btn btn--primary" :disabled="!canSubmit">Save</button>
     </footer>

@@ -53,9 +53,17 @@ export const useConnectionStore = defineStore('connections', () => {
     await load()
   }
 
-  async function duplicate(id: string): Promise<void> {
-    await api.duplicateConnection(id)
+  /**
+   * Copies a saved connection and hands the copy back.
+   *
+   * The caller gets the new record rather than just a refreshed list, because
+   * duplicating is a step on the way to editing: the screen opens the copy in
+   * the form straight afterwards.
+   */
+  async function duplicate(id: string): Promise<SavedConnection | null> {
+    const copy = await api.duplicateConnection(id)
     await load()
+    return copy
   }
 
   async function connect(id: string, password?: string): Promise<ConnectionStatus> {

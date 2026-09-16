@@ -17,6 +17,8 @@ const settings = useSettingsStore()
 const toasts = useToastStore()
 
 const editing = ref<SavedConnection | null>(null)
+/** The connection the open form is a copy of, when it is one. */
+const copiedFrom = ref<string | null>(null)
 const showForm = ref(false)
 const testing = ref(false)
 const search = ref('')
@@ -46,13 +48,21 @@ onMounted(() => {
 
 onBeforeUnmount(() => unsubscribeMenu?.())
 
+/** What the form's dialog is for, said above its title. */
+const formKicker = computed(() => {
+  if (!editing.value) return 'New connection'
+  return copiedFrom.value ? `Copy of ${copiedFrom.value}` : 'Edit connection'
+})
+
 function startNew(): void {
   editing.value = null
+  copiedFrom.value = null
   showForm.value = true
 }
 
 function startEdit(connection: SavedConnection): void {
   editing.value = connection
+  copiedFrom.value = null
   showForm.value = true
 }
 
@@ -114,10 +124,73 @@ async function remove(connection: SavedConnection): Promise<void> {
   toasts.info('Connection deleted')
 }
 
+/**
+ * Copies a connection and opens the copy in the form.
+ *
+ * Duplicating is how one connection becomes a variant of another — the same
+ * host with a different database, the same bastion with a different login —
+ * so the copy is only ever a step on the way to editing it. Leaving it in the
+ * list would mean hunting it down and clicking Edit; the form opens on it
+ * instead, with the password and the AWS credentials already carried over.
+ */
+async function duplicate(connection: SavedConnection): Promise<void> {
+  try {
+    const copy = await connections.duplicate(connection.id)
+    if (!copy) {
+      toasts.error('Could not duplicate the connection', 'It is no longer saved.')
+      return
+    }
+    editing.value = copy
+    copiedFrom.value = connection.name
+    showForm.value = true
+    toasts.success(`Copied “${connection.name}”`, `Editing “${copy.name}”`)
+  } catch (error) {
+    toasts.fromError('Could not duplicate the connection', error)
+  }
+}
+
+/**
+ * Saves the form's edits as a second connection, leaving the open one alone.
+ *
+ * The copy is made in the main process first so the secrets come with it: the
+ * form only holds what has been typed into it, and a blank password means
+ * "keep the stored one", which is only true of a record that already has one.
+ * The edits then land on the copy exactly as Save would have landed them on
+ * the original.
+ */
+async function saveAsCopy(input: Partial<ConnectionConfig> & { name: string }): Promise<void> {
+  const source = editing.value
+  if (!source) return
+
+  try {
+    const copy = await connections.duplicate(source.id)
+    if (!copy) {
+      toasts.error('Could not duplicate the connection', 'It is no longer saved.')
+      return
+    }
+
+    // A name left untouched would give the copy the original's, and two
+    // identical rows in the list; the generated one is what tells them apart.
+    const renamed = input.name.trim() === source.name.trim() ? copy.name : input.name.trim()
+    try {
+      editing.value = await connections.save({ ...input, id: copy.id, name: renamed })
+    } catch (error) {
+      // Don't leave a half-made copy behind when it was the edits that failed —
+      // and report why the save failed, not why the tidy-up did.
+      await connections.remove(copy.id).catch(() => undefined)
+      throw error
+    }
+    copiedFrom.value = source.name
+    toasts.success('Saved as a copy', `“${editing.value.name}” — “${source.name}” is unchanged`)
+  } catch (error) {
+    toasts.fromError('Could not duplicate the connection', error)
+  }
+}
+
 const menuItems: MenuEntry[] = [
   { label: 'Connect', action: 'connect' },
   { label: 'Edit…', action: 'edit' },
-  { label: 'Duplicate', action: 'duplicate' },
+  { label: 'Duplicate…', action: 'duplicate' },
   { separator: true, label: '' },
   { label: 'Delete', action: 'delete', danger: true }
 ]
@@ -127,7 +200,7 @@ async function onMenuSelect(action: string): Promise<void> {
   if (!connection) return
   if (action === 'connect') await open(connection)
   else if (action === 'edit') startEdit(connection)
-  else if (action === 'duplicate') await connections.duplicate(connection.id)
+  else if (action === 'duplicate') await duplicate(connection)
   else if (action === 'delete') await remove(connection)
 }
 
@@ -265,6 +338,13 @@ function relativeTime(iso?: string): string {
             </div>
 
             <div class="row__buttons">
+              <button
+                class="btn btn--sm btn--muted"
+                title="Copy this connection and edit the copy"
+                @click.stop="duplicate(connection)"
+              >
+                Duplicate
+              </button>
               <button class="btn btn--sm btn--muted" @click.stop="startEdit(connection)">
                 Edit
               </button>
@@ -300,7 +380,7 @@ function relativeTime(iso?: string): string {
 
     <BaseModal
       v-if="showForm"
-      :kicker="editing ? 'Edit connection' : 'New connection'"
+      :kicker="formKicker"
       :title="editing?.name || 'Untitled connection'"
       width="720px"
       flush
@@ -309,7 +389,9 @@ function relativeTime(iso?: string): string {
       <ConnectionForm
         :connection="editing"
         :busy="testing"
+        :select-name="Boolean(copiedFrom)"
         @save="save"
+        @duplicate="saveAsCopy"
         @test="test"
         @cancel="showForm = false"
       />
@@ -360,7 +442,7 @@ function relativeTime(iso?: string): string {
 <style scoped>
 /* The seven tracks the header and every row share. */
 .screen {
-  --conn-cols: 6px minmax(0, 1.5fr) minmax(0, 2fr) 92px 92px 116px 168px;
+  --conn-cols: 6px minmax(0, 1.5fr) minmax(0, 2fr) 92px 92px 116px 254px;
   display: flex;
   flex-direction: column;
   height: 100%;

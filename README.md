@@ -27,6 +27,14 @@ TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind
   ID and resolve it on every connect, so a redeployed bastion needs no edit at all
 - Passwords and SSH secrets encrypted at rest — the OS keystore via Electron `safeStorage` where
   available, AES-256-GCM under a `0600` key file otherwise. Secrets never reach the renderer.
+- **Duplicate, then edit** — most connections are a variant of one that already works, so
+  *Duplicate* copies a saved connection whole (password, SSH passphrase and AWS credentials
+  included) and opens the copy in the form with its name selected, ready to be typed over. The
+  copy is named apart from its source — `Prod (copy)`, then `Prod (copy 2)`, never
+  `Prod (copy) (copy)` — and the original is not touched. From inside the form, *Save as copy*
+  does the same the other way round: change a field, fork it, and the connection you opened stays
+  as it was. A copy is saved the moment it is made, so *Cancel* stops editing it rather than
+  un-making it.
 - Test-connection button that reports the server edition and version
 - **Kept alive, and put back when it drops** — an idle connection is poked once a minute (the
   *Keepalive* option; 0 turns it off) so an SSM session, an SSH forward or a firewall does not tear
@@ -392,7 +400,7 @@ and flips `AllowTcpForwarding` on, which the `linuxserver/openssh-server` image 
 ### End-to-end
 
 ```bash
-scripts/e2e.sh all          # or: smoke | workspace | editing | table-ui | ssm-form
+scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | ssm-form
 ```
 
 On a headless box it starts Xvfb itself. It needs Electron's usual Linux libraries:
@@ -406,6 +414,10 @@ apt-get install -y xvfb libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2
 The suites:
 - **smoke** — the window opens, the preload bridge exposes the API, settings load, IPC errors arrive
   as real `Error`s, and a saved password never appears in renderer-visible data
+- **connections** — duplicates a saved connection from the list and from inside the form, checks
+  the copy opens ready to edit with the secrets carried over, that the original comes through
+  untouched either way, and that a copy of a copy is numbered rather than suffixed twice. Needs no
+  database: nothing in it connects.
 - **workspace** — connects to the container, loads the schema tree, opens a table, reads the grid,
   checks the structure tab, types and runs a JOIN in the editor, provokes a SQL error, toggles theme
 - **editing** — edits a cell, stages an insert, applies the change set, verifies the rows in the
@@ -447,6 +459,7 @@ src/
 │   ├── aws/credentials.ts    parses the AWS portal's credential blocks
 │   ├── aws/regions.ts        the region list the connection form offers
 │   ├── accent.ts             a connection's colour, and the shades derived from it
+│   ├── copyName.ts           what a duplicated connection is called
 │   ├── sql/                  identifier escaping, T-SQL lexer, query builders
 │   ├── serialize.ts          driver values ⇄ IPC-safe cell values
 │   ├── export.ts             CSV/JSON/SQL/Markdown

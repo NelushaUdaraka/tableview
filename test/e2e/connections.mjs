@@ -1,10 +1,13 @@
 /**
- * Duplicating a saved connection, in the real UI.
+ * The connection list screen, in the real UI.
  *
  * Duplicating exists to make editing easier — copy the connection that works,
- * change the one field that differs — so what this suite is really checking is
+ * change the one field that differs — so most of what this suite checks is
  * that the copy arrives ready to edit and that the original comes out of it
- * untouched. No database is needed: nothing here connects.
+ * untouched. The rest is what a list of five then needs: an order the reader
+ * chooses, which has to still be there after a restart, and a toast whose
+ * dismiss button is where they last saw it. No database is needed: nothing
+ * here connects.
  */
 import { spawn } from 'node:child_process'
 import { writeFileSync, mkdirSync } from 'node:fs'
@@ -119,6 +122,57 @@ const ROWS = `document.querySelectorAll('.table__body .row')`
 const row = (name) =>
   `[...${ROWS}].find((r) => r.querySelector('.row__name').textContent.trim() === ${JSON.stringify(name)})`
 
+/**
+ * A click the way a mouse makes one — mousedown, then mouseup.
+ *
+ * `element.click()` dispatches neither, so anything that listens for a
+ * mousedown (a menu's click-away, for one) never sees it. Takes the same kind
+ * of expression `row()` builds rather than a selector.
+ */
+const clickOn = async (expression, label) => {
+  const at = await ev(`
+    (() => {
+      const el = ${expression}
+      if (!el) return null
+      const box = el.getBoundingClientRect()
+      const x = Math.round(box.left + box.width / 2)
+      const y = Math.round(box.top + box.height / 2)
+      // An open menu covers the rows under it, and a click that lands on one
+      // of its items instead is a confusing way to find that out.
+      const top = document.elementFromPoint(x, y)
+      return JSON.stringify({ x, y, hit: el === top || el.contains(top) })
+    })()
+  `).then((v) => (v ? JSON.parse(v) : null))
+  if (!at) bail('nothing to click for ' + label)
+  if (!at.hit) bail(`${label} is under something else`)
+  for (const type of ['mousePressed', 'mouseReleased']) {
+    await send('Input.dispatchMouseEvent', { x: at.x, y: at.y, type, button: 'left', clickCount: 1 })
+  }
+}
+
+/**
+ * Picks an item out of a row's ⋮ menu.
+ *
+ * Everything but Connect lives there now, so this is how the suite edits and
+ * duplicates. `.click()` dispatches no mousedown, which is what keeps the
+ * menu's own click-away from closing it before the item is chosen.
+ */
+const rowMenu = async (name, label) => {
+  await ev(`${row(name)}.querySelector('.row__menu').click()`)
+  await waitFor(`!!document.querySelector('.menu')`, `the ⋮ menu on ${name}`)
+  const clicked = await ev(`
+    (() => {
+      const item = [...document.querySelectorAll('.menu .menu__item')]
+        .find((b) => b.textContent.trim().startsWith(${JSON.stringify(label)}))
+      if (!item) return null
+      item.click()
+      return item.textContent.trim()
+    })()
+  `)
+  if (!clicked) bail(`no ${label} in the ⋮ menu on ${name}`)
+  return clicked
+}
+
 await send('Runtime.enable'); await send('Page.enable')
 await waitFor(`!!document.querySelector('.brand__title')`, 'connection screen')
 
@@ -142,9 +196,60 @@ await send('Runtime.enable')
 await waitFor(`${ROWS}.length === 2`, 'both rows')
 await shot('01-list')
 
+// --- what a row offers --------------------------------------------------
+// Connect is the one thing a row is for; the rest moved behind its ⋮, so what
+// that menu holds, and where it opens, is the row's whole vocabulary now.
+const menuOf = (name) => `${row(name)}.querySelector('.row__menu')`
+const menuItemLabels = () =>
+  ev(`JSON.stringify([...document.querySelectorAll('.menu .menu__item')].map((b) => b.textContent.trim()))`)
+    .then(JSON.parse)
+/** Where the open menu sits, relative to the button that opened it. */
+const menuAnchor = (name) => ev(`
+  (() => {
+    const button = ${menuOf(name)}.getBoundingClientRect()
+    const menu = document.querySelector('.menu').getBoundingClientRect()
+    return JSON.stringify({
+      below: menu.top >= button.bottom,
+      reaches: Math.round(menu.right - button.right) >= 0,
+      onScreen: menu.right <= window.innerWidth && menu.left >= 0 && menu.bottom <= window.innerHeight
+    })
+  })()
+`).then(JSON.parse)
+
+check('the row shows Connect and nothing else', await ev(`
+  JSON.stringify([...${row('Local dev')}.querySelectorAll('.row__buttons .btn')].map((b) => b.textContent.trim()))
+`).then(JSON.parse), ['Connect', '⋮'])
+
+await clickOn(menuOf('Local dev'), 'the ⋮ on Local dev')
+await waitFor(`!!document.querySelector('.menu')`, 'the ⋮ menu')
+const rowActions = await menuItemLabels()
+steps.push({ step: 'row menu', actions: rowActions, anchor: await menuAnchor('Local dev') })
+check('its ⋮ carries the rest', rowActions, ['Connect', 'Edit…', 'Duplicate…', 'Delete'])
+check('opened under the button that raised it', await menuAnchor('Local dev'), {
+  below: true, reaches: true, onScreen: true
+})
+await shot('01b-row-menu')
+
+// The button closes what it opened, rather than reopening it under itself.
+await clickOn(menuOf('Local dev'), 'the ⋮ again')
+await waitFor(`!document.querySelector('.menu')`, 'the menu closed')
+
+// Another row's ⋮ moves the menu to that row rather than leaving it where it
+// was. Opened from the lower row and moved up, because a menu hangs below the
+// button that raised it and would otherwise be sitting on the one clicked next.
+await clickOn(menuOf('Production reporting'), 'the ⋮ on Production reporting')
+await waitFor(`!!document.querySelector('.menu')`, 'that row\u2019s menu')
+await clickOn(menuOf('Local dev'), 'the ⋮ one row up')
+await waitFor(`!!document.querySelector('.menu')`, 'the menu again')
+check('another row re-anchors it', await menuAnchor('Local dev'), {
+  below: true, reaches: true, onScreen: true
+})
+await clickOn(menuOf('Local dev'), 'the ⋮ once more')
+await waitFor(`!document.querySelector('.menu')`, 'the menu closed again')
+
 // Duplicate from the list. The copy opens in the form with its name selected,
 // because renaming it is the first thing anyone does next.
-await ev(`${row('Production reporting')}.querySelector('.row__buttons .btn').click()`)
+await rowMenu('Production reporting', 'Duplicate')
 await waitFor(`!!document.querySelector('.form__tabs')`, 'form on the copy')
 const opened = {
   step: 'duplicated from the list',
@@ -184,7 +289,7 @@ await shot('03-list-after-save')
 
 // The other route: open a connection, change a field, and fork it from inside
 // the form. The edits land on the copy and nowhere else.
-await ev(`${row('Production reporting')}.querySelectorAll('.row__buttons .btn')[1].click()`)
+await rowMenu('Production reporting', 'Edit')
 await waitFor(`!!document.querySelector('.form__tabs')`, 'edit form')
 await ev(`
   (() => {
@@ -215,7 +320,7 @@ await shot('04-save-as-copy')
 // Copies of copies number rather than stack: never "Prod (copy) (copy)".
 await ev(`document.querySelector('.modal__close').click()`)
 await waitFor(`!document.querySelector('.form__tabs')`, 'form closed')
-await ev(`${row('Production reporting (copy)')}.querySelector('.row__buttons .btn').click()`)
+await rowMenu('Production reporting (copy)', 'Duplicate')
 await waitFor(`!!document.querySelector('.form__tabs')`, 'form on the third copy')
 const numbered = await ev(`document.querySelector('.form input.input').value`)
 steps.push({ step: 'copy of a copy', name: numbered })
@@ -235,6 +340,207 @@ check('cancelling leaves the copy alone', names, [
   'Staging reporting'
 ])
 await shot('05-final-list')
+
+// --- the order the list reads in -------------------------------------------
+// Five connections is the point at which "the order they were made in" stops
+// being the only order worth having. The picker is one setting, not one
+// session, which is what the reload at the end is for.
+const shownNames = () =>
+  ev(`JSON.stringify([...${ROWS}].map((r) => r.querySelector('.row__name').textContent.trim()))`)
+    .then(JSON.parse)
+
+/**
+ * Those same names in name order, sorted in the page.
+ *
+ * Collation is the browser's, not Node's: an expectation built out here would
+ * be testing that two ICU versions agree rather than that the screen sorted.
+ */
+const nameOrder = () => ev(`
+  JSON.stringify([...${ROWS}].map((r) => r.querySelector('.row__name').textContent.trim())
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })))
+`).then(JSON.parse)
+
+/** The names newest-made first — the order the list opens on. */
+const createdOrder = () => ev(`
+  (async () => JSON.stringify((await window.api.listConnections())
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .map((c) => c.name)))()
+`).then(JSON.parse)
+
+const pickSort = (key) => ev(`
+  (() => {
+    const el = document.querySelector('#connection-sort')
+    el.value = ${JSON.stringify(key)}
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+    return el.value
+  })()
+`)
+const sortState = async () => ({
+  key: await ev(`document.querySelector('#connection-sort').value`),
+  direction: await ev(`document.querySelector('.screen__sort-flip').textContent.trim()`)
+})
+
+steps.push({ step: 'default order', sort: await sortState(), names: await shownNames() })
+check('the list opens on the newest connection', await shownNames(), await createdOrder())
+check('and the picker says which order that is', await sortState(), { key: 'created', direction: '↓' })
+
+await pickSort('name')
+await waitFor(`document.querySelector('.screen__sort-flip').textContent.trim() === '↑'`, 'sorted by name')
+check('sorting by name reads A to Z', await shownNames(), await nameOrder())
+await shot('06-sorted-by-name')
+
+await ev(`document.querySelector('.screen__sort-flip').click()`)
+await waitFor(`document.querySelector('.screen__sort-flip').textContent.trim() === '↓'`, 'name order flipped')
+check('flipping it reads Z to A', await shownNames(), (await nameOrder()).reverse())
+
+// The order is a setting rather than a session: it is still there on the way
+// back in, which is the whole reason it is not kept in the store alone.
+await ev('location.reload()')
+await delay(1200)
+await send('Runtime.enable')
+await waitFor(`${ROWS}.length === 5`, 'the list again')
+steps.push({ step: 'order after reload', sort: await sortState(), names: await shownNames() })
+check('the order survives a reload', await sortState(), { key: 'name', direction: '↓' })
+check('and the rows come back in it', await shownNames(), (await nameOrder()).reverse())
+
+// --- groups ------------------------------------------------------------------
+// A group is a name a connection carries rather than a record of its own, so
+// the first one has to be typed into the form; once it exists the row menu can
+// file the others under it.
+const headings = () => ev(`
+  JSON.stringify([...document.querySelectorAll('.group')].map((g) => ({
+    name: g.querySelector('.group__name').textContent.trim(),
+    count: Number(g.querySelector('.group__count').textContent.trim()),
+    open: g.getAttribute('aria-expanded') === 'true'
+  })))
+`).then(JSON.parse)
+
+/** Files a connection under a group through its ⋮, submenu and all. */
+const moveToGroup = async (name, group) => {
+  await ev(`${row(name)}.querySelector('.row__menu').click()`)
+  await waitFor(`!!document.querySelector('.menu')`, `the ⋮ menu on ${name}`)
+  // "Move to" opens on hover rather than on a click, so the row is entered.
+  await ev(`
+    (() => {
+      const entry = [...document.querySelectorAll('.menu .menu__row')]
+        .find((r) => r.textContent.includes('Move to'))
+      entry.dispatchEvent(new MouseEvent('mouseenter'))
+    })()
+  `)
+  await waitFor(`!!document.querySelector('.menu--sub')`, 'the Move to submenu')
+  const clicked = await ev(`
+    (() => {
+      const item = [...document.querySelectorAll('.menu--sub .menu__item')]
+        .find((b) => b.textContent.trim() === ${JSON.stringify(group)})
+      if (!item) return null
+      item.click()
+      return item.textContent.trim()
+    })()
+  `)
+  if (!clicked) bail(`no “${group}” to move ${name} into`)
+}
+
+check('nothing is filed to begin with', await headings(), [])
+
+await rowMenu('Local dev', 'Edit')
+await waitFor(`!!document.querySelector('.form__tabs')`, 'the form, to name a group')
+await setInput('.form input[list="connection-groups"]', 'Everyday')
+await ev(`document.querySelector('.form button[type=submit]').click()`)
+await waitFor(`!document.querySelector('.form__tabs')`, 'form closed')
+await waitFor(`!!document.querySelector('.group')`, 'the first heading')
+steps.push({ step: 'first group', headings: await headings() })
+// Four connections were never filed, so they gather under one quiet heading.
+check('naming a group in the form makes one', await headings(), [
+  { name: 'Everyday', count: 1, open: true },
+  { name: 'Ungrouped', count: 4, open: true }
+])
+
+await moveToGroup('Staging reporting', 'Everyday')
+await waitFor(`${row('Staging reporting')} !== undefined`, 'the moved row')
+check('the ⋮ files another one under it', await headings(), [
+  { name: 'Everyday', count: 2, open: true },
+  { name: 'Ungrouped', count: 3, open: true }
+])
+
+const namesUnder = (group) => ev(`
+  (() => {
+    const heads = [...document.querySelectorAll('.table__body > *')]
+    const start = heads.findIndex((el) => el.classList.contains('group') &&
+      el.querySelector('.group__name').textContent.trim() === ${JSON.stringify(group)})
+    const names = []
+    for (const el of heads.slice(start + 1)) {
+      if (el.classList.contains('group')) break
+      names.push(el.querySelector('.row__name').textContent.trim())
+    }
+    return JSON.stringify(names)
+  })()
+`).then(JSON.parse)
+check('and the rows sit under their own heading', (await namesUnder('Everyday')).sort(), [
+  'Local dev',
+  'Staging reporting'
+])
+
+// A heading folds the group away, and says so to anything reading the screen.
+await clickOn(
+  `[...document.querySelectorAll('.group')].find((g) => g.querySelector('.group__name').textContent.trim() === 'Everyday')`,
+  'the Everyday heading'
+)
+await waitFor(`${ROWS}.length === 3`, 'the folded list')
+check('folding one hides its rows and nothing else', await headings(), [
+  { name: 'Everyday', count: 2, open: false },
+  { name: 'Ungrouped', count: 3, open: true }
+])
+await shot('06b-groups-folded')
+
+// Searching reaches into a folded group: the row being typed for is exactly
+// the one a closed heading would be hiding.
+await setInput('.screen__search-input', 'staging')
+await waitFor(`${ROWS}.length === 1`, 'the search result')
+check('a search reaches into the fold', await shownNames(), ['Staging reporting'])
+await setInput('.screen__search-input', '')
+await waitFor(`${ROWS}.length === 3`, 'the folded list again')
+
+// Taking the last one out of a group takes the group with it.
+await clickOn(
+  `[...document.querySelectorAll('.group')].find((g) => g.querySelector('.group__name').textContent.trim() === 'Everyday')`,
+  'the Everyday heading again'
+)
+await waitFor(`${ROWS}.length === 5`, 'the whole list')
+await moveToGroup('Local dev', 'No group')
+await moveToGroup('Staging reporting', 'No group')
+await waitFor(`document.querySelectorAll('.group').length === 0`, 'no headings left')
+steps.push({ step: 'groups emptied', headings: await headings() })
+check('emptying a group removes it', await headings(), [])
+
+// --- where the dismiss button sits ------------------------------------------
+// Reported from the app: with a short message the ✕ ended up adrift in the
+// middle of the toast, because the message rather than the toast was deciding
+// where it went. Two toasts of very different lengths, side by side, is what
+// that looked like — so that is what this raises.
+await rowMenu('Local dev', 'Duplicate')
+await waitFor(`!!document.querySelector('.form__tabs')`, 'form on the Local dev copy')
+await ev(`document.querySelector('.form button[type=submit]').click()`)
+await waitFor(`document.querySelectorAll('.toast').length >= 2`, 'a long toast and a short one')
+const toasts = await ev(`
+  JSON.stringify([...document.querySelectorAll('.toast')].map((toast) => {
+    const box = toast.getBoundingClientRect()
+    const close = toast.querySelector('.toast__close').getBoundingClientRect()
+    return {
+      lines: toast.querySelector('.toast__message').textContent.trim().length,
+      width: Math.round(box.width),
+      fromRight: Math.round(box.right - close.right),
+      inside: close.right <= box.right && close.left >= box.left && close.top >= box.top
+    }
+  }))
+`).then(JSON.parse)
+steps.push({ step: 'toasts', toasts })
+check('the toasts are all one width', new Set(toasts.map((t) => t.width)).size, 1)
+check('so their dismiss buttons line up', new Set(toasts.map((t) => t.fromRight)).size, 1)
+check('and each one is inside its own toast', toasts.every((t) => t.inside), true)
+// Two messages of different lengths is the case that was wrong; if they came
+// out the same length this proved nothing.
+check('the two messages were different lengths', new Set(toasts.map((t) => t.lines)).size > 1, true)
+await shot('07-toasts')
 
 const rendererErrors = logs.join('').split('\n')
   .filter((l) => /ERROR|Uncaught/i.test(l))

@@ -11,6 +11,8 @@
 export type MenuAction =
   | 'connection:new'
   | 'connection:manage'
+  | 'connections:import'
+  | 'connections:export'
   | 'connection:disconnect'
   | 'tab:new-query'
   | 'tab:close'
@@ -124,6 +126,8 @@ export function buildMenuModel(platform: string): MenuModel[] {
           accelerator: 'CmdOrCtrl+Shift+M',
           action: 'connection:manage'
         },
+        { label: 'Import Connections…', action: 'connections:import' },
+        { label: 'Export Connections…', action: 'connections:export' },
         SEPARATOR,
         { label: 'New Query Tab', accelerator: 'CmdOrCtrl+T', action: 'tab:new-query' },
         { label: 'Move Tab to New Window', action: 'tab:detach' },

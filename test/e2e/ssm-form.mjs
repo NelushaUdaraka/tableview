@@ -217,7 +217,8 @@ steps.push({
 // what the name resolves to right now.
 await ev(`
   (() => {
-    const select = [...document.querySelectorAll('select')].find(
+    // Scoped to the form: the list screen behind it has pickers of its own.
+    const select = [...document.querySelectorAll('.form select')].find(
       (s) => [...s.options].some((o) => o.value === 'name')
     )
     select.value = 'name'
@@ -253,7 +254,8 @@ steps.push({
 // Back to an ID for the rest of the run.
 await ev(`
   (() => {
-    const select = [...document.querySelectorAll('select')].find(
+    // Scoped to the form: the list screen behind it has pickers of its own.
+    const select = [...document.querySelectorAll('.form select')].find(
       (s) => [...s.options].some((o) => o.value === 'instance-id')
     )
     select.value = 'instance-id'
@@ -343,7 +345,9 @@ steps.push({
 })
 
 // Reopen the saved connection: the summary should be there, the box empty.
-await ev(`[...document.querySelectorAll('.row__buttons .btn')].find(b => b.textContent.includes('Edit')).click()`)
+await ev(`document.querySelector('.row__menu').click()`)
+await waitFor(`!!document.querySelector('.menu')`, 'the row\u2019s ⋮ menu')
+await ev(`[...document.querySelectorAll('.menu .menu__item')].find(b => b.textContent.trim().startsWith('Edit')).click()`)
 await waitFor(`!!document.querySelector('.form__tabs')`, 'edit form')
 await ev(`[...document.querySelectorAll('.form__tab')].find(t => t.textContent.includes('Tunnel')).click()`)
 await waitFor(`!!document.querySelector('.creds__current')`, 'stored credential summary')

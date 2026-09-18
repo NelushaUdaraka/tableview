@@ -27,12 +27,13 @@ export const useSettingsStore = defineStore('settings', () => {
   })
 
   function applyTheme(): void {
-    document.documentElement.setAttribute('data-theme', resolvedTheme.value)
-    document.documentElement.style.setProperty('--font-size', `${settings.value.fontSize}px`)
-    document.documentElement.style.setProperty(
-      '--font-mono',
-      settings.value.editorFontFamily
-    )
+    // Same reason as the media query above: the store is also built where there
+    // is no document to paint — the unit tests run in Node.
+    const root = globalThis.document?.documentElement
+    if (!root) return
+    root.setAttribute('data-theme', resolvedTheme.value)
+    root.style.setProperty('--font-size', `${settings.value.fontSize}px`)
+    root.style.setProperty('--font-mono', settings.value.editorFontFamily)
   }
 
   watch(resolvedTheme, applyTheme, { immediate: false })

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { RoutineObject, SchemaObject } from '@shared/types'
+import { asCreateOrAlter } from '@shared/sql/statements'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
 import ObjectStructureTree from './ObjectStructureTree.vue'
 import { useConnectionStore } from '../stores/connections'
@@ -125,7 +126,13 @@ async function onMenuSelect(action: string): Promise<void> {
         break
       case 'definition': {
         const definition = await api.getObjectDefinition(id, target.schema, target.name)
-        emit('open-sql', definition ?? '-- no definition available', target.name)
+        // Opened as CREATE OR ALTER, so running the tab saves an edit back to
+        // the database instead of failing on the object that is already there.
+        emit(
+          'open-sql',
+          definition ? asCreateOrAlter(definition) : '-- no definition available',
+          target.name
+        )
         break
       }
       case 'exec':

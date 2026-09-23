@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  asCreateOrAlter,
   returnsRows,
   splitBatches,
   splitStatements,
@@ -180,5 +181,33 @@ describe('statementKind / returnsRows', () => {
     expect(returnsRows('UPDATE t SET a = 1')).toBe(false)
     // An OUTPUT clause makes a DML statement return rows too.
     expect(returnsRows('DELETE FROM t OUTPUT deleted.id')).toBe(true)
+  })
+})
+
+describe('asCreateOrAlter', () => {
+  it('rewrites a procedure definition past its header comments', () => {
+    const sql = '-- Author: me\n/* notes */\nCREATE PROCEDURE [dbo].[p] AS SELECT 1'
+    expect(asCreateOrAlter(sql)).toBe(
+      '-- Author: me\n/* notes */\nCREATE OR ALTER PROCEDURE [dbo].[p] AS SELECT 1'
+    )
+  })
+
+  it('handles functions, views, triggers and PROC, in any case', () => {
+    expect(asCreateOrAlter('create function f() returns int as begin return 1 end')).toBe(
+      'create OR ALTER function f() returns int as begin return 1 end'
+    )
+    expect(asCreateOrAlter('CREATE VIEW v AS SELECT 1')).toBe('CREATE OR ALTER VIEW v AS SELECT 1')
+    expect(asCreateOrAlter('CREATE PROC p AS SELECT 1')).toBe('CREATE OR ALTER PROC p AS SELECT 1')
+    expect(asCreateOrAlter('CREATE TRIGGER t ON x AFTER INSERT AS SELECT 1')).toBe(
+      'CREATE OR ALTER TRIGGER t ON x AFTER INSERT AS SELECT 1'
+    )
+  })
+
+  it('leaves everything else alone', () => {
+    const already = 'CREATE OR ALTER PROCEDURE p AS SELECT 1'
+    expect(asCreateOrAlter(already)).toBe(already)
+    expect(asCreateOrAlter('CREATE TABLE t (id int)')).toBe('CREATE TABLE t (id int)')
+    expect(asCreateOrAlter('SELECT 1 -- CREATE PROCEDURE')).toBe('SELECT 1 -- CREATE PROCEDURE')
+    expect(asCreateOrAlter('-- CREATE PROCEDURE p\nSELECT 1')).toBe('-- CREATE PROCEDURE p\nSELECT 1')
   })
 })

@@ -336,3 +336,27 @@ export function returnsRows(sql: string): boolean {
   // INSERT/UPDATE/DELETE with an OUTPUT clause also return rows.
   return /\bOUTPUT\b/i.test(stripComments(sql))
 }
+
+/**
+ * Turns a module's stored definition into a script that saves it back.
+ *
+ * `OBJECT_DEFINITION` returns the `CREATE PROCEDURE …` the object was made
+ * with, and running that against a database that already has the object
+ * fails with "There is already an object named …". `CREATE OR ALTER`
+ * (SQL Server 2016 SP1+) replaces it in place, keeping its permissions — so
+ * the definition tab is an editor for the object rather than a copy of it.
+ * Anything that is not a leading `CREATE` of a module is returned untouched.
+ */
+export function asCreateOrAlter(definition: string): string {
+  for (const token of tokenize(definition)) {
+    if (token.kind === 'line-comment' || token.kind === 'block-comment') continue
+    if (token.kind !== 'code') return definition
+    const text = definition.slice(token.start, token.end)
+    if (text.trim() === '') continue
+    const match = /^(\s*)CREATE(\s+)(?!OR\s+ALTER\b)(PROC|PROCEDURE|FUNCTION|VIEW|TRIGGER)\b/i.exec(text)
+    if (!match) return definition
+    const at = token.start + match[1].length + 'CREATE'.length
+    return `${definition.slice(0, at)} OR ALTER${definition.slice(at)}`
+  }
+  return definition
+}

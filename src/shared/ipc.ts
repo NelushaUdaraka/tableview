@@ -50,6 +50,11 @@ export interface DetachedTab {
   table?: string
   objectType?: SchemaObjectType
   view?: 'data' | 'structure'
+  /**
+   * How often the table re-reads itself, when it does: a table being watched
+   * is the one most likely to be dragged out onto a screen of its own.
+   */
+  autoRefresh?: number
 }
 
 export interface DetachRequest {

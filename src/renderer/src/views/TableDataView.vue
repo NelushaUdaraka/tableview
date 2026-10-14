@@ -38,6 +38,13 @@ import SplitPane from '../components/SplitPane.vue'
 import TableViewSwitch from '../components/TableViewSwitch.vue'
 import { exportRows } from '@shared/export'
 import { columnMenuItems } from '../lib/columnMenu'
+import {
+  AUTO_REFRESH_CHOICES,
+  autoRefreshChoice,
+  autoRefreshHold,
+  createAutoRefresher,
+  type AutoRefreshHold
+} from '../lib/autoRefresh'
 import { sameColumns, sameRows } from '../lib/tableCache'
 import { reindexStagedEdits } from '../lib/stagedRows'
 import { useRowPanel } from '../lib/rowPanel'
@@ -99,6 +106,10 @@ const totalRows = ref<number | null>(cached?.totalRows ?? null)
 const loading = ref(!cached)
 /** A re-read running behind rows that are already on screen. */
 const refreshing = ref(false)
+/** A re-read the tab's auto-refresh timer asked for, under way. */
+const autoReading = ref(false)
+/** When the rows on screen were last read, which the auto-refresh control says. */
+const lastReadAt = ref<number | null>(null)
 const durationMs = ref(cached?.durationMs ?? 0)
 const lastSql = ref(cached?.sql ?? '')
 const grid = ref<InstanceType<typeof DataGrid> | null>(null)
@@ -225,7 +236,7 @@ function answerPendingPrompt(choice: PendingChoice): void {
 }
 
 /** Runs `action` once the staged edits have been applied or dropped. */
-async function withPendingEdits(action: () => void | Promise<void>): Promise<void> {
+async function withPendingEdits(action: () => unknown): Promise<void> {
   if (pendingCount.value > 0) {
     const choice = await askAboutPendingEdits()
     if (choice === 'cancel') return
@@ -346,13 +357,22 @@ let loadToken = 0
  * are what the reader was looking at a moment ago, so nothing is dimmed and
  * nothing is blocked; the answer reaches the grid only where it differs from
  * what is already drawn.
+ *
+ * `auto` is a background read the tab's timer asked for. Nobody is waiting on
+ * it, so it stays off the window's progress bar and out of the "Checking for
+ * changes" note — the auto-refresh control shows it instead, rather than
+ * something blinking in the toolbar every few seconds.
+ *
+ * Resolves false only when the read failed; one overtaken by a newer read has
+ * not.
  */
-async function load(resetOffset = false, background = false): Promise<void> {
+async function load(resetOffset = false, background = false, auto = false): Promise<boolean> {
   if (resetOffset) offset.value = 0
   const token = ++loadToken
   if (background) refreshing.value = true
   else loading.value = true
-  busy.begin()
+  autoReading.value = auto
+  if (!auto) busy.begin()
   try {
     const response = await api.fetchTableData({
       connectionId: props.tab.connectionId,
@@ -365,28 +385,38 @@ async function load(resetOffset = false, background = false): Promise<void> {
       filterMode: filterMode.value,
       rawWhere: rawWhere.value
     })
-    if (token !== loadToken) return
+    if (token !== loadToken) return true
     // A background re-read never pulls rows out from under staged edits: they
     // are keyed by row index, and the reader is in the middle of typing them.
     // The page on screen stays the page, and Refresh still says otherwise.
-    if (background && pendingCount.value > 0) return
+    if (background && pendingCount.value > 0) return true
     accept(response)
     if (!background) discard()
     remember()
+    lastReadAt.value = Date.now()
+    return true
   } catch (error) {
-    if (token !== loadToken) return
+    if (token !== loadToken) return true
     // A session that ran out mid-browse is fixable in place; retry this load.
     const connection = connections.saved.find((entry) => entry.id === props.tab.connectionId)
-    if (!credentials.offerRefresh(connection, error, () => load(resetOffset, background))) {
-      toasts.fromError('Could not load the table', error)
+    const retry = async (): Promise<void> => {
+      await load(resetOffset, background)
     }
+    if (!credentials.offerRefresh(connection, error, retry)) {
+      toasts.fromError(
+        auto ? 'Auto refresh stopped: the table could not be read' : 'Could not load the table',
+        error
+      )
+    }
+    return false
   } finally {
-    busy.end()
+    if (!auto) busy.end()
     // Only the newest load may put the indicators down; an overtaken one
     // finishing later would clear the wait its successor is still in.
     if (token === loadToken) {
       loading.value = false
       refreshing.value = false
+      autoReading.value = false
     }
   }
 }
@@ -398,6 +428,79 @@ onBeforeUnmount(() => {
   tabs.setLeaveGuard(props.tab.id, null)
   // A dialog left waiting would keep its caller pending forever.
   if (pendingPrompt.value) answerPendingPrompt('cancel')
+  // The interval stays on the tab; the timer goes with the view, and the
+  // next view of this tab starts its own.
+  autoRefresher.dispose()
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+})
+
+// --- auto refresh -------------------------------------------------------------
+
+const rowPanel = ref<InstanceType<typeof RowDetailPanel> | null>(null)
+
+/** How often this tab re-reads itself; 0 when it does not. */
+const autoRefresh = computed(() => props.tab.autoRefresh ?? 0)
+
+const connected = computed(
+  () => connections.statusFor(props.tab.connectionId).state === 'connected'
+)
+
+/** What stands in the way of a read that has fallen due, if anything does. */
+function autoHold(): AutoRefreshHold | null {
+  return autoRefreshHold({
+    connected: connected.value,
+    stagedEdits: pendingCount.value,
+    editing: Boolean(grid.value?.isEditing() || rowPanel.value?.hasUncommittedEdit()),
+    busy:
+      loading.value ||
+      refreshing.value ||
+      applying.value ||
+      pendingPrompt.value !== null ||
+      menu.value !== null,
+    hidden: document.visibilityState === 'hidden'
+  })
+}
+
+const autoRefresher = createAutoRefresher({
+  hold: () => autoHold() !== null,
+  refresh: () => load(false, true, true),
+  // It has stopped itself; the tab stops saying it is on.
+  onFailure: () => tabs.update<TableTab>(props.tab.id, { autoRefresh: 0 })
+})
+
+watch(autoRefresh, (ms) => autoRefresher.set(ms), { immediate: true })
+
+/** Picked in the toolbar. Turning it on reads straight away, so it starts out current. */
+function chooseAutoRefresh(ms: number): void {
+  tabs.update<TableTab>(props.tab.id, { autoRefresh: ms })
+  autoRefresher.set(ms, true)
+}
+
+/** A window brought back into view catches up rather than waiting out the interval. */
+function onVisibilityChange(): void {
+  if (document.visibilityState === 'visible') autoRefresher.now()
+}
+document.addEventListener('visibilitychange', onVisibilityChange)
+
+/**
+ * The holds worth saying out loud: the ones that last until the reader does
+ * something about them. The others pass in a moment.
+ */
+const autoPaused = computed<string | null>(() => {
+  if (autoRefresh.value === 0) return null
+  if (!connected.value) return 'Paused while the connection is down'
+  if (pendingCount.value > 0) return 'Paused while edits are staged — apply or discard them to carry on'
+  return null
+})
+
+const autoTitle = computed(() => {
+  if (autoRefresh.value === 0) return 'Refresh this table automatically'
+  const lines = [`Re-reads the rows ${autoRefreshChoice(autoRefresh.value).label.toLowerCase()}`]
+  if (autoPaused.value) lines.push(autoPaused.value)
+  if (lastReadAt.value !== null) {
+    lines.push(`Last read at ${new Date(lastReadAt.value).toLocaleTimeString()}`)
+  }
+  return lines.join('\n')
 })
 
 /** Filters carried on the tab, e.g. from following a foreign key into it. */
@@ -1192,7 +1295,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       <!-- A tab picked again re-reads the page it already had. Nothing on
            screen changes while it does, so this is the only thing that says
            the rows are a moment old and being checked. -->
-      <span v-if="refreshing" class="data__refreshing">
+      <span v-if="refreshing && !autoReading" class="data__refreshing">
         <span class="spinner"></span>
         Checking for changes…
       </span>
@@ -1202,6 +1305,34 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       <button class="btn" :disabled="loading" @click="withPendingEdits(() => load())">
         ⟳ Refresh
       </button>
+      <!-- The native select does the choosing; the box around it carries the
+           look and says what is chosen, as the sidebar's database switcher
+           does. The square is the timer: lit while it is on, pulsing while
+           it reads, grey while something holds it. -->
+      <label
+        class="btn data__auto"
+        :class="{ 'btn--armed': autoRefresh > 0, 'data__auto--paused': !!autoPaused }"
+        :title="autoTitle"
+      >
+        <span
+          v-if="autoRefresh > 0"
+          class="data__auto-dot"
+          :class="{ 'data__auto-dot--reading': autoReading }"
+        ></span>
+        <span>Auto:</span>
+        <span class="data__auto-value">{{ autoRefreshChoice(autoRefresh).short }}</span>
+        <span class="data__auto-caret" aria-hidden="true">▾</span>
+        <select
+          class="data__auto-select"
+          :value="autoRefresh"
+          aria-label="Refresh automatically"
+          @change="chooseAutoRefresh(Number(($event.target as HTMLSelectElement).value))"
+        >
+          <option v-for="choice in AUTO_REFRESH_CHOICES" :key="choice.ms" :value="choice.ms">
+            {{ choice.label }}
+          </option>
+        </select>
+      </label>
       <button
         class="btn"
         :class="{ 'btn--armed': showFilters || filters.length > 0 || !!rawWhere }"
@@ -1305,6 +1436,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
         <template #second>
           <RowDetailPanel
             v-if="showRowPanel"
+            ref="rowPanel"
             :fields="rowFields"
             :label="rowLabel"
             :editable="editable"
@@ -1444,6 +1576,54 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
 }
 .data__toolbar .btn {
   flex: 0 0 auto;
+}
+.data__auto {
+  position: relative;
+  color: var(--text-secondary);
+}
+.data__auto.btn--armed {
+  color: var(--text-primary);
+}
+.data__auto:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.data__auto-value {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.data__auto-caret {
+  font-size: 9px;
+  color: var(--text-muted);
+}
+/* Transparent, but the real control: it takes every click on the box. */
+.data__auto-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  opacity: 0;
+  cursor: pointer;
+}
+.data__auto-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  background: var(--accent);
+}
+.data__auto-dot--reading {
+  animation: data-auto-read 520ms ease-in-out infinite alternate;
+}
+.data__auto--paused .data__auto-dot {
+  background: var(--text-muted);
+}
+@keyframes data-auto-read {
+  to {
+    opacity: 0.2;
+  }
 }
 .data__dot {
   display: inline-block;

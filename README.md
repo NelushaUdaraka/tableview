@@ -218,6 +218,16 @@ rather than folding it away.
   where it differs, so a table nobody has touched does not blink, and one that has changed updates
   in place. A table opened for the first time shows the wait from the first frame rather than
   flashing "No rows match" at it
+- **Auto refresh, when you ask for it** — beside *Refresh*, a table can be set to re-read itself
+  every 5, 10 or 30 seconds, every minute, or every 5 or 15 minutes. It is *Off* whenever a table
+  opens, and the choice belongs to the tab: a table left on a second screen to watch a queue drain
+  keeps refreshing across a trip to another tab, into a split, or out into a window of its own,
+  while every other table stays still. Each read is the same quiet re-read a reselected tab does —
+  nothing dims, and only rows that actually changed are redrawn — and the next is timed from the
+  end of the last, so a slow table is never asked twice at once. It waits while edits are staged
+  (they are keyed by row position, and new rows under them would move them onto other rows), while
+  a cell is being typed into, and while the connection is down; the control greys and says why. A
+  read that fails turns it off and says so, rather than raising the same error every few seconds
 - **Row panel** beside the grid (`Ctrl+I`): the selected row as one field per line, with room for
   the values a 26px cell cannot show, editable in place and moving with the selection. The same
   panel sits beside query results, read-only, and "View row details" on any row's menu opens it
@@ -443,7 +453,7 @@ Three layers, all runnable on Linux:
 
 | Command | What it covers |
 | --- | --- |
-| `npm test` | 732 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking |
+| `npm test` | 750 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh |
 | `npm run test:integration` | 66 tests against a **real SQL Server 2022** and a **real sshd** |
 | `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
 
@@ -461,7 +471,7 @@ and flips `AllowTcpForwarding` on, which the `linuxserver/openssh-server` image 
 ### End-to-end
 
 ```bash
-scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | routines | ssm-form
+scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | routines | auto-refresh | ssm-form
 ```
 
 On a headless box it starts Xvfb itself. It needs Electron's usual Linux libraries:
@@ -491,6 +501,10 @@ The suites:
   in it, reverts that change alone and takes the revert back with `Ctrl+Z`, steps between changes
   from the toolbar and the keyboard, reverts the rest, then runs the tab and checks the server has
   the edit and the marks start again from it — and that a partial run moves nothing
+- **auto-refresh** — checks a table opens with it off and offers the fixed intervals, turns it on and
+  waits for a row written from outside to turn up unprompted, stages an edit and checks it holds
+  (and says why) until the edit is discarded, takes the tab away and back, turns it off, and drops
+  the table under it to see a failed read switch it off with a word about it
 - **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block,
   fetches the account's instances and picks the bastion from the list (including the empty answer a
   wrong region gives), switches the connection to finding that bastion by its Name tag and back, runs the prerequisite check in both its failing and passing states, saves,
@@ -537,6 +551,7 @@ src/
     ├── lib/schemaTree.ts     a table's structure as the sidebar tree shows it
     ├── lib/jsonCell.ts       which cells hold a document, and what is inside one
     ├── lib/tableCache.ts     the page a table tab keeps, and what counts as it changing
+    ├── lib/autoRefresh.ts    a table re-reading itself: the intervals, and what holds a read back
     ├── lib/lineDiff.ts       what differs from a routine's stored definition, and putting one change back
     ├── lib/changeTracking.ts the editor's change marks, the peek under a change, and its revert
     ├── lib/sortConnections.ts the orders the connection list can be read in

@@ -69,6 +69,13 @@ export interface TableTab {
   /** As on a query tab: the row panel belongs to the tab showing it. */
   showRowPanel: boolean
   /**
+   * How often the rows re-read themselves, in milliseconds; absent or 0 is
+   * never, which is how every table opens. Kept on the tab rather than in the
+   * view, so a table being watched is still being watched after a trip to
+   * another tab — or to its structure — and back.
+   */
+  autoRefresh?: number
+  /**
    * The page the browser last had on screen, so reselecting this tab shows it
    * again straight away and re-reads it behind the rows rather than in front
    * of them. Written `markRaw`, like a query tab's result: it holds a page of

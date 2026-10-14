@@ -7,7 +7,7 @@
  * window it came from.
  */
 import type { DetachedTab } from '@shared/ipc'
-import { useTabStore, type Tab } from '../stores/tabs'
+import { useTabStore, type Tab, type TableTab } from '../stores/tabs'
 
 export function detachedTabFrom(tab: Tab): DetachedTab {
   if (tab.kind === 'table') {
@@ -18,7 +18,9 @@ export function detachedTabFrom(tab: Tab): DetachedTab {
       schema: tab.schema,
       table: tab.table,
       objectType: tab.objectType,
-      view: tab.view
+      view: tab.view,
+      // A table being watched keeps being watched wherever it is put.
+      ...(tab.autoRefresh ? { autoRefresh: tab.autoRefresh } : {})
     }
   }
   return {
@@ -50,6 +52,16 @@ export async function openTabFrom(tab: DetachedTab): Promise<void> {
       tab.objectType ?? 'table',
       tab.view ?? 'data'
     )
+    if (tab.autoRefresh) {
+      const opened = tabs.tabs.find(
+        (entry): entry is TableTab =>
+          entry.kind === 'table' &&
+          entry.connectionId === tab.connectionId &&
+          entry.schema === tab.schema &&
+          entry.table === tab.table
+      )
+      if (opened) tabs.update<TableTab>(opened.id, { autoRefresh: tab.autoRefresh })
+    }
     return
   }
 

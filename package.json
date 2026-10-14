@@ -29,6 +29,7 @@
     "test:e2e:editing": "scripts/e2e.sh editing",
     "test:e2e:table-ui": "scripts/e2e.sh table-ui",
     "test:e2e:routines": "scripts/e2e.sh routines",
+    "test:e2e:auto-refresh": "scripts/e2e.sh auto-refresh",
     "testenv:up": "scripts/test-env.sh up",
     "testenv:down": "scripts/test-env.sh down",
     "testenv:status": "scripts/test-env.sh status",

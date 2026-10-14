@@ -96,6 +96,20 @@ describe('detachedTabFrom, for a routine\'s tab', () => {
   })
 })
 
+describe('detachedTabFrom, for a table being watched', () => {
+  it('carries how often it re-reads itself', () => {
+    expect(detachedTabFrom({ ...tableTab, autoRefresh: 30_000 })).toMatchObject({
+      kind: 'table',
+      autoRefresh: 30_000
+    })
+  })
+
+  it('says nothing about it for a table that is not', () => {
+    expect(detachedTabFrom(tableTab)).not.toHaveProperty('autoRefresh')
+    expect(detachedTabFrom({ ...tableTab, autoRefresh: 0 })).not.toHaveProperty('autoRefresh')
+  })
+})
+
 /**
  * The other half: a description opened in the window it lands in — or in the
  * one it came from, when no window took it.
@@ -103,8 +117,8 @@ describe('detachedTabFrom, for a routine\'s tab', () => {
 describe('openTabFrom', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
-  it('reopens a table in the view it was showing', async () => {
-    await openTabFrom(detachedTabFrom(tableTab))
+  it('reopens a table in the view it was showing, still re-reading itself', async () => {
+    await openTabFrom(detachedTabFrom({ ...tableTab, autoRefresh: 10_000 }))
     const tabs = useTabStore()
     const opened = tabs.tabs[0] as TableTab
     expect(opened).toMatchObject({
@@ -112,7 +126,8 @@ describe('openTabFrom', () => {
       schema: 'dbo',
       table: 'customers',
       objectType: 'view',
-      view: 'structure'
+      view: 'structure',
+      autoRefresh: 10_000
     })
     // Nothing of the old window's comes with it.
     expect(opened.pendingEdits).toBe(0)

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { RoutineObject, SchemaObject } from '@shared/types'
-import { asCreateOrAlter } from '@shared/sql/statements'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
 import ObjectStructureTree from './ObjectStructureTree.vue'
 import { useConnectionStore } from '../stores/connections'
@@ -15,6 +14,7 @@ const emit = defineEmits<{
   (event: 'open-table', schema: string, table: string, type: 'table' | 'view'): void
   (event: 'open-structure', schema: string, table: string, type: 'table' | 'view'): void
   (event: 'open-sql', sql: string, title?: string): void
+  (event: 'open-routine', schema: string, name: string): void
   (event: 'generate', kind: string, schema: string, table: string): void
 }>()
 
@@ -73,7 +73,10 @@ const connectionState = computed(() => connections.activeStatus?.state ?? 'disco
 /** The object the active tab is showing, so the tree can mark it. */
 const activeObject = computed(() => {
   const tab = tabs.active
-  return tab?.kind === 'table' ? `${tab.schema}.${tab.table}` : ''
+  if (tab?.kind === 'table') return `${tab.schema}.${tab.table}`
+  // A routine's definition is the routine, the way a table's tab is the table.
+  if (tab?.kind === 'query' && tab.routine) return `${tab.routine.schema}.${tab.routine.name}`
+  return ''
 })
 
 function isActive(schemaName: string, name: string): boolean {
@@ -124,17 +127,10 @@ async function onMenuSelect(action: string): Promise<void> {
       case 'pin':
         schema.togglePinned(target.schema, target.name)
         break
-      case 'definition': {
-        const definition = await api.getObjectDefinition(id, target.schema, target.name)
-        // Opened as CREATE OR ALTER, so running the tab saves an edit back to
-        // the database instead of failing on the object that is already there.
-        emit(
-          'open-sql',
-          definition ? asCreateOrAlter(definition) : '-- no definition available',
-          target.name
-        )
+      case 'definition':
+        // The workspace reads it — or shows the tab that already has it.
+        emit('open-routine', target.schema, target.name)
         break
-      }
       case 'exec':
         emit('open-sql', `EXEC ${qualified};`, target.name)
         break
@@ -366,6 +362,7 @@ defineExpose({ focusFilter, refresh })
                 v-for="routine in group.routines"
                 :key="`r-${routine.schema}.${routine.name}`"
                 class="item"
+                :class="{ 'item--active': isActive(routine.schema, routine.name) }"
                 @click="onMenuSelect('definition')"
                 @mousedown="menu = { x: 0, y: 0, schema: routine.schema, name: routine.name, type: 'routine' }"
                 @contextmenu.prevent="openMenu($event, routine.schema, routine.name, 'routine')"

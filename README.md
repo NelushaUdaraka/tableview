@@ -218,6 +218,16 @@ rather than folding it away.
   where it differs, so a table nobody has touched does not blink, and one that has changed updates
   in place. A table opened for the first time shows the wait from the first frame rather than
   flashing "No rows match" at it
+- **Auto refresh, when you ask for it** — beside *Refresh*, a table can be set to re-read itself
+  every 5, 10 or 30 seconds, every minute, or every 5 or 15 minutes. It is *Off* whenever a table
+  opens, and the choice belongs to the tab: a table left on a second screen to watch a queue drain
+  keeps refreshing across a trip to another tab, into a split, or out into a window of its own,
+  while every other table stays still. Each read is the same quiet re-read a reselected tab does —
+  nothing dims, and only rows that actually changed are redrawn — and the next is timed from the
+  end of the last, so a slow table is never asked twice at once. It waits while edits are staged
+  (they are keyed by row position, and new rows under them would move them onto other rows), while
+  a cell is being typed into, and while the connection is down; the control greys and says why. A
+  read that fails turns it off and says so, rather than raising the same error every few seconds
 - **Row panel** beside the grid (`Ctrl+I`): the selected row as one field per line, with room for
   the values a 26px cell cannot show, editable in place and moving with the selection. The same
   panel sits beside query results, read-only, and "View row details" on any row's menu opens it
@@ -254,6 +264,10 @@ rather than opening a query that would match nothing.
 - Edit cells in place — the editor grows past the cell for long or multi-line values, `Enter`
   commits, `Shift+Enter` adds a line, `Tab` moves on — or edit the same row from the row panel
 - Insert rows, mark rows for deletion — all staged locally
+- **Staged edits are never dropped without a word** — reloading, sorting, filtering or paging,
+  picking another tab, switching to the table's structure, closing the tab, disconnecting, closing
+  the window and quitting all stop and ask first: apply them, discard them, or stay where you are.
+  The question says which of those it is
 - One `Apply` sends the whole change set, executed **inside a transaction**: either all of it lands
   or none of it does
 - Rows are addressed by primary key; a keyless table falls back to matching every column and the UI
@@ -269,6 +283,60 @@ rather than opening a query that would match nothing.
 - Results sort by clicking a header — a local reorder, since the statement is yours to re-issue, not
   ours to rewrite — with NULLs kept at the end either way
 - SQL formatting, open/save `.sql` files, saved queries, searchable query history
+- **A routine's definition shows what you changed in it**, and lets you put back any one change on
+  its own — see below
+
+**Editing a stored procedure**
+
+Clicking a procedure or function in the tree opens its definition as `CREATE OR ALTER`, so running
+the tab saves it back. That tab remembers what the server holds, and the editor marks every line
+that differs from it, the way a source-control gutter does — a bar beside lines that changed or were
+added, a wedge where lines were taken out:
+
+```
+   5    SET NOCOUNT ON;
+   6 ▌  SELECT order_id, customer_id, total            ← changed
+     ┌ CHANGE 1 OF 3 · 1 line changed  [Revert] ‹ › ✕ ┐
+     │ STORED                                          │
+     │   6    SELECT order_id, customer_id             │
+     └─────────────────────────────────────────────────┘
+   7      FROM sales.orders
+   8 ▌    -- only the ones asked for                   ← added
+   9      WHERE status = @status
+  10 ▸ END                                             ← ORDER BY removed above
+```
+
+Clicking a mark opens a strip under the change showing what the stored routine had there, and
+**Revert** puts back that change alone; the others stay where they are. Every revert is an ordinary
+edit, so `Ctrl+Z` takes it back. The toolbar counts the changes, steps through them (`Alt+F5`, `Shift+Alt+F5`) and
+reverts the lot; `Ctrl+Alt+Z` reverts the change under the cursor.
+
+Running the whole tab without an error is what saves the routine, so from then on the marks are
+measured against what was run — in every tab open on that routine. A selection, a single statement,
+a failure or a cancel moves nothing. It is the script that ran rather than the definition read back,
+because SQL Server does not keep what it was sent: `CREATE OR ALTER` comes back as `CREATE` with the
+`OR ALTER` blanked out, and comparing against that would mark the first line of every routine the
+moment it was saved. A definition stored with Windows line endings reads the same as the editor's.
+
+A routine already open is shown where it is rather than opened twice — each tab has its own idea of
+what is stored and what has changed, and two of them would quietly undo each other's saves. The
+tab's dot means "differs from the database", so it goes away once the changes are run or reverted.
+
+Closing a routine's tab with its changes unsaved asks first, the way a table with staged edits
+does: **Save and close** runs the script, **Discard** closes without it, **Cancel** keeps the tab.
+The difference is where the work lives. A table's staged edits live in its view and are gone the
+moment it is unmounted; a routine's text lives on the tab, so switching away loses nothing and never
+asks — but closing does, whether the tab is on screen or not: its ✕ in the background, *Close
+others* and *Close all* all ask about every routine they would close. A save that fails keeps the
+tab and puts it on screen with the error; dragging the tab into another window takes its text
+along, so that does not ask either.
+
+Disconnecting, closing the window and quitting take every tab with them, so they ask the same
+questions — tables' staged edits first, then each routine — and say which of them it is: "Save and
+disconnect", "Save and quit". Cancel on any one keeps the connection, the window and every tab as
+they were. A window's close is held by the main process while the window says it has unsaved work,
+and quitting asks each such window in turn, bringing it to the front; quitting needs asking for on its
+own, because with connections open the app exits outright and no window ever gets a close event.
 
 **One title bar**
 
@@ -315,7 +383,7 @@ One connection is active per window, and **File → New Window** (`Ctrl+N`) open
 — the intended way to work with several databases at once. Each window keeps its own connection,
 tabs and schema tree; connections are namespaced per window, so two windows opening the *same* saved
 connection get their own pool and tunnel rather than evicting one another. Closing a window closes
-what it opened. Saved connections and settings are shared, since one process owns those files.
+what it opened — once anything unsaved in it has been asked about. Saved connections and settings are shared, since one process owns those files.
 
 **A connection's colour is the window's accent**
 
@@ -405,7 +473,7 @@ Three layers, all runnable on Linux:
 
 | Command | What it covers |
 | --- | --- |
-| `npm test` | 411 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config |
+| `npm test` | 805 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh |
 | `npm run test:integration` | 66 tests against a **real SQL Server 2022** and a **real sshd** |
 | `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
 
@@ -423,7 +491,7 @@ and flips `AllowTcpForwarding` on, which the `linuxserver/openssh-server` image 
 ### End-to-end
 
 ```bash
-scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | ssm-form
+scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | routines | auto-refresh | unsaved | ssm-form
 ```
 
 On a headless box it starts Xvfb itself. It needs Electron's usual Linux libraries:
@@ -448,6 +516,24 @@ The suites:
 - **table-ui** — opens the title bar's View menu, reads the selected row out of the row panel, edits
   a field there and applies it to the database, follows a foreign key into the referenced table and
   checks the filter and the row it lands on, opens the expanding cell editor, and hides the panel
+- **routines** — creates a procedure, opens it from the tree, edits three places in it and checks
+  each is marked as what it is (changed, added, removed); opens a change and reads the stored line
+  in it, reverts that change alone and takes the revert back with `Ctrl+Z`, steps between changes
+  from the toolbar and the keyboard, reverts the rest, then runs the tab and checks the server has
+  the edit and the marks start again from it — and that a partial run moves nothing. Then closes
+  it with changes unsaved: Cancel keeps it, *Close all* from another tab still asks, Discard leaves
+  the server alone, an unchanged routine closes without asking, *Save and close* writes it, and a
+  save that fails keeps the tab and shows it
+- **unsaved** — disconnects with nothing unsaved and checks nothing is asked; then, with a row staged
+  in a table and a routine changed, checks disconnecting asks about both and says it is
+  disconnecting, and that Cancel keeps the connection; that switching the table to its structure
+  asks too; that the window's ✕ and File → Exit ask in
+  their own words and Cancel keeps the window and the app; and that once every question is answered
+  the window really does close and the app goes with it
+- **auto-refresh** — checks a table opens with it off and offers the fixed intervals, turns it on and
+  waits for a row written from outside to turn up unprompted, stages an edit and checks it holds
+  (and says why) until the edit is discarded, takes the tab away and back, turns it off, and drops
+  the table under it to see a failed read switch it off with a word about it
 - **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block,
   fetches the account's instances and picks the bastion from the list (including the empty answer a
   wrong region gives), switches the connection to finding that bastion by its Name tag and back, runs the prerequisite check in both its failing and passing states, saves,
@@ -473,6 +559,7 @@ src/
 │   ├── storage/              JSON stores + credential vault
 │   ├── ipc/                  handlers, each wrapped in a result envelope
 │   ├── menu.ts, window.ts    native menu + roles, frameless windows and their state
+│   ├── closeGuard.ts         holds a window's close, and the quit, while it has unsaved work
 │   └── index.ts
 ├── preload/index.ts          contextBridge façade
 ├── shared/                   used by both sides
@@ -494,6 +581,10 @@ src/
     ├── lib/schemaTree.ts     a table's structure as the sidebar tree shows it
     ├── lib/jsonCell.ts       which cells hold a document, and what is inside one
     ├── lib/tableCache.ts     the page a table tab keeps, and what counts as it changing
+    ├── lib/autoRefresh.ts    a table re-reading itself: the intervals, and what holds a read back
+    ├── lib/lineDiff.ts       what differs from a routine's stored definition, and putting one change back
+    ├── lib/changeTracking.ts the editor's change marks, the peek under a change, and its revert
+    ├── lib/runQueryTab.ts    runs a query tab, on screen or not, and says whether it saved a routine
     ├── lib/sortConnections.ts the orders the connection list can be read in
     ├── lib/connectionGroups.ts the headings the list is filed under
     ├── stores/               connections, schema, tabs (and panes), library,

@@ -11,7 +11,8 @@ import {
   DetachedTab,
   IpcResult,
   RendererApi,
-  WindowChromeState
+  WindowChromeState,
+  WindowCloseReason
 } from '../shared/ipc'
 import type {
   ConnectionStatus,
@@ -60,6 +61,8 @@ const api: RendererApi = {
   toggleMaximizeWindow: () => invoke(CHANNELS.windowToggleMaximize),
   closeWindow: () => invoke(CHANNELS.windowClose),
   getWindowChrome: () => invoke(CHANNELS.windowChrome),
+  setUnsavedWork: (unsaved) => invoke(CHANNELS.windowUnsavedWork, unsaved),
+  answerCloseRequest: (proceed) => invoke(CHANNELS.windowCloseAnswer, proceed),
   runMenuRole: (role) => invoke(CHANNELS.windowMenuRole, role),
   openExternal: (url) => invoke(CHANNELS.shellOpenExternal, url),
 
@@ -114,7 +117,9 @@ const api: RendererApi = {
   onWindowChrome: (handler: (state: WindowChromeState) => void) =>
     subscribe(CHANNELS.eventWindowChrome, handler as (payload: never) => void),
   onAttachTab: (handler: (tab: DetachedTab) => void) =>
-    subscribe(CHANNELS.eventAttachTab, handler as (payload: never) => void)
+    subscribe(CHANNELS.eventAttachTab, handler as (payload: never) => void),
+  onCloseRequested: (handler: (reason: WindowCloseReason) => void) =>
+    subscribe(CHANNELS.eventCloseRequested, handler as (payload: never) => void)
 }
 
 contextBridge.exposeInMainWorld('api', api)

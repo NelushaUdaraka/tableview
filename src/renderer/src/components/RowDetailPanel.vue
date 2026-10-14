@@ -129,6 +129,23 @@ function setNull(index: number): void {
 }
 
 /**
+ * Whether a field holds text typed into it that has not been committed.
+ *
+ * A field commits when it is left, so until then the typing lives only in
+ * the textarea — where new rows arriving under it would replace it, or leave
+ * it showing against a different row.
+ */
+function hasUncommittedEdit(): boolean {
+  const active = document.activeElement
+  if (!(active instanceof HTMLTextAreaElement) || !list.value?.contains(active)) return false
+  const index = Number(active.closest('[data-field]')?.getAttribute('data-field'))
+  const field = props.fields[index]
+  return field !== undefined && active.value !== text(field)
+}
+
+defineExpose({ hasUncommittedEdit })
+
+/**
  * How tall one field may grow before it scrolls inside itself.
  *
  * The panel is a column of fields, so an unbounded one would push every other

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { DetachedTab } from '@shared/ipc'
+import type { DetachedTab, WindowCloseReason } from '@shared/ipc'
 import type { MenuAction } from '@shared/menu'
 import ConnectionScreen from './views/ConnectionScreen.vue'
 import TitleBar from './components/TitleBar.vue'
@@ -14,6 +14,7 @@ import { useTabStore } from './stores/tabs'
 import { useToastStore } from './stores/toasts'
 import { dispatchMenuAction } from './lib/menuBus'
 import { applyAccent } from './lib/accent'
+import { openTabFrom } from './lib/detach'
 import { api } from './lib/api'
 
 const connections = useConnectionStore()
@@ -50,17 +51,7 @@ async function openIncomingTab(incoming: DetachedTab): Promise<boolean> {
     }
   }
 
-  if (incoming.kind === 'table' && incoming.schema && incoming.table) {
-    await tabs.openTable(
-      incoming.connectionId,
-      incoming.schema,
-      incoming.table,
-      incoming.objectType ?? 'table',
-      incoming.view ?? 'data'
-    )
-  } else {
-    await tabs.openQuery(incoming.connectionId, incoming.sql ?? '', incoming.title)
-  }
+  await openTabFrom(incoming)
   return true
 }
 
@@ -106,8 +97,35 @@ watch(
   { immediate: true }
 )
 
+/**
+ * Tells the main process whether this window holds work that closing it would
+ * lose — staged table edits, a routine's unsaved changes. While it does, a
+ * close of the window, or a quit of the app, is held and asked about here.
+ */
+watch(
+  () => tabs.hasUnsavedWork,
+  (unsaved) => void api.setUnsavedWork(unsaved),
+  { immediate: true }
+)
+
+/**
+ * The window is closing, or the app quitting, with unsaved work in it: every
+ * tab holding some is asked, as closing it would ask it, and the main process
+ * is told whether to go ahead. An answer is always sent — a window left
+ * waiting on one could never be closed.
+ */
+async function answerCloseRequest(reason: WindowCloseReason): Promise<void> {
+  let proceed = false
+  try {
+    proceed = await tabs.canCloseWindow(reason)
+  } finally {
+    void api.answerCloseRequest(proceed)
+  }
+}
+
 let unsubscribeMenu: (() => void) | null = null
 let unsubscribeAttach: (() => void) | null = null
+let unsubscribeClose: (() => void) | null = null
 
 onMounted(async () => {
   // Actions from the native menu join the ones the title bar raises, so views
@@ -115,6 +133,7 @@ onMounted(async () => {
   unsubscribeMenu = api.onMenuAction((action) => dispatchMenuAction(action as MenuAction))
   // Tabs can arrive at any moment: another window is only ever a drag away.
   unsubscribeAttach = api.onAttachTab((incoming) => void adoptTab(incoming))
+  unsubscribeClose = api.onCloseRequested((reason) => void answerCloseRequest(reason))
   try {
     await settings.load()
     await connections.load()
@@ -129,6 +148,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   unsubscribeMenu?.()
   unsubscribeAttach?.()
+  unsubscribeClose?.()
 })
 </script>
 

@@ -734,7 +734,10 @@ defineExpose({
   // Where the rows are scrolled to, for a parent that has to put the grid
   // back the way it was — a tab reselected after being unmounted.
   scrollOffset: () => viewport.value?.scrollTop ?? 0,
-  scrollTo
+  scrollTo,
+  // A cell editor is addressed by row position and survives new rows, so a
+  // parent about to replace them has to know one is open.
+  isEditing: () => editing.value !== null
 })
 </script>
 

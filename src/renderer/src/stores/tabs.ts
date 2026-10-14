@@ -1,7 +1,13 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import type { QueryExecutionResult, SchemaObjectType, TableFilter } from '@shared/types'
+import type {
+  QueryExecutionResult,
+  RoutineSource,
+  SchemaObjectType,
+  TableFilter
+} from '@shared/types'
 import type { TableCache } from '../lib/tableCache'
+import { splitLines } from '../lib/lineDiff'
 import { useSettingsStore } from './settings'
 
 export interface QueryTab {
@@ -29,6 +35,18 @@ export interface QueryTab {
    * the tab is the only thing that answers for it.
    */
   showRowPanel: boolean
+  /**
+   * The routine this tab is editing, when it was opened from the schema tree,
+   * and the stored definition the editor marks its changes against.
+   */
+  routine?: RoutineSource
+  /**
+   * How many separate changes the text has against that definition, as the
+   * editor last counted them. The tab strip's dot goes by this rather than by
+   * `dirty` on a routine's tab: what matters there is whether the text still
+   * differs from the server, and reverting every change answers "no" again.
+   */
+  changeCount?: number
 }
 
 export interface TableTab {
@@ -51,6 +69,13 @@ export interface TableTab {
   filterRevision: number
   /** As on a query tab: the row panel belongs to the tab showing it. */
   showRowPanel: boolean
+  /**
+   * How often the rows re-read themselves, in milliseconds; absent or 0 is
+   * never, which is how every table opens. Kept on the tab rather than in the
+   * view, so a table being watched is still being watched after a trip to
+   * another tab — or to its structure — and back.
+   */
+  autoRefresh?: number
   /**
    * The page the browser last had on screen, so reselecting this tab shows it
    * again straight away and re-reads it behind the rows rather than in front
@@ -82,6 +107,18 @@ let paneCounter = 0
 const newPaneId = (): string => `pane-${++paneCounter}`
 
 /**
+ * Why a tab's work is about to go — which is what its prompt should say.
+ *
+ * `leave` is a view being unmounted while its tab stays: another tab picked,
+ * the tab moved to the other pane or to another window. The rest take the tab
+ * with them: closing it, disconnecting, closing the window, quitting.
+ */
+export type LeaveReason = 'leave' | 'close' | 'disconnect' | 'close-window' | 'quit'
+
+/** The reasons a tab itself goes, which is all a routine's changes care about. */
+export type CloseReason = Exclude<LeaveReason, 'leave'>
+
+/**
  * Asked before a tab is unmounted; `false` cancels whatever would unmount it.
  *
  * Only a pane's active tab is mounted, so only those can be holding work that
@@ -90,7 +127,30 @@ const newPaneId = (): string => `pane-${++paneCounter}`
  * workspace has one mounted view per pane, and a single slot would let the
  * second overwrite the first.
  */
-export type LeaveGuard = () => Promise<boolean>
+export type LeaveGuard = (reason: LeaveReason) => Promise<boolean>
+
+/**
+ * Whether a routine's tab holds text the server does not have.
+ *
+ * Read off the tab itself rather than off its editor: a tab does not have to
+ * be on screen to be closed, and its text is kept on it either way. Line
+ * endings do not count — a definition stored with CRLF opens in an editor that
+ * holds LF, and nothing was changed.
+ */
+export function hasUnsavedRoutineChanges(tab: Tab | undefined): tab is QueryTab {
+  if (tab?.kind !== 'query' || !tab.routine) return false
+  return splitLines(tab.sql).join('\n') !== splitLines(tab.routine.baseline).join('\n')
+}
+
+/**
+ * A routine's tab waiting to hear whether it may close with its changes
+ * unsaved. The workspace's dialog answers it: true to close, false to stay.
+ */
+export interface ClosePrompt {
+  tabId: string
+  reason: CloseReason
+  resolve: (close: boolean) => void
+}
 
 export const useTabStore = defineStore('tabs', () => {
   const tabs = ref<Tab[]>([])
@@ -100,16 +160,62 @@ export const useTabStore = defineStore('tabs', () => {
   /** Registered by each mounted view, cleared when it unmounts. */
   const guards = new Map<string, LeaveGuard>()
 
+  const closePrompt = ref<ClosePrompt | null>(null)
+
+  /**
+   * Asks about every routine among `ids` that would close with its changes
+   * unsaved, one at a time, and resolves false as soon as one is to stay.
+   *
+   * This is not a leave guard. A table's staged edits live in its view, so
+   * they are lost the moment it is unmounted and only the mounted tab can be
+   * holding any; a routine's text lives on the tab, so switching away from it
+   * loses nothing — but closing it does, whether it is on screen or not.
+   */
+  async function canClose(ids: string[], reason: CloseReason = 'close'): Promise<boolean> {
+    for (const id of ids) {
+      if (!hasUnsavedRoutineChanges(byId(id))) continue
+      // One question at a time: a close asked for while another is waiting
+      // on its answer is dropped rather than left to wait behind it.
+      if (closePrompt.value) return false
+      const close = await new Promise<boolean>((resolve) => {
+        closePrompt.value = { tabId: id, reason, resolve }
+      })
+      if (!close) return false
+    }
+    return true
+  }
+
+  /**
+   * Asks every tab among `ids` that has work to lose if they all go: the
+   * mounted ones about staged edits first, then every routine about unsaved
+   * changes. Resolves false as soon as one of them is to stay.
+   */
+  async function canDiscard(ids: string[], reason: CloseReason): Promise<boolean> {
+    for (const tabId of mountedExcept([])) {
+      if (ids.includes(tabId) && !(await canLeave(tabId, reason))) return false
+    }
+    return canClose(ids, reason)
+  }
+
+  function answerClose(close: boolean): void {
+    const prompt = closePrompt.value
+    closePrompt.value = null
+    prompt?.resolve(close)
+  }
+
   function setLeaveGuard(tabId: string, guard: LeaveGuard | null): void {
     if (guard) guards.set(tabId, guard)
     else guards.delete(tabId)
   }
 
   /** Asks a tab that is about to be unmounted whether it is ready to go. */
-  async function canLeave(tabId: string | null | undefined): Promise<boolean> {
+  async function canLeave(
+    tabId: string | null | undefined,
+    reason: LeaveReason = 'leave'
+  ): Promise<boolean> {
     if (!tabId) return true
     const guard = guards.get(tabId)
-    return guard ? guard() : true
+    return guard ? guard(reason) : true
   }
 
   const focusedPane = computed(
@@ -180,7 +286,12 @@ export const useTabStore = defineStore('tabs', () => {
   async function openQuery(connectionId: string, sql = '', title = 'Query'): Promise<void> {
     const existingUntitled = tabs.value.find(
       (tab): tab is QueryTab =>
-        tab.kind === 'query' && tab.connectionId === connectionId && !tab.dirty && tab.sql === ''
+        tab.kind === 'query' &&
+        tab.connectionId === connectionId &&
+        !tab.dirty &&
+        tab.sql === '' &&
+        // Emptied, but still the routine's: it would save over it when run.
+        !tab.routine
     )
     // Reuse a blank tab rather than piling up empties.
     if (existingUntitled && sql === '') return select(existingUntitled.id)
@@ -208,6 +319,97 @@ export const useTabStore = defineStore('tabs', () => {
     )
   }
 
+  /** Whether a tab is editing this routine, on this connection. */
+  function editsRoutine(
+    tab: Tab,
+    connectionId: string,
+    routine: Pick<RoutineSource, 'schema' | 'name' | 'database'>
+  ): tab is QueryTab {
+    return (
+      tab.kind === 'query' &&
+      tab.connectionId === connectionId &&
+      tab.routine?.schema === routine.schema &&
+      tab.routine.name === routine.name &&
+      (tab.routine.database ?? '') === (routine.database ?? '')
+    )
+  }
+
+  /** The tab already editing a routine, if one is open. */
+  function routineTab(
+    connectionId: string,
+    routine: Pick<RoutineSource, 'schema' | 'name' | 'database'>
+  ): QueryTab | undefined {
+    return tabs.value.find((tab): tab is QueryTab => editsRoutine(tab, connectionId, routine))
+  }
+
+  /**
+   * Moves what every tab on a routine is measured against, once one of them
+   * has saved it.
+   *
+   * Saved from one tab is saved for all: a second view still holding the old
+   * text now differs from the server, and running it would put the old
+   * routine back — which is exactly what its marks should then say.
+   */
+  function storeRoutine(
+    connectionId: string,
+    routine: Pick<RoutineSource, 'schema' | 'name' | 'database'>,
+    baseline: string
+  ): void {
+    for (const tab of tabs.value) {
+      if (!editsRoutine(tab, connectionId, routine) || tab.routine?.baseline === baseline) continue
+      update<QueryTab>(tab.id, { routine: { ...tab.routine!, baseline } })
+    }
+  }
+
+  /**
+   * Opens a routine's definition to be edited, its changes marked against it
+   * — or shows the tab that already has it, the way a table opens where it
+   * stands.
+   *
+   * One tab per routine, because each carries its own idea of what is stored
+   * and of what has been changed since: with two, running one would quietly
+   * undo whatever had been saved from the other.
+   *
+   * `sql` is what the tab opens holding — the definition itself, unless the tab
+   * is arriving from another window with its edits in it. Such a tab is never
+   * folded into one already open here: its edits exist nowhere else.
+   */
+  async function openRoutine(
+    connectionId: string,
+    routine: RoutineSource,
+    options: { sql?: string } = {}
+  ): Promise<void> {
+    const sql = options.sql ?? routine.baseline
+    const existing = routineTab(connectionId, routine)
+    if (existing && (options.sql === undefined || existing.sql === sql)) {
+      return select(existing.id)
+    }
+
+    if (!(await canLeave(focusedPane.value?.activeTabId))) return
+
+    addTab(
+      {
+        id: newId(),
+        kind: 'query',
+        title: routine.name,
+        connectionId,
+        sql,
+        // A definition is read from the top.
+        cursor: 0,
+        result: null,
+        running: false,
+        executionId: null,
+        activeResultIndex: 0,
+        dirty: false,
+        statementLine: null,
+        routine: { ...routine },
+        changeCount: 0,
+        ...openingDefaults()
+      },
+      focusedPaneId.value
+    )
+  }
+
   async function openTable(
     connectionId: string,
     schema: string,
@@ -227,10 +429,11 @@ export const useTabStore = defineStore('tabs', () => {
       // A table already open is shown where it is, split pane included.
       const pane = paneFor(existing.id)
       if (pane && pane.activeTabId !== existing.id && !(await canLeave(pane.activeTabId))) return
-      existing.view = view
+      if (!(await setTableView(existing.id, view))) return
       if (filters) {
-        existing.filters = filters
-        existing.filterRevision += 1
+        // Read again: answering a question can have replaced the tab object.
+        const current = byId(existing.id) as TableTab
+        update<TableTab>(existing.id, { filters, filterRevision: current.filterRevision + 1 })
       }
       if (pane) {
         pane.activeTabId = existing.id
@@ -260,14 +463,40 @@ export const useTabStore = defineStore('tabs', () => {
     )
   }
 
+  /**
+   * Shows a table tab's rows or its structure. Resolves false when the tab
+   * asked to stay where it was.
+   *
+   * The rows' view is where staged edits live, and the structure replaces
+   * it, so leaving the rows on screen asks first — as leaving the tab would.
+   * A tab that is not on screen has no view, and nothing to lose.
+   */
+  async function setTableView(tabId: string, view: 'data' | 'structure'): Promise<boolean> {
+    const tab = byId(tabId)
+    if (tab?.kind !== 'table' || tab.view === view) return true
+    const onScreen = paneFor(tabId)?.activeTabId === tabId
+    if (tab.view === 'data' && onScreen && !(await canLeave(tabId))) return false
+    update<TableTab>(tabId, { view })
+    return true
+  }
+
   // --- closing ---------------------------------------------------------------
 
-  /** Resolves false when the tab asked to stay. */
-  async function close(id: string): Promise<boolean> {
+  /**
+   * Resolves false when the tab asked to stay.
+   *
+   * `moving` is a tab on its way to another window rather than being closed:
+   * its view is still unmounted, so staged edits are still asked about, but a
+   * routine's text goes with it and has nothing to lose.
+   */
+  async function close(id: string, options: { moving?: boolean } = {}): Promise<boolean> {
     const pane = paneFor(id)
     if (!pane) return false
-    // Only the mounted tab can be holding work that closing would throw away.
-    if (pane.activeTabId === id && !(await canLeave(id))) return false
+    // Only the mounted tab can be holding staged edits.
+    const leaving = options.moving ? 'leave' : 'close'
+    if (pane.activeTabId === id && !(await canLeave(id, leaving))) return false
+    // Any tab can be holding a routine's unsaved changes.
+    if (!options.moving && !(await canClose([id]))) return false
     removeTab(id)
     return true
   }
@@ -302,27 +531,59 @@ export const useTabStore = defineStore('tabs', () => {
   }
 
   async function closeOthers(id: string): Promise<void> {
-    for (const tabId of mountedExcept([id])) {
-      if (!(await canLeave(tabId))) return
-    }
+    const others = tabs.value.filter((tab) => tab.id !== id).map((tab) => tab.id)
+    if (!(await canDiscard(others, 'close'))) return
     for (const tab of [...tabs.value]) {
       if (tab.id !== id) removeTab(tab.id)
     }
   }
 
   async function closeAll(): Promise<void> {
-    for (const tabId of mountedExcept([])) {
-      if (!(await canLeave(tabId))) return
-    }
+    if (!(await canDiscard(tabs.value.map((tab) => tab.id), 'close'))) return
     for (const tab of [...tabs.value]) removeTab(tab.id)
   }
 
-  /** Disconnecting takes its tabs with it; there is nothing left to save to. */
+  /** Takes a connection's tabs away, asking nothing; see `closeConnection`. */
   function closeForConnection(connectionId: string): void {
     for (const tab of [...tabs.value]) {
       if (tab.connectionId === connectionId) removeTab(tab.id)
     }
   }
+
+  /**
+   * Closes a connection's tabs once their unsaved work has been answered for
+   * — which is what disconnecting does. Resolves false when one is to stay,
+   * and then nothing closes.
+   */
+  async function closeConnection(connectionId: string): Promise<boolean> {
+    const ids = tabs.value.filter((tab) => tab.connectionId === connectionId).map((tab) => tab.id)
+    if (!(await canDiscard(ids, 'disconnect'))) return false
+    closeForConnection(connectionId)
+    return true
+  }
+
+  /**
+   * Whether this window may close, or the app quit: every tab with work to
+   * lose is asked, as closing them all would ask them. Nothing is closed here;
+   * the window takes its tabs with it.
+   */
+  function canCloseWindow(reason: 'close-window' | 'quit'): Promise<boolean> {
+    return canDiscard(
+      tabs.value.map((tab) => tab.id),
+      reason
+    )
+  }
+
+  /**
+   * Whether any tab holds work that closing the window would lose: a table's
+   * staged edits, or a routine's unsaved changes. The main process holds a
+   * window's close while this is true, and asks.
+   */
+  const hasUnsavedWork = computed(() =>
+    tabs.value.some((tab) =>
+      tab.kind === 'table' ? tab.pendingEdits > 0 : hasUnsavedRoutineChanges(tab)
+    )
+  )
 
   // --- moving around ---------------------------------------------------------
 
@@ -519,11 +780,18 @@ export const useTabStore = defineStore('tabs', () => {
     paneFor,
     focusPane,
     openQuery,
+    openRoutine,
+    routineTab,
+    storeRoutine,
     openTable,
+    setTableView,
     close,
     closeOthers,
     closeAll,
     closeForConnection,
+    closeConnection,
+    canCloseWindow,
+    hasUnsavedWork,
     select,
     cycle,
     moveToPane,
@@ -531,6 +799,8 @@ export const useTabStore = defineStore('tabs', () => {
     splitTab,
     closeSplit,
     update,
-    setLeaveGuard
+    setLeaveGuard,
+    closePrompt,
+    answerClose
   }
 })

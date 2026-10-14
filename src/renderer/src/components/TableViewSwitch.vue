@@ -11,8 +11,9 @@ import type { TableTab } from '../stores/tabs'
 const props = defineProps<{ tab: TableTab }>()
 const tabs = useTabStore()
 
+/** Asks first when it would take the rows, and the edits staged in them, off screen. */
 function setView(view: 'data' | 'structure'): void {
-  tabs.update<TableTab>(props.tab.id, { view })
+  void tabs.setTableView(props.tab.id, view)
 }
 </script>
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, markRaw, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { format as formatSql } from 'sql-formatter'
 import type { CellValue, ColumnMeta } from '@shared/types'
 import { statementAt, statementsInRange } from '@shared/sql/statements'
@@ -9,14 +9,12 @@ import SplitPane from '../components/SplitPane.vue'
 import NameDialog from '../components/NameDialog.vue'
 import type { QueryTab } from '../stores/tabs'
 import { useTabStore } from '../stores/tabs'
-import { useBusyStore } from '../stores/busy'
 import { useSchemaStore } from '../stores/schema'
 import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toasts'
-import { useConnectionStore } from '../stores/connections'
-import { useCredentialsStore } from '../stores/credentials'
 import { useLibraryStore } from '../stores/library'
 import { useRowPanel } from '../lib/rowPanel'
+import { runQueryTab } from '../lib/runQueryTab'
 import { api } from '../lib/api'
 
 const props = defineProps<{ tab: QueryTab }>()
@@ -25,12 +23,9 @@ const emit = defineEmits<{
 }>()
 
 const tabs = useTabStore()
-const busy = useBusyStore()
 const schema = useSchemaStore()
 const settings = useSettingsStore()
 const toasts = useToastStore()
-const connections = useConnectionStore()
-const credentials = useCredentialsStore()
 const library = useLibraryStore()
 
 const editor = ref<InstanceType<typeof SqlEditor> | null>(null)
@@ -45,6 +40,35 @@ const sql = computed({
   set: (value: string) => tabs.update<QueryTab>(props.tab.id, { sql: value, dirty: true })
 })
 
+// --- a routine's changes -----------------------------------------------------
+
+/** What the editor marks changes against: a routine's stored definition. */
+const baseline = computed(() => props.tab.routine?.baseline ?? null)
+const changeCount = computed(() => props.tab.changeCount ?? 0)
+
+const changesLabel = computed(() => {
+  const count = changeCount.value
+  if (count === 0) return 'No changes'
+  return `${count} ${count === 1 ? 'change' : 'changes'}`
+})
+
+const changesTitle = computed(() => {
+  const routine = props.tab.routine
+  if (!routine) return ''
+  const where = routine.database ? ` in ${routine.database}` : ''
+  return (
+    `Compared with ${routine.schema}.${routine.name} as it is stored${where}. ` +
+    'Click a mark beside the line numbers to see what was there, or to revert that change ' +
+    'alone. Running the whole script saves it.'
+  )
+})
+
+/** Kept on the tab, which the strip's dot and a remounted view both read. */
+function onChanges(count: number): void {
+  if ((props.tab.changeCount ?? 0) === count) return
+  tabs.update<QueryTab>(props.tab.id, { changeCount: count })
+}
+
 /** lang-sql wants bare table names as well as schema-qualified ones. */
 const completionSchema = computed(() => {
   const out: Record<string, string[]> = {}
@@ -58,55 +82,9 @@ const completionSchema = computed(() => {
 
 const currentStatement = computed(() => statementAt(props.tab.sql, cursor.value))
 
-async function run(text?: string): Promise<void> {
-  const body = (text ?? props.tab.sql).trim()
-  if (!body) return
-  if (props.tab.running) {
-    toasts.info('A query is already running in this tab')
-    return
-  }
-
-  const executionId = `exec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  tabs.update<QueryTab>(props.tab.id, { running: true, executionId })
-  // The bar under the title bar carries the wait for the whole window, so a
-  // query running in a pane that is not on screen is still visible as work.
-  busy.begin()
-
-  try {
-    const result = await api.runQuery({
-      connectionId: props.tab.connectionId,
-      sql: body,
-      maxRows: settings.settings.maxResultRows,
-      executionId
-    })
-    // markRaw keeps the (potentially huge) result set out of the reactivity
-    // graph; it is only ever replaced, never mutated field by field.
-    tabs.update<QueryTab>(props.tab.id, {
-      result: markRaw(result),
-      running: false,
-      executionId: null
-    })
-
-    const failed = result.statements.find((statement) => statement.error)
-    if (failed?.error && !offerCredentialFix(failed.error, () => run(text))) {
-      toasts.error('Query failed', failed.error.message)
-    }
-    void library.loadHistory()
-  } catch (error) {
-    tabs.update<QueryTab>(props.tab.id, { running: false, executionId: null })
-    if (!offerCredentialFix(error, () => run(text))) toasts.fromError('Query failed', error)
-  } finally {
-    busy.end()
-  }
-}
-
-/**
- * A session that ran out mid-query is worth a paste box, not a toast — the
- * query itself was fine and can be rerun once the credentials are fresh.
- */
-function offerCredentialFix(error: unknown, retry: () => Promise<void>): boolean {
-  const connection = connections.saved.find((entry) => entry.id === props.tab.connectionId)
-  return credentials.offerRefresh(connection, error, retry)
+/** Runs the tab, or the part of it given; see `runQueryTab`. */
+function run(text?: string): Promise<boolean> {
+  return runQueryTab(props.tab.id, text)
 }
 
 function runSelection(): void {
@@ -256,6 +234,49 @@ defineExpose({
             <button class="btn" title="Ctrl+Alt+Enter" @click="runCurrent">Run statement</button>
             <button v-if="tab.running" class="btn btn--danger" @click="cancel">■ Cancel</button>
             <div class="query__spacer"></div>
+
+            <!-- A routine's tab says how far it has moved from what is stored,
+                 and steps through the changes the gutter marks. -->
+            <template v-if="tab.routine">
+              <span
+                class="query__changes mono"
+                :class="{ 'query__changes--none': changeCount === 0 }"
+                :title="changesTitle"
+              >
+                <span v-if="changeCount > 0" class="query__changes-dot"></span>
+                {{ changesLabel }}
+              </span>
+              <div class="seg query__nav">
+                <button
+                  class="seg__opt"
+                  :disabled="changeCount === 0"
+                  title="Previous change (Shift+Alt+F5)"
+                  aria-label="Previous change"
+                  @click="editor?.previousChange()"
+                >
+                  ‹
+                </button>
+                <button
+                  class="seg__opt"
+                  :disabled="changeCount === 0"
+                  title="Next change (Alt+F5)"
+                  aria-label="Next change"
+                  @click="editor?.nextChange()"
+                >
+                  ›
+                </button>
+              </div>
+              <button
+                class="btn btn--muted"
+                :disabled="changeCount === 0"
+                title="Put every change back the way it is stored (Ctrl+Z takes it back)"
+                @click="editor?.revertAllChanges()"
+              >
+                Revert all
+              </button>
+              <div class="divider-v"></div>
+            </template>
+
             <button class="btn btn--muted" title="Ctrl+Shift+F" @click="formatDocument">
               Format
             </button>
@@ -270,6 +291,8 @@ defineExpose({
             :theme="settings.resolvedTheme"
             :font-family="settings.settings.editorFontFamily"
             :font-size="settings.settings.fontSize"
+            :baseline="baseline"
+            @changes="onChanges"
             @cursor="onCursor"
             @run="run()"
             @run-selection="runSelection"
@@ -331,5 +354,29 @@ defineExpose({
 }
 .query__spacer {
   flex: 1;
+}
+.query__changes {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.query__changes--none {
+  color: var(--text-dim);
+}
+/* The gutter's colour for a changed line, so the count reads as those marks. */
+.query__changes-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--warning);
+}
+.query__nav .seg__opt {
+  justify-content: center;
+  width: 28px;
+  padding: 0;
+  font-size: 15px;
 }
 </style>

@@ -81,8 +81,10 @@ function baseTheme(): ReturnType<typeof EditorView.theme> {
         backgroundColor: 'var(--bg-app)',
         color: 'var(--text-dim)',
         border: 'none',
-        borderRight: '1px solid var(--border-subtle)',
-        padding: '10px 0'
+        borderRight: '1px solid var(--border-subtle)'
+        // No vertical padding here: CodeMirror already offsets each gutter
+        // row by the content's top padding, so padding the gutter as well
+        // pushed every line number below the line it belongs to.
       },
       '.cm-lineNumbers .cm-gutterElement': { padding: '0 12px 0 20px', minWidth: '52px' },
       '.cm-activeLine': { backgroundColor: 'var(--editor-active-line)' },

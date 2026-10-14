@@ -28,6 +28,7 @@ import { useSettingsStore } from '../stores/settings'
 import { useTabStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
 import { onMenuAction } from '../lib/menuBus'
+import { exportConnections, importConnections } from '../lib/connectionTransfer'
 import { detachedTabFrom } from '../lib/detach'
 import { api } from '../lib/api'
 
@@ -239,6 +240,12 @@ function handleAction(action: string): void {
   switch (action) {
     case 'tab:new-query':
       newQueryTab()
+      break
+    case 'connections:import':
+      void importConnections()
+      break
+    case 'connections:export':
+      void exportConnections()
       break
     case 'tab:close':
       if (tabs.activeId) tabs.close(tabs.activeId)

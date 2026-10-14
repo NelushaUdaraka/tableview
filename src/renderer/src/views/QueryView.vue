@@ -6,6 +6,7 @@ import { statementAt, statementsInRange } from '@shared/sql/statements'
 import SqlEditor from '../components/SqlEditor.vue'
 import ResultsPanel from '../components/ResultsPanel.vue'
 import SplitPane from '../components/SplitPane.vue'
+import NameDialog from '../components/NameDialog.vue'
 import type { QueryTab } from '../stores/tabs'
 import { useTabStore } from '../stores/tabs'
 import { useBusyStore } from '../stores/busy'
@@ -145,11 +146,18 @@ function formatDocument(): void {
   }
 }
 
-async function save(): Promise<void> {
-  const name = props.tab.savedQueryId
-    ? props.tab.title
-    : prompt('Save query as:', props.tab.title === 'Query' ? 'Untitled query' : props.tab.title)
-  if (!name) return
+/** Open while a first save is asking what to call the query. */
+const naming = ref(false)
+
+function save(): void {
+  // A query that is already in the library keeps its name; only the first
+  // save has to ask for one.
+  if (props.tab.savedQueryId) void saveAs(props.tab.title)
+  else naming.value = true
+}
+
+async function saveAs(name: string): Promise<void> {
+  naming.value = false
   try {
     const record = await library.saveQuery({
       id: props.tab.savedQueryId,
@@ -281,6 +289,14 @@ defineExpose({
         />
       </template>
     </SplitPane>
+
+    <NameDialog
+      v-if="naming"
+      title="Save query"
+      :initial="tab.title === 'Query' ? 'Untitled query' : tab.title"
+      @confirm="saveAs"
+      @close="naming = false"
+    />
   </div>
 </template>
 

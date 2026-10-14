@@ -7,7 +7,7 @@
  * (which would lose undo history and the cursor).
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Compartment, EditorState } from '@codemirror/state'
+import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap, placeholder as placeholderExt } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { MSSQL, sql } from '@codemirror/lang-sql'
@@ -23,6 +23,14 @@ import {
 } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
 import { lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection } from '@codemirror/view'
+import {
+  changeTracking,
+  nextChange,
+  previousChange,
+  revertAllChanges,
+  setBaseline,
+  trackedChanges
+} from '../lib/changeTracking'
 
 const props = withDefaults(
   defineProps<{
@@ -33,6 +41,12 @@ const props = withDefaults(
     fontSize?: number
     placeholder?: string
     readonly?: boolean
+    /**
+     * The stored text this document is an edit of — a routine's definition.
+     * Given one, the editor marks every line that differs from it and offers
+     * to put each change back; null tracks nothing.
+     */
+    baseline?: string | null
   }>(),
   {
     schema: () => ({}),
@@ -40,7 +54,8 @@ const props = withDefaults(
     fontFamily: 'monospace',
     fontSize: 13,
     placeholder: '-- Write T-SQL here. Ctrl+Enter runs it.',
-    readonly: false
+    readonly: false,
+    baseline: null
   }
 )
 
@@ -51,6 +66,8 @@ const emit = defineEmits<{
   (event: 'run-selection'): void
   (event: 'run-current'): void
   (event: 'save'): void
+  /** How many separate changes the document has against `baseline`. */
+  (event: 'changes', count: number): void
 }>()
 
 const host = ref<HTMLElement | null>(null)
@@ -59,6 +76,12 @@ let view: EditorView | null = null
 const themeCompartment = new Compartment()
 const schemaCompartment = new Compartment()
 const styleCompartment = new Compartment()
+/** Empty unless there is a baseline, so a plain query tab has no change gutter at all. */
+const changesCompartment = new Compartment()
+
+function changesExtension(): Extension {
+  return props.baseline === null ? [] : changeTracking(props.baseline)
+}
 
 function baseTheme(): ReturnType<typeof EditorView.theme> {
   return EditorView.theme(
@@ -169,6 +192,9 @@ onMounted(() => {
     doc: props.modelValue,
     extensions: [
       lineNumbers(),
+      // Between the line numbers and the fold markers, where an editor's
+      // change bars usually sit.
+      changesCompartment.of(changesExtension()),
       highlightActiveLineGutter(),
       highlightActiveLine(),
       foldGutter(),
@@ -202,11 +228,16 @@ onMounted(() => {
         if (update.selectionSet || update.docChanged) {
           emit('cursor', update.state.selection.main.head)
         }
+        const count = trackedChanges(update.state).length
+        if (count !== trackedChanges(update.startState).length) emit('changes', count)
       })
     ]
   })
 
   view = new EditorView({ state, parent: host.value })
+  // A tab coming back on screen is a new editor over text that may already
+  // differ from what is stored; no update reports that, so say it here.
+  emit('changes', trackedChanges(view.state).length)
 })
 
 onBeforeUnmount(() => {
@@ -251,6 +282,30 @@ watch([() => props.fontFamily, () => props.fontSize], () => {
   view?.dispatch({ effects: styleCompartment.reconfigure(baseTheme()) })
 })
 
+/**
+ * A new baseline is the stored text moving — the tab's script has just been
+ * written to the server — so the marks are measured afresh against it. Only
+ * starting or stopping tracking needs the gutter itself added or taken away.
+ */
+watch(
+  () => props.baseline,
+  (next, previous) => {
+    if (!view) return
+    if ((next === null) !== (previous === null)) {
+      view.dispatch({ effects: changesCompartment.reconfigure(changesExtension()) })
+    } else if (next !== null) {
+      view.dispatch({ effects: setBaseline.of(next) })
+    }
+  }
+)
+
+/** Runs a change command from outside the editor, then hands the keyboard back. */
+function changeCommand(command: (target: EditorView) => boolean): void {
+  if (!view) return
+  command(view)
+  view.focus()
+}
+
 function getSelection(): { from: number; to: number; text: string } {
   if (!view) return { from: 0, to: 0, text: '' }
   const range = view.state.selection.main
@@ -282,7 +337,16 @@ function setValue(text: string): void {
   })
 }
 
-defineExpose({ getSelection, getCursor, focus, insertText, setValue })
+defineExpose({
+  getSelection,
+  getCursor,
+  focus,
+  insertText,
+  setValue,
+  nextChange: () => changeCommand(nextChange),
+  previousChange: () => changeCommand(previousChange),
+  revertAllChanges: () => changeCommand(revertAllChanges)
+})
 </script>
 
 <template>

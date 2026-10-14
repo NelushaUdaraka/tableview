@@ -45,6 +45,54 @@ const sql = computed({
   set: (value: string) => tabs.update<QueryTab>(props.tab.id, { sql: value, dirty: true })
 })
 
+// --- a routine's changes -----------------------------------------------------
+
+/** What the editor marks changes against: a routine's stored definition. */
+const baseline = computed(() => props.tab.routine?.baseline ?? null)
+const changeCount = computed(() => props.tab.changeCount ?? 0)
+
+const changesLabel = computed(() => {
+  const count = changeCount.value
+  if (count === 0) return 'No changes'
+  return `${count} ${count === 1 ? 'change' : 'changes'}`
+})
+
+const changesTitle = computed(() => {
+  const routine = props.tab.routine
+  if (!routine) return ''
+  const where = routine.database ? ` in ${routine.database}` : ''
+  return (
+    `Compared with ${routine.schema}.${routine.name} as it is stored${where}. ` +
+    'Click a mark beside the line numbers to see what was there, or to revert that change ' +
+    'alone. Running the whole script saves it.'
+  )
+})
+
+/** Kept on the tab, which the strip's dot and a remounted view both read. */
+function onChanges(count: number): void {
+  if ((props.tab.changeCount ?? 0) === count) return
+  tabs.update<QueryTab>(props.tab.id, { changeCount: count })
+}
+
+/**
+ * Moves a routine's baseline to the script that has just run.
+ *
+ * Running the whole tab without an error is what saves a routine — its
+ * `CREATE OR ALTER` replaces the stored definition — so from then on the
+ * changes worth marking are the ones made since. A selection, a single
+ * statement, a failure or a cancel leaves it where it was: none of those can
+ * be taken to have written the routine.
+ *
+ * The script that ran, not the definition read back: SQL Server does not
+ * keep what it was sent — `CREATE OR ALTER` comes back as `CREATE` with the
+ * `OR ALTER` blanked out — so a re-read would mark a change on the first
+ * line of every routine the moment it was saved.
+ */
+function storeBaseline(script: string): void {
+  const routine = props.tab.routine
+  if (routine) tabs.storeRoutine(props.tab.connectionId, routine, script)
+}
+
 /** lang-sql wants bare table names as well as schema-qualified ones. */
 const completionSchema = computed(() => {
   const out: Record<string, string[]> = {}
@@ -72,6 +120,11 @@ async function run(text?: string): Promise<void> {
   // query running in a pane that is not on screen is still visible as work.
   busy.begin()
 
+  // The script as it was sent, whatever is typed while it runs — and whether
+  // it was all of it, which a selection covering the whole tab also is.
+  const script = props.tab.sql
+  const whole = body === script.trim()
+
   try {
     const result = await api.runQuery({
       connectionId: props.tab.connectionId,
@@ -88,6 +141,9 @@ async function run(text?: string): Promise<void> {
     })
 
     const failed = result.statements.find((statement) => statement.error)
+    if (whole && !failed && !result.cancelled && result.statements.length > 0) {
+      storeBaseline(script)
+    }
     if (failed?.error && !offerCredentialFix(failed.error, () => run(text))) {
       toasts.error('Query failed', failed.error.message)
     }
@@ -256,6 +312,49 @@ defineExpose({
             <button class="btn" title="Ctrl+Alt+Enter" @click="runCurrent">Run statement</button>
             <button v-if="tab.running" class="btn btn--danger" @click="cancel">■ Cancel</button>
             <div class="query__spacer"></div>
+
+            <!-- A routine's tab says how far it has moved from what is stored,
+                 and steps through the changes the gutter marks. -->
+            <template v-if="tab.routine">
+              <span
+                class="query__changes mono"
+                :class="{ 'query__changes--none': changeCount === 0 }"
+                :title="changesTitle"
+              >
+                <span v-if="changeCount > 0" class="query__changes-dot"></span>
+                {{ changesLabel }}
+              </span>
+              <div class="seg query__nav">
+                <button
+                  class="seg__opt"
+                  :disabled="changeCount === 0"
+                  title="Previous change (Shift+Alt+F5)"
+                  aria-label="Previous change"
+                  @click="editor?.previousChange()"
+                >
+                  ‹
+                </button>
+                <button
+                  class="seg__opt"
+                  :disabled="changeCount === 0"
+                  title="Next change (Alt+F5)"
+                  aria-label="Next change"
+                  @click="editor?.nextChange()"
+                >
+                  ›
+                </button>
+              </div>
+              <button
+                class="btn btn--muted"
+                :disabled="changeCount === 0"
+                title="Put every change back the way it is stored (Ctrl+Z takes it back)"
+                @click="editor?.revertAllChanges()"
+              >
+                Revert all
+              </button>
+              <div class="divider-v"></div>
+            </template>
+
             <button class="btn btn--muted" title="Ctrl+Shift+F" @click="formatDocument">
               Format
             </button>
@@ -270,6 +369,8 @@ defineExpose({
             :theme="settings.resolvedTheme"
             :font-family="settings.settings.editorFontFamily"
             :font-size="settings.settings.fontSize"
+            :baseline="baseline"
+            @changes="onChanges"
             @cursor="onCursor"
             @run="run()"
             @run-selection="runSelection"
@@ -331,5 +432,29 @@ defineExpose({
 }
 .query__spacer {
   flex: 1;
+}
+.query__changes {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.query__changes--none {
+  color: var(--text-dim);
+}
+/* The gutter's colour for a changed line, so the count reads as those marks. */
+.query__changes-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--warning);
+}
+.query__nav .seg__opt {
+  justify-content: center;
+  width: 28px;
+  padding: 0;
+  font-size: 15px;
 }
 </style>

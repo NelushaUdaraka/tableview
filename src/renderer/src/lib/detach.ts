@@ -7,7 +7,7 @@
  * window it came from.
  */
 import type { DetachedTab } from '@shared/ipc'
-import type { Tab } from '../stores/tabs'
+import { useTabStore, type Tab } from '../stores/tabs'
 
 export function detachedTabFrom(tab: Tab): DetachedTab {
   if (tab.kind === 'table') {
@@ -25,6 +25,38 @@ export function detachedTabFrom(tab: Tab): DetachedTab {
     kind: 'query',
     connectionId: tab.connectionId,
     title: tab.title,
-    sql: tab.sql
+    sql: tab.sql,
+    // A routine's tab takes what is stored with it, so its changes are still
+    // marked in the window it lands in.
+    ...(tab.routine ? { routine: { ...tab.routine } } : {})
   }
+}
+
+/**
+ * Opens a described tab in this window — the other half of `detachedTabFrom`.
+ *
+ * Used both for a tab arriving from another window and for one put back
+ * because no window took it, so the two cannot disagree about what a
+ * description means.
+ */
+export async function openTabFrom(tab: DetachedTab): Promise<void> {
+  const tabs = useTabStore()
+
+  if (tab.kind === 'table' && tab.schema && tab.table) {
+    await tabs.openTable(
+      tab.connectionId,
+      tab.schema,
+      tab.table,
+      tab.objectType ?? 'table',
+      tab.view ?? 'data'
+    )
+    return
+  }
+
+  if (tab.routine) {
+    await tabs.openRoutine(tab.connectionId, tab.routine, { sql: tab.sql })
+    return
+  }
+
+  await tabs.openQuery(tab.connectionId, tab.sql ?? '', tab.title)
 }

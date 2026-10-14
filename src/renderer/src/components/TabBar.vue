@@ -11,7 +11,7 @@
 import { computed, ref } from 'vue'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
 import { beginTabDrag, draggedTab, endTabDrag, markTabDropped } from '../lib/tabDrag'
-import { useTabStore, type TabPane } from '../stores/tabs'
+import { useTabStore, type Tab, type TabPane } from '../stores/tabs'
 
 const props = defineProps<{ pane: TabPane }>()
 const emit = defineEmits<{
@@ -61,8 +61,27 @@ function onMenuSelect(action: string): void {
   else if (action === 'detach') emit('detach', id, { x: window.screenX + 80, y: window.screenY + 80 })
 }
 
-function icon(kind: string): string {
-  return kind === 'query' ? '⌨' : '▤'
+/** The glyph the tree gives the same thing: a routine's tab is that routine. */
+function icon(tab: Tab): string {
+  if (tab.kind === 'table') return '▤'
+  if (tab.routine) return tab.routine.type && tab.routine.type !== 'procedure' ? 'ƒ' : '⚙'
+  return '⌨'
+}
+
+/**
+ * Whether a tab's dot is up, and what it says.
+ *
+ * A routine's tab differs from the server or it does not — reverting every
+ * change, or running the script, puts the dot away. Any other query tab has
+ * unsaved text from its first keystroke until it is saved.
+ */
+function unsaved(tab: Tab): string {
+  if (tab.kind !== 'query') return ''
+  if (tab.routine) {
+    const count = tab.changeCount ?? 0
+    return count > 0 ? `${count} ${count === 1 ? 'change' : 'changes'} not saved to the database` : ''
+  }
+  return tab.dirty ? 'Unsaved changes' : ''
 }
 
 /** Middle-click closes, matching browser and editor conventions. */
@@ -157,21 +176,23 @@ function onDragEnd(event: DragEvent, tabId: string): void {
             'tab--dimmed': tab.id === pane.activeTabId && tabs.focusedPaneId !== pane.id
           }"
           draggable="true"
-          :title="tab.kind === 'table' ? `${tab.schema}.${tab.table}` : tab.title"
+          :title="
+            tab.kind === 'table'
+              ? `${tab.schema}.${tab.table}`
+              : tab.routine
+                ? `${tab.routine.schema}.${tab.routine.name}`
+                : tab.title
+          "
           @click="tabs.select(tab.id)"
           @auxclick="onAuxClick($event, tab.id)"
           @contextmenu.prevent="menu = { x: $event.clientX, y: $event.clientY, id: tab.id }"
           @dragstart="onDragStart($event, tab.id)"
           @dragend="onDragEnd($event, tab.id)"
         >
-          <span class="tab__icon">{{ icon(tab.kind) }}</span>
+          <span class="tab__icon">{{ icon(tab) }}</span>
           <span class="tab__title truncate">{{ tab.title }}</span>
           <span v-if="tab.kind === 'query' && tab.running" class="spinner tab__spinner"></span>
-          <span
-            v-else-if="tab.kind === 'query' && tab.dirty"
-            class="tab__dot"
-            title="Unsaved changes"
-          ></span>
+          <span v-else-if="unsaved(tab)" class="tab__dot" :title="unsaved(tab)"></span>
           <span
             v-else-if="tab.kind === 'table' && tab.pendingEdits > 0"
             class="tab__dot tab__dot--edit"

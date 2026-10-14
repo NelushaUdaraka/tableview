@@ -482,3 +482,113 @@ describe('a tab\'s cached page', () => {
     expect(copy.pendingEdits).toBe(0)
   })
 })
+
+/**
+ * A routine opened from the tree is its definition, in a query tab that knows
+ * which routine it is and what is stored for it — which is what the editor
+ * marks changes against.
+ */
+describe('a routine\'s tab', () => {
+  const routine = {
+    schema: 'dbo',
+    name: 'usp_orders',
+    type: 'procedure' as const,
+    database: 'Sales',
+    baseline: 'CREATE OR ALTER PROCEDURE dbo.usp_orders AS\r\nSELECT 1'
+  }
+
+  it('opens holding the definition, titled by the routine', async () => {
+    const tabs = useTabStore()
+    await tabs.openRoutine('c1', routine)
+
+    const tab = tabs.tabs[0] as QueryTab
+    expect(tab.title).toBe('usp_orders')
+    expect(tab.sql).toBe(routine.baseline)
+    expect(tab.routine).toEqual(routine)
+    expect(tab.changeCount).toBe(0)
+    expect(tab.dirty).toBe(false)
+  })
+
+  it('keeps its own copy of what it was given', async () => {
+    const tabs = useTabStore()
+    const given = { ...routine }
+    await tabs.openRoutine('c1', given)
+    given.baseline = 'changed afterwards'
+    expect((tabs.tabs[0] as QueryTab).routine?.baseline).toBe(routine.baseline)
+  })
+
+  it('shows the tab that already has the routine rather than opening another', async () => {
+    const tabs = useTabStore()
+    await tabs.openRoutine('c1', routine)
+    const first = tabs.activeId
+    await tabs.openQuery('c1', 'SELECT 2')
+
+    await tabs.openRoutine('c1', { ...routine, baseline: 'read again' })
+
+    expect(tabs.tabs).toHaveLength(2)
+    expect(tabs.activeId).toBe(first)
+    // The tab is left as it was: its edits and its baseline are its own.
+    expect((tabs.tabs[0] as QueryTab).routine?.baseline).toBe(routine.baseline)
+  })
+
+  it('is found by routine and database, on its own connection', async () => {
+    const tabs = useTabStore()
+    await tabs.openRoutine('c1', routine)
+
+    expect(tabs.routineTab('c1', routine)?.id).toBe(tabs.tabs[0].id)
+    // The same name in another database is another routine.
+    expect(tabs.routineTab('c1', { ...routine, database: 'Archive' })).toBeUndefined()
+    expect(tabs.routineTab('c2', routine)).toBeUndefined()
+    expect(tabs.routineTab('c1', { ...routine, name: 'usp_other' })).toBeUndefined()
+  })
+
+  it('opens beside the one already open when it arrives with edits of its own', async () => {
+    const tabs = useTabStore()
+    await tabs.openRoutine('c1', routine)
+
+    // Dragged in from another window: its text exists nowhere else.
+    await tabs.openRoutine('c1', routine, { sql: 'CREATE OR ALTER PROCEDURE dbo.usp_orders AS SELECT 2' })
+    expect(tabs.tabs).toHaveLength(2)
+    expect((tabs.tabs[1] as QueryTab).sql).toContain('SELECT 2')
+    expect((tabs.tabs[1] as QueryTab).routine?.baseline).toBe(routine.baseline)
+
+    // The same text again is nothing new.
+    await tabs.openRoutine('c1', routine, { sql: routine.baseline })
+    expect(tabs.tabs).toHaveLength(2)
+  })
+
+  it('is never taken for a blank query tab to reuse', async () => {
+    const tabs = useTabStore()
+    await tabs.openRoutine('c1', { ...routine, baseline: '' })
+    await tabs.openQuery('c1')
+    expect(tabs.tabs).toHaveLength(2)
+  })
+
+  it('gives a second view the same routine and baseline', async () => {
+    const tabs = useTabStore()
+    await tabs.openRoutine('c1', routine)
+    await tabs.splitTab(tabs.activeId!)
+
+    const copy = tabs.tabs[1] as QueryTab
+    expect(copy.routine).toEqual(routine)
+  })
+
+  it('moves the baseline of every tab on the routine once one of them saves it', async () => {
+    const tabs = useTabStore()
+    await tabs.openRoutine('c1', routine)
+    await tabs.splitTab(tabs.activeId!)
+    await tabs.openRoutine('c1', { ...routine, name: 'usp_other' })
+    await tabs.openRoutine('c1', { ...routine, database: 'Archive' })
+
+    tabs.storeRoutine('c1', routine, 'CREATE OR ALTER PROCEDURE dbo.usp_orders AS SELECT 2')
+
+    const baselines = (tabs.tabs as QueryTab[]).map((tab) => tab.routine?.baseline)
+    expect(baselines).toEqual([
+      'CREATE OR ALTER PROCEDURE dbo.usp_orders AS SELECT 2',
+      'CREATE OR ALTER PROCEDURE dbo.usp_orders AS SELECT 2',
+      // Another routine, and the same name in another database, are untouched.
+      routine.baseline,
+      routine.baseline
+    ])
+  })
+})

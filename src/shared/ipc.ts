@@ -9,6 +9,7 @@ import {
   QueryExecutionResult,
   QueryHistoryEntry,
   RoutineObject,
+  RoutineSource,
   RunQueryRequest,
   SavedConnection,
   SavedQuery,
@@ -38,6 +39,12 @@ export interface DetachedTab {
   title: string
   /** Query tabs only. */
   sql?: string
+  /**
+   * A query tab editing a routine: what it is, and the stored definition its
+   * changes are marked against — without it, the text arrives with every
+   * edit in it and nothing to say which lines they were.
+   */
+  routine?: RoutineSource
   /** Table tabs only. */
   schema?: string
   table?: string

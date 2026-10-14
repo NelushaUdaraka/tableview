@@ -1,6 +1,11 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import type { QueryExecutionResult, SchemaObjectType, TableFilter } from '@shared/types'
+import type {
+  QueryExecutionResult,
+  RoutineSource,
+  SchemaObjectType,
+  TableFilter
+} from '@shared/types'
 import type { TableCache } from '../lib/tableCache'
 import { useSettingsStore } from './settings'
 
@@ -29,6 +34,18 @@ export interface QueryTab {
    * the tab is the only thing that answers for it.
    */
   showRowPanel: boolean
+  /**
+   * The routine this tab is editing, when it was opened from the schema tree,
+   * and the stored definition the editor marks its changes against.
+   */
+  routine?: RoutineSource
+  /**
+   * How many separate changes the text has against that definition, as the
+   * editor last counted them. The tab strip's dot goes by this rather than by
+   * `dirty` on a routine's tab: what matters there is whether the text still
+   * differs from the server, and reverting every change answers "no" again.
+   */
+  changeCount?: number
 }
 
 export interface TableTab {
@@ -180,7 +197,12 @@ export const useTabStore = defineStore('tabs', () => {
   async function openQuery(connectionId: string, sql = '', title = 'Query'): Promise<void> {
     const existingUntitled = tabs.value.find(
       (tab): tab is QueryTab =>
-        tab.kind === 'query' && tab.connectionId === connectionId && !tab.dirty && tab.sql === ''
+        tab.kind === 'query' &&
+        tab.connectionId === connectionId &&
+        !tab.dirty &&
+        tab.sql === '' &&
+        // Emptied, but still the routine's: it would save over it when run.
+        !tab.routine
     )
     // Reuse a blank tab rather than piling up empties.
     if (existingUntitled && sql === '') return select(existingUntitled.id)
@@ -202,6 +224,97 @@ export const useTabStore = defineStore('tabs', () => {
         activeResultIndex: 0,
         dirty: false,
         statementLine: null,
+        ...openingDefaults()
+      },
+      focusedPaneId.value
+    )
+  }
+
+  /** Whether a tab is editing this routine, on this connection. */
+  function editsRoutine(
+    tab: Tab,
+    connectionId: string,
+    routine: Pick<RoutineSource, 'schema' | 'name' | 'database'>
+  ): tab is QueryTab {
+    return (
+      tab.kind === 'query' &&
+      tab.connectionId === connectionId &&
+      tab.routine?.schema === routine.schema &&
+      tab.routine.name === routine.name &&
+      (tab.routine.database ?? '') === (routine.database ?? '')
+    )
+  }
+
+  /** The tab already editing a routine, if one is open. */
+  function routineTab(
+    connectionId: string,
+    routine: Pick<RoutineSource, 'schema' | 'name' | 'database'>
+  ): QueryTab | undefined {
+    return tabs.value.find((tab): tab is QueryTab => editsRoutine(tab, connectionId, routine))
+  }
+
+  /**
+   * Moves what every tab on a routine is measured against, once one of them
+   * has saved it.
+   *
+   * Saved from one tab is saved for all: a second view still holding the old
+   * text now differs from the server, and running it would put the old
+   * routine back — which is exactly what its marks should then say.
+   */
+  function storeRoutine(
+    connectionId: string,
+    routine: Pick<RoutineSource, 'schema' | 'name' | 'database'>,
+    baseline: string
+  ): void {
+    for (const tab of tabs.value) {
+      if (!editsRoutine(tab, connectionId, routine) || tab.routine?.baseline === baseline) continue
+      update<QueryTab>(tab.id, { routine: { ...tab.routine!, baseline } })
+    }
+  }
+
+  /**
+   * Opens a routine's definition to be edited, its changes marked against it
+   * — or shows the tab that already has it, the way a table opens where it
+   * stands.
+   *
+   * One tab per routine, because each carries its own idea of what is stored
+   * and of what has been changed since: with two, running one would quietly
+   * undo whatever had been saved from the other.
+   *
+   * `sql` is what the tab opens holding — the definition itself, unless the tab
+   * is arriving from another window with its edits in it. Such a tab is never
+   * folded into one already open here: its edits exist nowhere else.
+   */
+  async function openRoutine(
+    connectionId: string,
+    routine: RoutineSource,
+    options: { sql?: string } = {}
+  ): Promise<void> {
+    const sql = options.sql ?? routine.baseline
+    const existing = routineTab(connectionId, routine)
+    if (existing && (options.sql === undefined || existing.sql === sql)) {
+      return select(existing.id)
+    }
+
+    if (!(await canLeave(focusedPane.value?.activeTabId))) return
+
+    addTab(
+      {
+        id: newId(),
+        kind: 'query',
+        title: routine.name,
+        connectionId,
+        sql,
+        // A definition is read from the top.
+        cursor: 0,
+        result: null,
+        running: false,
+        executionId: null,
+        activeResultIndex: 0,
+        dirty: false,
+        statementLine: null,
+        routine: { ...routine },
+        changeCount: 0,
         ...openingDefaults()
       },
       focusedPaneId.value
@@ -519,6 +632,9 @@ export const useTabStore = defineStore('tabs', () => {
     paneFor,
     focusPane,
     openQuery,
+    openRoutine,
+    routineTab,
+    storeRoutine,
     openTable,
     close,
     closeOthers,

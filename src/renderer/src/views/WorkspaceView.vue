@@ -15,6 +15,7 @@ import {
   buildSelectTemplate,
   buildUpdateTemplate
 } from '@shared/sql/builder'
+import { asCreateOrAlter } from '@shared/sql/statements'
 import AppSidebar from '../components/AppSidebar.vue'
 import SplitPane from '../components/SplitPane.vue'
 import StatusBar from '../components/StatusBar.vue'
@@ -29,7 +30,7 @@ import { useTabStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
 import { onMenuAction } from '../lib/menuBus'
 import { exportConnections, importConnections } from '../lib/connectionTransfer'
-import { detachedTabFrom } from '../lib/detach'
+import { detachedTabFrom, openTabFrom } from '../lib/detach'
 import { api } from '../lib/api'
 
 type PaneView = InstanceType<typeof TabPaneView>
@@ -134,6 +135,46 @@ function newQueryTab(): void {
   tabs.openQuery(connectionId.value)
 }
 
+/**
+ * Opens a routine from the tree as its definition, ready to be edited.
+ *
+ * Opened as `CREATE OR ALTER`, so running the tab saves an edit back to the
+ * database instead of failing on the object that is already there — and kept
+ * as what is stored, so the editor can mark every change made to it. A routine
+ * that is already open is shown where it is, without asking the server again.
+ */
+async function openRoutine(schemaName: string, name: string): Promise<void> {
+  const id = connectionId.value
+  if (!id) return
+  const database = connections.activeStatus?.currentDatabase || undefined
+  const open = tabs.routineTab(id, { schema: schemaName, name, database })
+  if (open) {
+    await tabs.select(open.id)
+    return
+  }
+
+  try {
+    const definition = await api.getObjectDefinition(id, schemaName, name)
+    if (!definition) {
+      // Encrypted, or out of this login's sight: nothing to edit or compare.
+      openSql('-- no definition available', name)
+      return
+    }
+    const type = schema.routines.find(
+      (routine) => routine.schema === schemaName && routine.name === name
+    )?.type
+    await tabs.openRoutine(id, {
+      schema: schemaName,
+      name,
+      type,
+      database,
+      baseline: asCreateOrAlter(definition)
+    })
+  } catch (error) {
+    toasts.fromError(`Could not read the definition of ${schemaName}.${name}`, error)
+  }
+}
+
 /** Sidebar "generate statement" actions. */
 async function generate(kind: string, schemaName: string, table: string): Promise<void> {
   if (!connectionId.value) return
@@ -180,11 +221,7 @@ async function moveTabOut(
   } catch (error) {
     toasts.fromError(failure, error)
     // Put it back rather than losing it to a window that never took it.
-    if (payload.kind === 'table' && payload.schema && payload.table) {
-      void tabs.openTable(payload.connectionId, payload.schema, payload.table, payload.objectType)
-    } else {
-      void tabs.openQuery(payload.connectionId, payload.sql ?? '', payload.title)
-    }
+    void openTabFrom(payload)
   }
 }
 
@@ -417,6 +454,7 @@ onBeforeUnmount(() => {
           @open-table="(s, t, type) => openTable(s, t, type, 'data')"
           @open-structure="(s, t, type) => openTable(s, t, type, 'structure')"
           @open-sql="openSql"
+          @open-routine="openRoutine"
           @generate="generate"
         />
       </template>

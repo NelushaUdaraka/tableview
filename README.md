@@ -269,6 +269,44 @@ rather than opening a query that would match nothing.
 - Results sort by clicking a header — a local reorder, since the statement is yours to re-issue, not
   ours to rewrite — with NULLs kept at the end either way
 - SQL formatting, open/save `.sql` files, saved queries, searchable query history
+- **A routine's definition shows what you changed in it**, and lets you put back any one change on
+  its own — see below
+
+**Editing a stored procedure**
+
+Clicking a procedure or function in the tree opens its definition as `CREATE OR ALTER`, so running
+the tab saves it back. That tab remembers what the server holds, and the editor marks every line
+that differs from it, the way a source-control gutter does — a bar beside lines that changed or were
+added, a wedge where lines were taken out:
+
+```
+   5    SET NOCOUNT ON;
+   6 ▌  SELECT order_id, customer_id, total            ← changed
+     ┌ CHANGE 1 OF 3 · 1 line changed  [Revert] ‹ › ✕ ┐
+     │ STORED                                          │
+     │   6    SELECT order_id, customer_id             │
+     └─────────────────────────────────────────────────┘
+   7      FROM sales.orders
+   8 ▌    -- only the ones asked for                   ← added
+   9      WHERE status = @status
+  10 ▸ END                                             ← ORDER BY removed above
+```
+
+Clicking a mark opens a strip under the change showing what the stored routine had there, and
+**Revert** puts back that change alone; the others stay where they are. Every revert is an ordinary
+edit, so `Ctrl+Z` takes it back. The toolbar counts the changes, steps through them (`Alt+F5`, `Shift+Alt+F5`) and
+reverts the lot; `Ctrl+Alt+Z` reverts the change under the cursor.
+
+Running the whole tab without an error is what saves the routine, so from then on the marks are
+measured against what was run — in every tab open on that routine. A selection, a single statement,
+a failure or a cancel moves nothing. It is the script that ran rather than the definition read back,
+because SQL Server does not keep what it was sent: `CREATE OR ALTER` comes back as `CREATE` with the
+`OR ALTER` blanked out, and comparing against that would mark the first line of every routine the
+moment it was saved. A definition stored with Windows line endings reads the same as the editor's.
+
+A routine already open is shown where it is rather than opened twice — each tab has its own idea of
+what is stored and what has changed, and two of them would quietly undo each other's saves. The
+tab's dot means "differs from the database", so it goes away once the changes are run or reverted.
 
 **One title bar**
 
@@ -405,7 +443,7 @@ Three layers, all runnable on Linux:
 
 | Command | What it covers |
 | --- | --- |
-| `npm test` | 411 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config |
+| `npm test` | 732 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking |
 | `npm run test:integration` | 66 tests against a **real SQL Server 2022** and a **real sshd** |
 | `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
 
@@ -423,7 +461,7 @@ and flips `AllowTcpForwarding` on, which the `linuxserver/openssh-server` image 
 ### End-to-end
 
 ```bash
-scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | ssm-form
+scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | routines | ssm-form
 ```
 
 On a headless box it starts Xvfb itself. It needs Electron's usual Linux libraries:
@@ -448,6 +486,11 @@ The suites:
 - **table-ui** — opens the title bar's View menu, reads the selected row out of the row panel, edits
   a field there and applies it to the database, follows a foreign key into the referenced table and
   checks the filter and the row it lands on, opens the expanding cell editor, and hides the panel
+- **routines** — creates a procedure, opens it from the tree, edits three places in it and checks
+  each is marked as what it is (changed, added, removed); opens a change and reads the stored line
+  in it, reverts that change alone and takes the revert back with `Ctrl+Z`, steps between changes
+  from the toolbar and the keyboard, reverts the rest, then runs the tab and checks the server has
+  the edit and the marks start again from it — and that a partial run moves nothing
 - **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block,
   fetches the account's instances and picks the bastion from the list (including the empty answer a
   wrong region gives), switches the connection to finding that bastion by its Name tag and back, runs the prerequisite check in both its failing and passing states, saves,
@@ -494,6 +537,8 @@ src/
     ├── lib/schemaTree.ts     a table's structure as the sidebar tree shows it
     ├── lib/jsonCell.ts       which cells hold a document, and what is inside one
     ├── lib/tableCache.ts     the page a table tab keeps, and what counts as it changing
+    ├── lib/lineDiff.ts       what differs from a routine's stored definition, and putting one change back
+    ├── lib/changeTracking.ts the editor's change marks, the peek under a change, and its revert
     ├── lib/sortConnections.ts the orders the connection list can be read in
     ├── lib/connectionGroups.ts the headings the list is filed under
     ├── stores/               connections, schema, tabs (and panes), library,

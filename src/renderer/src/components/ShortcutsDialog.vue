@@ -17,6 +17,16 @@ const GROUPS = [
     ]
   },
   {
+    title: 'Routine definitions',
+    items: [
+      ['Click a mark by the line numbers', 'See what the stored routine had there'],
+      ['Alt+F5', 'Next change'],
+      ['Shift+Alt+F5', 'Previous change'],
+      ['Ctrl+Alt+Z', 'Revert the change at the cursor'],
+      ['Escape', 'Close the change you are looking at']
+    ]
+  },
+  {
     title: 'Tabs',
     items: [
       ['Ctrl+T', 'New query tab'],

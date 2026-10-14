@@ -10,15 +10,14 @@ import ToastHost from './components/ToastHost.vue'
 import CredentialsExpiredDialog from './components/CredentialsExpiredDialog.vue'
 import { useConnectionStore } from './stores/connections'
 import { useSettingsStore } from './stores/settings'
-import { useTabStore } from './stores/tabs'
 import { useToastStore } from './stores/toasts'
 import { dispatchMenuAction } from './lib/menuBus'
 import { applyAccent } from './lib/accent'
+import { openTabFrom } from './lib/detach'
 import { api } from './lib/api'
 
 const connections = useConnectionStore()
 const settings = useSettingsStore()
-const tabs = useTabStore()
 const toasts = useToastStore()
 const ready = ref(false)
 /**
@@ -50,17 +49,7 @@ async function openIncomingTab(incoming: DetachedTab): Promise<boolean> {
     }
   }
 
-  if (incoming.kind === 'table' && incoming.schema && incoming.table) {
-    await tabs.openTable(
-      incoming.connectionId,
-      incoming.schema,
-      incoming.table,
-      incoming.objectType ?? 'table',
-      incoming.view ?? 'data'
-    )
-  } else {
-    await tabs.openQuery(incoming.connectionId, incoming.sql ?? '', incoming.title)
-  }
+  await openTabFrom(incoming)
   return true
 }
 

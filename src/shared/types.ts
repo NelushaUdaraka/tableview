@@ -298,6 +298,31 @@ export interface RoutineObject {
   type: RoutineType
 }
 
+/**
+ * A routine a query tab is editing, opened from the schema tree.
+ *
+ * The tab's text is a `CREATE OR ALTER` script for something that already
+ * exists, so it carries the definition its changes are measured against —
+ * which is what lets the editor mark them, and put any one of them back.
+ */
+export interface RoutineSource {
+  schema: string
+  name: string
+  /** What kind of routine it is, for the icon its tab carries. */
+  type?: RoutineType
+  /**
+   * The database the routine lives in. A window can switch database under an
+   * open tab, and the same schema-qualified name can mean a different routine
+   * there.
+   */
+  database?: string
+  /**
+   * The script as the server holds it: as it was read, or as the tab last ran
+   * it in full without an error — which is what writes it back.
+   */
+  baseline: string
+}
+
 export interface TableColumn {
   name: string
   position: number

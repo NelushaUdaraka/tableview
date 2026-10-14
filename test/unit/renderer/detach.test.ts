@@ -5,9 +5,10 @@
  * to the window a tab came from — staged edits, a result set, a cursor — must
  * not travel with it; what crosses is only enough to open the same thing again.
  */
-import { describe, expect, it } from 'vitest'
-import { detachedTabFrom } from '../../../src/renderer/src/lib/detach'
-import type { QueryTab, TableTab } from '../../../src/renderer/src/stores/tabs'
+import { createPinia, setActivePinia } from 'pinia'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { detachedTabFrom, openTabFrom } from '../../../src/renderer/src/lib/detach'
+import { useTabStore, type QueryTab, type TableTab } from '../../../src/renderer/src/stores/tabs'
 
 const tableTab: TableTab = {
   id: 'tab-1',
@@ -72,5 +73,65 @@ describe('detachedTabFrom', () => {
     expect(payload.pendingEdits).toBeUndefined()
     expect(payload.filters).toBeUndefined()
     expect(payload.id).toBeUndefined()
+  })
+})
+
+describe('detachedTabFrom, for a routine\'s tab', () => {
+  it('carries the routine and what is stored for it, so its changes are still marked', () => {
+    const routine = { schema: 'dbo', name: 'usp_orders', database: 'Sales', baseline: 'CREATE …' }
+    const payload = detachedTabFrom({ ...queryTab, sql: 'CREATE … edited', routine, changeCount: 2 })
+    expect(payload).toEqual({
+      kind: 'query',
+      connectionId: 'c1',
+      title: 'Monthly totals',
+      sql: 'CREATE … edited',
+      routine
+    })
+    // A copy, not the tab's own object.
+    expect(payload.routine).not.toBe(routine)
+  })
+
+  it('carries no routine for a plain query', () => {
+    expect(detachedTabFrom(queryTab)).not.toHaveProperty('routine')
+  })
+})
+
+/**
+ * The other half: a description opened in the window it lands in — or in the
+ * one it came from, when no window took it.
+ */
+describe('openTabFrom', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it('reopens a table in the view it was showing', async () => {
+    await openTabFrom(detachedTabFrom(tableTab))
+    const tabs = useTabStore()
+    const opened = tabs.tabs[0] as TableTab
+    expect(opened).toMatchObject({
+      kind: 'table',
+      schema: 'dbo',
+      table: 'customers',
+      objectType: 'view',
+      view: 'structure'
+    })
+    // Nothing of the old window's comes with it.
+    expect(opened.pendingEdits).toBe(0)
+    expect(opened.filters).toBeUndefined()
+  })
+
+  it('reopens a routine with its edits, its changes marked against what is stored', async () => {
+    const routine = { schema: 'dbo', name: 'usp_orders', baseline: 'CREATE … stored' }
+    await openTabFrom(detachedTabFrom({ ...queryTab, sql: 'CREATE … edited', routine }))
+    const opened = useTabStore().tabs[0] as QueryTab
+    expect(opened.sql).toBe('CREATE … edited')
+    expect(opened.routine).toEqual(routine)
+    expect(opened.title).toBe('usp_orders')
+  })
+
+  it('reopens a plain query with its title and text', async () => {
+    await openTabFrom(detachedTabFrom(queryTab))
+    const opened = useTabStore().tabs[0] as QueryTab
+    expect(opened).toMatchObject({ kind: 'query', title: 'Monthly totals', sql: 'SELECT 1' })
+    expect(opened.routine).toBeUndefined()
   })
 })

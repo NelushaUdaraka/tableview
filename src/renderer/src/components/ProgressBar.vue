@@ -35,7 +35,8 @@ const busy = useBusyStore()
 .progress__sweep {
   width: 40%;
   height: 100%;
-  background: var(--accent);
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent) 30%, var(--accent) 70%, transparent);
   /* Paused until the bar is up, so an idle window animates nothing. */
   animation: progress-sweep 1100ms ease-in-out infinite;
   animation-play-state: paused;

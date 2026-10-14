@@ -16,6 +16,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import type { CellValue, ColumnMeta } from '@shared/types'
 import { formatCellFull, parseCellInput } from '@shared/serialize'
+import AppIcon from './AppIcon.vue'
 import JsonTree from './JsonTree.vue'
 import { parseJsonCell, previewOf } from '../lib/jsonCell'
 
@@ -184,7 +185,7 @@ watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
 <template>
   <aside class="rowpanel">
     <header class="rowpanel__head">
-      <span class="kicker rowpanel__kicker">Row</span>
+      <span class="caps rowpanel__kicker">Row</span>
       <span class="rowpanel__title mono truncate">
         <template v-if="label">{{ label }}</template>
         <span v-else class="dim">none selected</span>
@@ -198,17 +199,22 @@ watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
         :disabled="!hasPrevious"
         @click="emit('move', -1)"
       >
-        ‹
+        <AppIcon name="chevron-left" :size="16" />
       </button>
       <button class="rowpanel__btn" title="Next row" :disabled="!hasNext" @click="emit('move', 1)">
-        ›
+        <AppIcon name="chevron-right" :size="16" />
       </button>
-      <button class="rowpanel__btn" title="Hide the row panel (Ctrl+I)" @click="emit('close')">
-        ✕
+      <button
+        class="rowpanel__btn rowpanel__btn--close"
+        title="Hide the row panel (Ctrl+I)"
+        @click="emit('close')"
+      >
+        <AppIcon name="x" :size="14" />
       </button>
     </header>
 
     <div v-if="fields.length === 0" class="rowpanel__empty">
+      <AppIcon name="panel-right" :size="18" />
       <p>Select a cell to see its whole row here.</p>
     </div>
 
@@ -317,7 +323,6 @@ watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  border-left: var(--rule) solid var(--border-strong);
   background: var(--bg-surface);
 }
 
@@ -326,15 +331,13 @@ watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
   align-items: center;
   gap: 8px;
   height: var(--h-gridheader);
-  padding: 0 4px 0 14px;
-  border-bottom: var(--rule) solid var(--border-strong);
+  padding: 0 6px 0 14px;
+  border-bottom: 1px solid var(--border-strong);
   background: var(--bg-app);
   flex: 0 0 auto;
 }
 .rowpanel__kicker {
   flex: 0 0 auto;
-  font-weight: 700;
-  letter-spacing: 0.14em;
 }
 .rowpanel__title {
   font-size: 12px;
@@ -345,24 +348,23 @@ watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
   flex: 1;
 }
 .rowpanel__btn {
-  width: 28px;
-  height: 28px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
   flex: 0 0 auto;
   border: none;
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-secondary);
-  font-size: 14px;
-  line-height: 1;
+  color: var(--text-muted);
   cursor: pointer;
+  transition:
+    background-color var(--transition),
+    color var(--transition);
 }
 .rowpanel__btn:hover:not(:disabled) {
-  background: var(--bg-hover);
+  background: var(--bg-hover-strong);
   color: var(--text-primary);
-}
-.rowpanel__btn:last-child:hover:not(:disabled) {
-  background: var(--accent);
-  color: var(--accent-text);
 }
 .rowpanel__btn:disabled {
   opacity: 0.35;
@@ -370,25 +372,39 @@ watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
 }
 
 .rowpanel__empty {
-  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 24px;
   color: var(--text-muted);
   font-size: 13px;
+  text-align: center;
+}
+.rowpanel__empty p {
+  margin: 0;
+  max-width: 220px;
+  line-height: 1.5;
 }
 
 .rowpanel__fields {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  padding: 4px 0;
 }
 
-/* Each field is a ruled band; state is marked on the leading edge. */
+/* Each field is a band; the one the grid has selected is lit, and a staged
+   edit is marked on the leading edge. */
 .rowpanel__field {
-  padding: 9px 14px;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 14px 10px;
+  transition: background-color var(--transition);
+}
+.rowpanel__field + .rowpanel__field {
+  border-top: 1px solid var(--border);
 }
 .rowpanel__field--selected {
-  background: var(--bg-raised);
-  box-shadow: var(--row-staged);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
 }
 .rowpanel__field--edited {
   box-shadow: var(--row-staged);
@@ -397,36 +413,37 @@ watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
 .rowpanel__label {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   margin-bottom: 6px;
   min-width: 0;
 }
 .rowpanel__name {
   font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--text-primary);
+}
+.rowpanel__field--selected .rowpanel__name {
+  color: var(--accent-fg);
 }
 .rowpanel__type {
   flex: 1;
-  font-size: 10px;
-  color: var(--text-dim);
+  font-size: 11px;
+  color: var(--text-muted);
   text-align: right;
 }
 .rowpanel__fk {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   flex: 0 0 auto;
   padding: 0;
   border: none;
-  border-radius: 0;
+  border-radius: var(--radius-xs);
   background: transparent;
-  color: var(--accent);
+  color: var(--accent-fg);
   cursor: pointer;
 }
 .rowpanel__fk svg {
@@ -434,8 +451,7 @@ watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
   height: 11px;
 }
 .rowpanel__fk:hover:not(:disabled) {
-  background: var(--accent);
-  color: var(--accent-text);
+  background: var(--accent-soft);
 }
 .rowpanel__fk:disabled {
   opacity: 0.3;
@@ -446,12 +462,12 @@ watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   flex: 0 0 auto;
   padding: 0;
   border: none;
-  border-radius: 0;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--warning);
   cursor: pointer;
@@ -461,26 +477,31 @@ watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
   height: 11px;
 }
 .rowpanel__revert:hover {
-  background: var(--accent);
-  color: var(--accent-text);
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
 }
 
-.rowpanel__null {
+/* Small chips beside the name: set NULL, and read as JSON or as text. */
+.rowpanel__null,
+.rowpanel__mode {
   flex: 0 0 auto;
-  padding: 1px 5px;
+  height: 18px;
+  padding: 0 5px;
   border: 1px solid var(--border-strong);
-  border-radius: 0;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-size: 10px;
+  font-weight: 500;
   cursor: pointer;
+  transition:
+    border-color var(--transition),
+    color var(--transition);
 }
-.rowpanel__null:hover:not(:disabled) {
+.rowpanel__null:hover:not(:disabled),
+.rowpanel__mode:hover {
   color: var(--text-primary);
-  border-color: var(--text-muted);
+  border-color: var(--border-hover);
 }
 .rowpanel__null:disabled {
   opacity: 0.35;
@@ -495,7 +516,7 @@ watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
   max-height: 420px;
   padding: 6px 9px;
   border: 1px solid var(--border-strong);
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
   color: var(--text-primary);
   font-family: var(--font-mono);
@@ -507,37 +528,32 @@ watch(() => props.fields, () => void nextTick(sizeAll), { immediate: true })
   resize: none;
   outline: none;
   user-select: text;
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition);
+}
+.rowpanel__value:hover {
+  border-color: var(--border-hover);
 }
 .rowpanel__value:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.rowpanel__value::placeholder {
+  color: var(--text-dim);
+  font-style: italic;
 }
 .rowpanel__value--readonly {
   color: var(--text-secondary);
+  background: transparent;
+}
+.rowpanel__value--readonly:hover {
+  border-color: var(--border-strong);
 }
 /* The tree brings its own rows; the box only has to hold them and scroll. */
 .rowpanel__value--json {
   padding: 5px 7px;
   cursor: default;
-}
-
-/* Says what the field is holding, and switches to the other way of reading it:
-   `{4}` over the text, `raw` over the tree. */
-.rowpanel__mode {
-  flex: 0 0 auto;
-  padding: 1px 5px;
-  border: 1px solid var(--border-strong);
-  border-radius: 0;
-  background: transparent;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  cursor: pointer;
-}
-.rowpanel__mode:hover {
-  color: var(--text-primary);
-  border-color: var(--text-muted);
 }
 .rowpanel__nullmark {
   color: var(--text-dim);

@@ -25,11 +25,14 @@ export interface AccentSwatch {
  *
  * Chosen to read as the app's own accent does: each one carries at least 3:1
  * against both the dark and the light ground, since the accent is used as text
- * as well as as a fill. Empty is the app's red — the connection that has not
- * asked for anything in particular.
+ * as well as as a fill. Empty is the app's indigo — the connection that has not
+ * asked for anything in particular. Red is offered rather than assumed: it is
+ * the colour people reach for to mark production, which is exactly why it
+ * should not be every window's colour.
  */
 export const ACCENT_SWATCHES: AccentSwatch[] = [
-  { hex: '', label: 'Default (red)' },
+  { hex: '', label: 'Default (indigo)' },
+  { hex: '#e03131', label: 'Red' },
   { hex: '#d9480f', label: 'Orange' },
   { hex: '#b45309', label: 'Amber' },
   { hex: '#2b8a3e', label: 'Green' },
@@ -47,8 +50,8 @@ const ON_ACCENT_DARK = '#16181d'
 /**
  * How readable white has to be on a colour before it is used.
  *
- * The app's own red carries 4.2:1 with white, and several of the swatches sit
- * just under that; the bar is what separates "this is the house style" from
+ * The app's own indigo carries 5.2:1 with white, and several of the swatches
+ * sit near 4:1; the bar is what separates "this is the house style" from
  * "nobody can read the button". Below it, ink wins — which is what rescues a
  * pale colour saved back when this was only a stripe in a list.
  */
@@ -127,7 +130,7 @@ export function textOn(colour: Rgb): string {
  * `--accent-bright` is the one that has to know the theme: it is the colour
  * the SQL keywords are painted in, over the editor's own ground, so it is a
  * light tint on the dark theme and a dark shade on the light one — the same
- * relationship the app's stock red already has with itself.
+ * relationship the app's own indigo already has with itself.
  *
  * Returns null for anything that is not a colour, which is how "this
  * connection has no colour of its own" reaches the caller.

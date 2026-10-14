@@ -371,6 +371,16 @@ class PeekWidget extends WidgetType {
       return node
     }
 
+    /** A button drawn with one of the window's icons rather than a typed glyph. */
+    const iconButton = (path: string, title: string, run: () => void, extra = ''): HTMLElement => {
+      const node = button('', title, run, `cm-changePeek__btn--icon ${extra}`.trim())
+      node.setAttribute('aria-label', title)
+      node.innerHTML =
+        '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ' +
+        `stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`
+      return node
+    }
+
     const head = element('div', 'cm-changePeek__head')
     head.append(
       element('span', 'cm-changePeek__count', `Change ${this.index + 1} of ${this.total}`),
@@ -381,9 +391,16 @@ class PeekWidget extends WidgetType {
         () => revertPeekedChange(view),
         'cm-changePeek__btn--revert'
       ),
-      button('‹', 'Previous change (Shift+Alt+F5)', () => previousChange(view)),
-      button('›', 'Next change (Alt+F5)', () => nextChange(view)),
-      button('✕', 'Close (Escape)', () => closePeek(view), 'cm-changePeek__btn--close')
+      iconButton('<path d="m15 18-6-6 6-6"/>', 'Previous change (Shift+Alt+F5)', () =>
+        previousChange(view)
+      ),
+      iconButton('<path d="m9 18 6-6-6-6"/>', 'Next change (Alt+F5)', () => nextChange(view)),
+      iconButton(
+        '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+        'Close (Escape)',
+        () => closePeek(view),
+        'cm-changePeek__btn--close'
+      )
     )
     root.append(head)
 
@@ -488,67 +505,84 @@ const changeTheme = EditorView.baseTheme({
   },
 
   '.cm-changePeek': {
-    margin: '2px 0 6px',
-    borderTop: '1px solid var(--border-strong)',
-    borderBottom: '1px solid var(--border-strong)',
-    backgroundColor: 'var(--bg-app)',
-    color: 'var(--text-primary)'
+    margin: '4px 16px 8px 4px',
+    border: '1px solid var(--border-overlay)',
+    borderRadius: '8px',
+    backgroundColor: 'var(--bg-overlay)',
+    boxShadow: 'var(--shadow-menu)',
+    color: 'var(--text-primary)',
+    overflow: 'hidden'
   },
-  '.cm-changePeek--added': { boxShadow: 'inset 3px 0 0 var(--success)' },
-  '.cm-changePeek--modified': { boxShadow: 'inset 3px 0 0 var(--warning)' },
-  '.cm-changePeek--deleted': { boxShadow: 'inset 3px 0 0 var(--danger)' },
+  '.cm-changePeek--added': { borderLeft: '3px solid var(--success)' },
+  '.cm-changePeek--modified': { borderLeft: '3px solid var(--warning)' },
+  '.cm-changePeek--deleted': { borderLeft: '3px solid var(--danger)' },
   '.cm-changePeek__head': {
     display: 'flex',
     alignItems: 'center',
     gap: '10px',
-    padding: '5px 14px',
-    borderBottom: '1px solid var(--border)',
+    padding: '6px 8px 6px 14px',
+    borderBottom: '1px solid var(--border-subtle)',
     fontFamily: 'var(--font-ui)',
     fontSize: '12px',
     lineHeight: '20px'
   },
   '.cm-changePeek__count': {
-    fontFamily: 'var(--font-mono)',
-    fontSize: '10px',
-    fontWeight: '700',
-    letterSpacing: '0.14em',
+    fontSize: '11px',
+    fontWeight: '600',
+    letterSpacing: '0.06em',
     textTransform: 'uppercase',
     color: 'var(--text-secondary)'
   },
   '.cm-changePeek__what': { color: 'var(--text-muted)', marginRight: '6px' },
   '.cm-changePeek__btn': {
-    height: '22px',
+    height: '24px',
     minWidth: '24px',
-    padding: '0 8px',
+    padding: '0 9px',
     border: '1px solid var(--border-strong)',
-    borderRadius: '0',
-    background: 'transparent',
+    borderRadius: '6px',
+    background: 'var(--bg-control)',
     color: 'var(--text-primary)',
     fontFamily: 'var(--font-ui)',
     fontSize: '12px',
+    fontWeight: '500',
     cursor: 'pointer'
   },
-  '.cm-changePeek__btn:hover': { backgroundColor: 'var(--bg-hover)' },
+  '.cm-changePeek__btn:hover': { backgroundColor: 'var(--bg-control-hover)' },
+  '.cm-changePeek__btn--icon': {
+    display: 'inline-grid',
+    placeItems: 'center',
+    width: '24px',
+    padding: '0'
+  },
   '.cm-changePeek__btn--revert': {
-    borderColor: 'var(--accent)',
+    borderColor: 'transparent',
+    backgroundColor: 'var(--accent)',
+    color: 'var(--accent-text)',
     fontWeight: '600'
   },
   '.cm-changePeek__btn--revert:hover': {
-    backgroundColor: 'var(--accent)',
-    color: 'var(--accent-text)'
+    backgroundColor: 'var(--accent-hover)'
   },
-  '.cm-changePeek__btn--close': { borderColor: 'transparent', color: 'var(--text-muted)' },
+  '.cm-changePeek__btn--close': {
+    borderColor: 'transparent',
+    background: 'transparent',
+    color: 'var(--text-muted)'
+  },
+  '.cm-changePeek__btn--close:hover': {
+    backgroundColor: 'var(--bg-hover-strong)',
+    color: 'var(--text-primary)'
+  },
   '.cm-changePeek__body': {
     maxHeight: '240px',
     overflow: 'auto',
     padding: '4px 0'
   },
   '.cm-changePeek__label': {
-    padding: '0 14px 2px',
-    fontFamily: 'var(--font-mono)',
-    fontSize: '10px',
-    fontWeight: '700',
-    letterSpacing: '0.14em',
+    padding: '2px 14px 4px',
+    fontFamily: 'var(--font-ui)',
+    fontSize: '11px',
+    fontWeight: '600',
+    letterSpacing: '0.06em',
     textTransform: 'uppercase',
     color: 'var(--danger)'
   },

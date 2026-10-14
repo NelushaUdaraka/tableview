@@ -170,7 +170,7 @@ await send('Input.insertText', { text: '\n-- not saved yet' })
 await waitFor(`document.querySelector('.query__changes')?.textContent.includes('1 change')`, 'the routine changed')
 
 const stageRow = async () => {
-  await ev(`[...document.querySelectorAll('.data__toolbar .btn')].find(b => b.textContent.trim() === '+ Row').click()`)
+  await ev(`[...document.querySelectorAll('.data__toolbar .btn')].find(b => b.textContent.trim() === 'Add row').click()`)
   await waitFor(`[...document.querySelectorAll('.data__toolbar .btn')].some(b => b.textContent.includes('Apply'))`, 'a staged row')
 }
 await ev(`[...document.querySelectorAll('.sidebar .item__name')].find(e => e.textContent.trim() === 'customers').closest('.item').click()`)

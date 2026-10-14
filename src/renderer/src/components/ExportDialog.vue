@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { CellValue, ColumnMeta, ExportFormat } from '@shared/types'
 import { exportRows } from '@shared/export'
+import AppIcon from './AppIcon.vue'
 import BaseModal from './BaseModal.vue'
 import { useToastStore } from '../stores/toasts'
 import { api } from '../lib/api'
@@ -112,11 +113,11 @@ async function copy(): Promise<void> {
       <div class="export__row">
         <label v-if="isDelimited" class="field" style="flex: 0 0 130px">
           <span class="field__label">Delimiter</span>
-          <input v-model="delimiter" class="input" maxlength="3" />
+          <input v-model="delimiter" class="input mono" maxlength="3" />
         </label>
         <label class="field" style="flex: 0 0 160px">
           <span class="field__label">NULL as</span>
-          <input v-model="nullString" class="input" placeholder="(empty)" />
+          <input v-model="nullString" class="input mono" placeholder="(empty)" />
         </label>
       </div>
 
@@ -132,10 +133,14 @@ async function copy(): Promise<void> {
     </div>
 
     <template #footer>
-      <button class="btn btn--muted export__copy" @click="copy">Copy to clipboard</button>
+      <button class="btn btn--muted export__copy" @click="copy">
+        <AppIcon name="copy" :size="14" />
+        Copy to clipboard
+      </button>
       <button class="btn btn--muted" @click="emit('close')">Cancel</button>
       <button class="btn btn--primary" :disabled="busy" @click="save">
         <span v-if="busy" class="spinner"></span>
+        <AppIcon v-else name="download" :size="14" />
         Save file
       </button>
     </template>
@@ -153,29 +158,29 @@ async function copy(): Promise<void> {
   gap: 16px;
   align-items: flex-end;
 }
-/* Six equal cells, so the whole set reads as one ruled strip. */
-.export__formats {
+/* Six equal options, so the set reads as one control. */
+.field > .export__formats {
   display: flex;
+  align-self: stretch;
 }
 .export__formats .seg__opt {
   flex: 1;
-  height: 32px;
-  justify-content: center;
+  height: calc(var(--h-control-lg) - 6px);
   padding: 0 8px;
   font-size: 12px;
 }
 .export__preview {
   margin: 0;
-  padding: 12px;
+  padding: 12px 14px;
   max-height: 260px;
   overflow: auto;
-  border: 1px solid var(--border-strong);
-  border-radius: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
   background: var(--bg-input);
   color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: 11px;
-  line-height: 1.6;
+  line-height: 1.65;
   white-space: pre;
 }
 /* The one footer action that is not about finishing: pushed away from the pair. */

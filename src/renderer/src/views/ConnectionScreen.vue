@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { ConnectionConfig, ConnectionSortKey, SavedConnection } from '@shared/types'
+import { parseHex, textOn } from '@shared/accent'
+import AppIcon from '../components/AppIcon.vue'
 import BaseModal from '../components/BaseModal.vue'
+import BrandMark from '../components/BrandMark.vue'
 import ConnectionForm from '../components/ConnectionForm.vue'
 import ContextMenu, { type MenuEntry } from '../components/ContextMenu.vue'
 import { useConnectionStore } from '../stores/connections'
@@ -354,6 +357,12 @@ async function moveToGroup(connection: SavedConnection, group: string): Promise<
   }
 }
 
+/** The ink that reads on a connection's own colour, for the icon on its tile. */
+function inkOn(colour?: string): string | undefined {
+  const rgb = parseHex(colour)
+  return rgb ? textOn(rgb) : undefined
+}
+
 function endpoint(connection: SavedConnection): string {
   return `${connection.host}:${connection.port}`
 }
@@ -402,10 +411,7 @@ function relativeTime(iso?: string): string {
   <div class="screen">
     <header class="screen__head">
       <div class="brand">
-        <svg class="brand__mark" viewBox="0 0 48 48" aria-hidden="true">
-          <path d="M15 6h18l9 18-9 18H15L6 24z" fill="currentColor" />
-          <path d="M7 19h34M5 24h38M7 29h34" stroke="var(--bg-surface)" stroke-width="3.4" />
-        </svg>
+        <BrandMark class="brand__mark" :size="44" />
         <div class="brand__text">
           <h1 class="brand__title">Beekeeper Clone</h1>
           <p class="brand__sub">
@@ -415,8 +421,13 @@ function relativeTime(iso?: string): string {
         </div>
       </div>
       <div class="screen__actions">
-        <button class="screen__theme" title="Toggle theme" @click="settings.toggleTheme()">
-          {{ settings.resolvedTheme === 'dark' ? '☀' : '☾' }}
+        <button
+          class="screen__theme"
+          :title="settings.resolvedTheme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme'"
+          aria-label="Toggle theme"
+          @click="settings.toggleTheme()"
+        >
+          <AppIcon :name="settings.resolvedTheme === 'dark' ? 'sun' : 'moon'" :size="16" />
         </button>
         <button
           class="screen__theme screen__more"
@@ -427,16 +438,19 @@ function relativeTime(iso?: string): string {
           @mousedown.stop
           @click.stop="toggleScreenMenu($event)"
         >
-          ⋮
+          <AppIcon name="more" :size="16" />
         </button>
-        <button class="btn btn--lg btn--primary" @click="startNew">New connection</button>
+        <button class="btn btn--lg btn--primary" @click="startNew">
+          <AppIcon name="plus" :size="16" />
+          New connection
+        </button>
       </div>
     </header>
 
     <div class="screen__body">
       <div class="screen__tools">
         <div class="screen__search">
-          <span class="screen__search-glyph">⌕</span>
+          <AppIcon class="screen__search-glyph" name="search" :size="15" />
           <input
             v-model="search"
             class="screen__search-input"
@@ -470,13 +484,18 @@ function relativeTime(iso?: string): string {
       </div>
 
       <div v-if="filtered.length === 0" class="empty-state">
+        <div class="empty-state__icon">
+          <AppIcon :name="connections.saved.length === 0 ? 'database' : 'search'" :size="20" />
+        </div>
         <div class="empty-state__title">
           {{ connections.saved.length === 0 ? 'No saved connections yet' : 'No matches' }}
         </div>
         <p v-if="connections.saved.length === 0">
           Create one to get started — host, login, and an optional SSH tunnel.
         </p>
+        <p v-else>Nothing matches “{{ search.trim() }}” by name, host or database.</p>
         <button v-if="connections.saved.length === 0" class="btn btn--primary" @click="startNew">
+          <AppIcon name="plus" :size="14" />
           New connection
         </button>
       </div>
@@ -503,9 +522,12 @@ function relativeTime(iso?: string): string {
               :aria-expanded="!folded(group.name)"
               @click="connections.toggleGroup(group.name)"
             >
-              <span class="group__caret" aria-hidden="true">
-                {{ folded(group.name) ? '▸' : '▾' }}
-              </span>
+              <AppIcon
+                class="group__caret"
+                :class="{ 'group__caret--open': !folded(group.name) }"
+                name="chevron-right"
+                :size="12"
+              />
               <span class="group__name" :class="{ 'group__name--none': !group.name }">
                 {{ group.label }}
               </span>
@@ -521,19 +543,24 @@ function relativeTime(iso?: string): string {
             @dblclick="open(connection)"
             @contextmenu.prevent="openContextMenu(connection, $event)"
           >
+            <!-- The connection's colour, on a tile, so a red one still says
+                 "production" from across the room. -->
             <span
-              class="row__stripe"
-              :style="{ background: connection.color || 'var(--text-muted)' }"
-            ></span>
+              class="row__avatar"
+              :class="{ 'row__avatar--plain': !connection.color }"
+              :style="connection.color ? { background: connection.color, color: inkOn(connection.color) } : {}"
+            >
+              <AppIcon name="database" :size="16" />
+            </span>
 
             <div class="row__cell row__cell--wide">
               <div class="row__name truncate">{{ connection.name }}</div>
-              <div class="row__sub mono truncate">{{ connection.database || 'master' }}</div>
+              <div class="row__sub truncate">{{ connection.database || 'master' }}</div>
             </div>
 
             <div class="row__cell row__cell--wide">
               <div class="row__endpoint mono truncate">{{ endpoint(connection) }}</div>
-              <div class="row__sub mono truncate">{{ route(connection) }}</div>
+              <div class="row__sub truncate">{{ route(connection) }}</div>
             </div>
 
             <div class="row__cell">
@@ -546,7 +573,7 @@ function relativeTime(iso?: string): string {
               <span class="badge">{{ connection.authType === 'windows' ? 'NTLM' : 'SQL' }}</span>
             </div>
 
-            <div class="row__cell row__cell--right row__time mono">
+            <div class="row__cell row__cell--right row__time">
               <div class="truncate">{{ relativeTime(connection.lastUsedAt) }}</div>
               <div v-if="createdOn(connection.createdAt)" class="row__sub truncate">
                 created {{ createdOn(connection.createdAt) }}
@@ -555,7 +582,7 @@ function relativeTime(iso?: string): string {
 
             <div class="row__buttons">
               <button
-                class="btn btn--sm btn--primary"
+                class="btn btn--sm row__connect"
                 :disabled="connections.connectingId === connection.id"
                 @click.stop="open(connection)"
               >
@@ -565,7 +592,7 @@ function relativeTime(iso?: string): string {
               <!-- Connect is what a row is for; everything else it can do is
                    behind here, and behind a right-click as it always was. -->
               <button
-                class="btn btn--sm btn--muted row__menu"
+                class="btn btn--sm btn--muted btn--icon row__menu"
                 title="Edit, duplicate, delete"
                 :aria-label="`More for ${connection.name}`"
                 aria-haspopup="menu"
@@ -574,7 +601,7 @@ function relativeTime(iso?: string): string {
                 @click.stop="toggleRowMenu(connection, $event)"
                 @dblclick.stop
               >
-                ⋮
+                <AppIcon name="more" :size="16" />
               </button>
             </div>
           </div>
@@ -587,9 +614,9 @@ function relativeTime(iso?: string): string {
     <footer class="screen__foot muted">
       <template v-if="settings.appInfo">
         <span>v{{ settings.appInfo.version }}</span>
-        <span class="screen__foot-sep">/</span>
+        <span class="screen__foot-sep" aria-hidden="true">·</span>
         <span>Electron {{ settings.appInfo.electronVersion }}</span>
-        <span class="screen__foot-sep">/</span>
+        <span class="screen__foot-sep" aria-hidden="true">·</span>
         <span>
           {{
             settings.appInfo.secretsAreOsBacked
@@ -671,7 +698,9 @@ function relativeTime(iso?: string): string {
 <style scoped>
 /* The seven tracks the header and every row share. */
 .screen {
-  --conn-cols: 6px minmax(0, 1.5fr) minmax(0, 2fr) 92px 92px 132px 148px;
+  --conn-cols: 64px minmax(0, 1.5fr) minmax(0, 2fr) 92px 92px 140px 136px;
+  /* Content keeps to a readable measure, centred, however wide the window. */
+  --screen-gutter: max(32px, calc((100% - 1120px) / 2));
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -679,77 +708,70 @@ function relativeTime(iso?: string): string {
 }
 .screen__head {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 32px;
-  padding: 28px 32px 22px;
-  border-bottom: var(--rule) solid var(--border-strong);
-  background: var(--bg-surface);
+  padding: 32px var(--screen-gutter) 8px;
   flex: 0 0 auto;
 }
 .brand {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 16px;
   min-width: 0;
 }
 .brand__mark {
-  width: 44px;
-  height: 44px;
-  flex: 0 0 auto;
-  color: var(--accent);
+  box-shadow: var(--shadow-sm);
+  border-radius: 10px;
 }
 .brand__text {
   min-width: 0;
 }
 .brand__title {
   margin: 0;
-  font-size: 28px;
-  font-weight: 800;
-  line-height: 1.05;
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.15;
   letter-spacing: -0.02em;
 }
 .brand__sub {
   margin: 4px 0 0;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  font-size: 13px;
   color: var(--text-muted);
 }
 .screen__actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
   flex: 0 0 auto;
 }
 .screen__theme {
-  width: var(--h-field);
-  height: var(--h-field);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
+  width: var(--h-control-lg);
+  height: var(--h-control-lg);
   border: 1px solid var(--border-strong);
-  background: transparent;
+  border-radius: var(--radius-sm);
+  background: var(--bg-control);
+  box-shadow: var(--shadow-xs);
   color: var(--text-secondary);
-  font-size: 15px;
   cursor: pointer;
+  transition:
+    background-color var(--transition),
+    border-color var(--transition),
+    color var(--transition);
 }
 .screen__theme:hover {
-  background: var(--bg-hover);
+  border-color: var(--border-hover);
+  background: var(--bg-control-hover);
   color: var(--text-primary);
 }
-.screen__more {
-  font-size: 18px;
-  line-height: 1;
+.screen__theme:focus-visible {
+  outline-offset: 2px;
 }
 .screen__more[aria-expanded='true'] {
   background: var(--bg-active);
   color: var(--text-primary);
-}
-.screen__head .btn--primary {
-  height: var(--h-field);
-  font-size: 14px;
 }
 
 .screen__body {
@@ -757,7 +779,7 @@ function relativeTime(iso?: string): string {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 24px 32px;
+  padding: 20px var(--screen-gutter) 24px;
   overflow: hidden;
 }
 /* Search takes the width it is given; the sort control keeps its own. */
@@ -770,20 +792,28 @@ function relativeTime(iso?: string): string {
 .screen__search {
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 38px;
-  padding: 0 12px;
+  gap: 9px;
+  height: var(--h-control-lg);
+  padding: 0 12px 0 11px;
   border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
+  box-shadow: var(--shadow-xs);
   max-width: 420px;
   flex: 1 1 420px;
   min-width: 0;
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition);
+}
+.screen__search:hover {
+  border-color: var(--border-hover);
 }
 .screen__search:focus-within {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 .screen__search-glyph {
-  font-size: 13px;
   color: var(--text-muted);
 }
 .screen__search-input {
@@ -792,7 +822,7 @@ function relativeTime(iso?: string): string {
   border: none;
   background: transparent;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 13px;
   outline: none;
   user-select: text;
 }
@@ -803,8 +833,9 @@ function relativeTime(iso?: string): string {
 .screen__sort {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex: 0 0 auto;
+  margin-left: auto;
 }
 .screen__sort-label {
   white-space: nowrap;
@@ -812,16 +843,14 @@ function relativeTime(iso?: string): string {
 .screen__sort-select {
   width: auto;
   min-width: 132px;
-  height: 38px;
-  font-family: var(--font-ui);
+  height: var(--h-control-lg);
 }
 /* Square, and the search field's height: the three read as one strip. */
 .screen__sort-flip {
-  width: 38px;
-  height: 38px;
+  width: var(--h-control-lg);
+  height: var(--h-control-lg);
   padding: 0;
-  justify-content: center;
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text-secondary);
 }
 .screen__sort-flip:hover:not(:disabled) {
@@ -832,21 +861,26 @@ function relativeTime(iso?: string): string {
 .table {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
+  margin-top: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-xs);
+  overflow: hidden;
 }
 .table__head {
   display: grid;
   grid-template-columns: var(--conn-cols);
   align-items: center;
-  height: 34px;
-  margin-top: 20px;
-  border-bottom: var(--rule) solid var(--border-strong);
+  height: 36px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-app) 50%, var(--bg-surface));
   flex: 0 0 auto;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
@@ -871,31 +905,32 @@ function relativeTime(iso?: string): string {
   align-items: center;
   gap: 8px;
   width: 100%;
-  height: 32px;
-  padding: 0 14px;
+  height: 34px;
+  padding: 0 18px;
   border: none;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-app);
+  background: color-mix(in srgb, var(--bg-app) 30%, var(--bg-surface));
   color: var(--text-secondary);
   cursor: pointer;
   text-align: left;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   position: sticky;
   top: 0;
   z-index: 1;
+  transition: color var(--transition);
 }
 .group:hover {
-  background: var(--bg-hover);
   color: var(--text-primary);
 }
 .group__caret {
-  width: 10px;
-  font-size: 9px;
   color: var(--text-muted);
+  transition: transform var(--transition);
+}
+.group__caret--open {
+  transform: rotate(90deg);
 }
 .group__name {
   min-width: 0;
@@ -906,12 +941,20 @@ function relativeTime(iso?: string): string {
 /* The bucket rather than a group anyone named, so it is said more quietly. */
 .group__name--none {
   color: var(--text-muted);
-  font-weight: 400;
 }
 .group__count {
-  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-muted);
   font-size: 10px;
   letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .row {
@@ -921,6 +964,10 @@ function relativeTime(iso?: string): string {
   height: 60px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
+  transition: background-color var(--transition);
+}
+.row:last-child {
+  border-bottom: none;
 }
 .row:hover {
   background: var(--bg-hover);
@@ -928,9 +975,24 @@ function relativeTime(iso?: string): string {
 .row--busy {
   opacity: 0.75;
 }
-/* The colour tag runs the full height of the row's leading edge. */
-.row__stripe {
-  align-self: stretch;
+/* The connection's colour on a tile at the head of the row. */
+.row__avatar {
+  display: grid;
+  place-items: center;
+  justify-self: end;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  color: #ffffff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    var(--shadow-xs);
+}
+.row__avatar--plain {
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  box-shadow: none;
 }
 .row__cell {
   padding: 0 8px;
@@ -943,7 +1005,7 @@ function relativeTime(iso?: string): string {
   text-align: right;
 }
 .row__name {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
 }
 .row__endpoint {
@@ -951,30 +1013,43 @@ function relativeTime(iso?: string): string {
   color: var(--text-secondary);
 }
 .row__sub {
-  font-size: 10px;
-  color: var(--text-dim);
-  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 3px;
 }
 .row__time {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.row__time .row__sub {
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--text-dim);
 }
 .row__buttons {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   justify-content: flex-end;
-  padding: 0 4px 0 8px;
+  padding: 0 14px 0 8px;
 }
 .row__buttons .btn {
-  height: 30px;
+  height: 28px;
 }
-/* Square, and the glyph centred in it rather than flush left like a label. */
+/* A quiet button at rest; the row being pointed at makes it the action. */
+.row:hover .row__connect:not(:disabled),
+.row:focus-within .row__connect:not(:disabled) {
+  border-color: transparent;
+  background: var(--accent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    var(--shadow-sm);
+  color: var(--accent-text);
+}
+.row:hover .row__connect:not(:disabled):hover {
+  background: var(--accent-hover);
+}
 .row__menu {
-  width: 30px;
-  padding: 0;
-  justify-content: center;
-  font-size: 16px;
-  line-height: 1;
+  width: 28px;
 }
 .row__menu[aria-expanded='true'] {
   background: var(--bg-active);
@@ -985,17 +1060,16 @@ function relativeTime(iso?: string): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 8px;
   height: var(--h-statusbar);
   padding: 0 32px;
-  border-top: var(--rule) solid var(--border-strong);
-  background: var(--bg-raised);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-app);
+  font-size: 12px;
+  color: var(--text-dim);
   flex: 0 0 auto;
 }
 .screen__foot-sep {
-  color: var(--border-strong);
+  color: var(--text-dim);
 }
 </style>

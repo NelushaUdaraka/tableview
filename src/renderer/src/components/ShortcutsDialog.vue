@@ -69,6 +69,15 @@ const GROUPS = [
     ]
   }
 ]
+
+/**
+ * A combination as the keys to press, one cap each — or null for a shortcut
+ * that is an instruction in words rather than keys.
+ */
+function keysOf(combo: string): string[] | null {
+  if (/\s/.test(combo)) return null
+  return combo.split('+')
+}
 </script>
 
 <template>
@@ -78,7 +87,10 @@ const GROUPS = [
         <h3 class="shortcuts__title">{{ group.title }}</h3>
         <div v-for="[keys, description] in group.items" :key="keys" class="shortcuts__row">
           <span class="shortcuts__label">{{ description }}</span>
-          <kbd>{{ keys }}</kbd>
+          <span v-if="keysOf(keys)" class="shortcuts__keys">
+            <kbd v-for="key in keysOf(keys)" :key="key">{{ key }}</kbd>
+          </span>
+          <span v-else class="shortcuts__words">{{ keys }}</span>
         </div>
       </section>
     </div>
@@ -89,44 +101,50 @@ const GROUPS = [
 </template>
 
 <style scoped>
-/* One ruled list: the label reads first, the keys sit at the right edge. */
+/* One list: the label reads first, the keys sit at the right edge as caps. */
 .shortcuts {
-  max-height: 340px;
+  max-height: 420px;
   overflow-y: auto;
+  padding-bottom: 8px;
 }
 .shortcuts__title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   margin: 0;
-  padding: 12px 20px 8px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-app);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
+  padding: 14px 20px 6px;
+  background: var(--bg-overlay);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--text-muted);
 }
 .shortcuts__row {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 9px 20px;
-  border-bottom: 1px solid var(--border);
+  min-height: 34px;
+  margin: 0 8px;
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+}
+.shortcuts__row:hover {
+  background: var(--bg-hover);
 }
 .shortcuts__label {
   flex: 1;
   font-size: 13px;
-}
-kbd {
-  flex: 0 0 auto;
-  padding: 3px 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: 0;
-  background: transparent;
   color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+}
+.shortcuts__keys {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.shortcuts__words {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 </style>

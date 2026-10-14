@@ -173,7 +173,8 @@ async function retryOnly(): Promise<void> {
 .expired__cmd {
   display: block;
   padding: 10px 12px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
   color: var(--text-primary);
   font-size: 12px;

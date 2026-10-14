@@ -9,6 +9,7 @@
  * paths through a document whose shape it does not know.
  */
 import { computed, ref } from 'vue'
+import AppIcon from './AppIcon.vue'
 import {
   DEFAULT_OPEN_DEPTH,
   entriesOf,
@@ -40,7 +41,12 @@ function toggle(key: string): void {
     <template v-for="entry in entries" :key="entry.key">
       <template v-if="isContainer(entry.value)">
         <button class="json__row json__row--branch" @click="toggle(entry.key)">
-          <span class="json__chevron">{{ isOpen(entry.key) ? '▾' : '▸' }}</span>
+          <AppIcon
+            class="json__chevron"
+            :class="{ 'json__chevron--open': isOpen(entry.key) }"
+            name="chevron-right"
+            :size="10"
+          />
           <span class="json__key truncate">{{ entry.key }}</span>
           <span class="json__preview">{{ previewOf(entry.value) }}</span>
         </button>
@@ -48,7 +54,7 @@ function toggle(key: string): void {
       </template>
 
       <div v-else class="json__row">
-        <span class="json__chevron"></span>
+        <span class="json__chevron json__chevron--blank"></span>
         <span class="json__key truncate">{{ entry.key }}</span>
         <span class="json__value" :class="`json__value--${kindOf(entry.value)}`">
           {{ scalarText(entry.value) }}
@@ -79,6 +85,7 @@ function toggle(key: string): void {
   width: 100%;
   padding: 1px 2px;
   border: none;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-secondary);
   font-family: inherit;
@@ -90,15 +97,20 @@ function toggle(key: string): void {
   cursor: pointer;
 }
 .json__row--branch:hover {
-  background: var(--bg-hover);
+  background: var(--bg-hover-strong);
 }
+/* Lined up with the first line of the text beside it, and turned a quarter
+   when the branch is open. */
 .json__chevron {
   flex: 0 0 auto;
-  width: 8px;
+  width: 10px;
+  height: 10px;
+  margin-top: 3.5px;
   color: var(--text-muted);
-  font-size: 8px;
-  /* Line the glyph up with the text beside it rather than the top of the row. */
-  line-height: 17px;
+  transition: transform var(--transition);
+}
+.json__chevron--open {
+  transform: rotate(90deg);
 }
 .json__key {
   flex: 0 0 auto;
@@ -119,13 +131,16 @@ function toggle(key: string): void {
   word-break: break-word;
   user-select: text;
 }
-/* The editor holds its keywords apart from everything else and leaves the rest
-   in the text shades; `true`, `false` and `null` are this document's. */
+/* The editor's own syntax colours, so a document reads the way the SQL
+   around it does: strings, numbers, and `true`, `false` and `null` as keywords. */
+.json__value--string {
+  color: var(--syntax-string);
+}
 .json__value--boolean,
 .json__value--null {
-  color: var(--accent-bright);
+  color: var(--syntax-keyword);
 }
 .json__value--number {
-  color: var(--text-primary);
+  color: var(--syntax-number);
 }
 </style>

@@ -9,6 +9,7 @@
  */
 import { computed, ref } from 'vue'
 import type { CellValue, ColumnMeta, TableFilter } from '@shared/types'
+import AppIcon from '../components/AppIcon.vue'
 import TabBar from '../components/TabBar.vue'
 import QueryView from './QueryView.vue'
 import TableView from './TableView.vue'
@@ -89,11 +90,15 @@ defineExpose({
         @open-related="(schema, table, filters) => emit('open-related', schema, table, filters)"
       />
       <div v-else class="empty-state">
+        <div class="empty-state__icon"><AppIcon name="terminal" :size="20" /></div>
         <div class="empty-state__title">No open tabs</div>
         <p v-if="hasSidebar">Pick a table on the left, or open a query tab.</p>
         <!-- No tree to pick from in a detached window, so say where it is. -->
         <p v-else>Open a query tab, or bring the schema tree in with Ctrl+B.</p>
-        <button class="btn btn--primary" @click="emit('new-query')">New query tab</button>
+        <button class="btn btn--primary" @click="emit('new-query')">
+          <AppIcon name="plus" :size="14" />
+          New query tab
+        </button>
       </div>
     </div>
   </div>

@@ -9,7 +9,9 @@
  * to open in a window of their own.
  */
 import { computed, ref } from 'vue'
+import AppIcon from './AppIcon.vue'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
+import type { IconName } from '../lib/icons'
 import { beginTabDrag, draggedTab, endTabDrag, markTabDropped } from '../lib/tabDrag'
 import { useTabStore, type Tab, type TabPane } from '../stores/tabs'
 
@@ -61,11 +63,11 @@ function onMenuSelect(action: string): void {
   else if (action === 'detach') emit('detach', id, { x: window.screenX + 80, y: window.screenY + 80 })
 }
 
-/** The glyph the tree gives the same thing: a routine's tab is that routine. */
-function icon(tab: Tab): string {
-  if (tab.kind === 'table') return '▤'
-  if (tab.routine) return tab.routine.type && tab.routine.type !== 'procedure' ? 'ƒ' : '⚙'
-  return '⌨'
+/** The icon the tree gives the same thing: a routine's tab is that routine. */
+function icon(tab: Tab): IconName {
+  if (tab.kind === 'table') return 'table'
+  if (tab.routine) return tab.routine.type && tab.routine.type !== 'procedure' ? 'function' : 'procedure'
+  return 'terminal'
 }
 
 /**
@@ -189,7 +191,7 @@ function onDragEnd(event: DragEvent, tabId: string): void {
           @dragstart="onDragStart($event, tab.id)"
           @dragend="onDragEnd($event, tab.id)"
         >
-          <span class="tab__icon">{{ icon(tab) }}</span>
+          <AppIcon class="tab__icon" :name="icon(tab)" :size="14" />
           <span class="tab__title truncate">{{ tab.title }}</span>
           <span v-if="tab.kind === 'query' && tab.running" class="spinner tab__spinner"></span>
           <span v-else-if="unsaved(tab)" class="tab__dot" :title="unsaved(tab)"></span>
@@ -198,7 +200,9 @@ function onDragEnd(event: DragEvent, tabId: string): void {
             class="tab__dot tab__dot--edit"
             :title="`${tab.pendingEdits} pending change(s)`"
           ></span>
-          <span class="tab__close" title="Close" @click.stop="tabs.close(tab.id)">✕</span>
+          <span class="tab__close" title="Close" @click.stop="tabs.close(tab.id)">
+            <AppIcon name="x" :size="12" />
+          </span>
         </button>
       </template>
       <span
@@ -208,7 +212,14 @@ function onDragEnd(event: DragEvent, tabId: string): void {
       ></span>
     </div>
 
-    <button class="tabbar__new" title="New query (Ctrl+T)" @click="emit('new-query')">+</button>
+    <button
+      class="tabbar__new"
+      title="New query (Ctrl+T)"
+      aria-label="New query"
+      @click="emit('new-query')"
+    >
+      <AppIcon name="plus" :size="16" />
+    </button>
 
     <ContextMenu
       v-if="menu"
@@ -222,12 +233,14 @@ function onDragEnd(event: DragEvent, tabId: string): void {
 </template>
 
 <style scoped>
+/* The strip's own hairline is painted under the tabs, so the active tab — on
+   the content's ground — covers it and reads as part of the panel below. */
 .tabbar {
   display: flex;
   align-items: stretch;
   height: var(--h-tabstrip);
-  border-bottom: var(--rule) solid var(--border-strong);
   background: var(--bg-app);
+  box-shadow: inset 0 -1px 0 var(--border-subtle);
   flex: 0 0 auto;
 }
 .tabbar__scroll {
@@ -244,41 +257,76 @@ function onDragEnd(event: DragEvent, tabId: string): void {
 .tabbar__drop {
   flex: 0 0 auto;
   width: 2px;
+  margin: 7px 0;
+  border-radius: 2px;
   background: var(--accent);
 }
 .tab {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   max-width: 220px;
-  min-width: 132px;
-  padding: 0 10px 0 14px;
+  min-width: 124px;
+  padding: 0 8px 0 12px;
   border: none;
-  border-right: 1px solid var(--border-subtle);
   background: transparent;
   color: var(--text-muted);
   font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
+  transition:
+    background-color var(--transition),
+    color var(--transition);
+}
+/* Short dividers between resting tabs, gone beside the one in front. */
+.tab + .tab::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 11px;
+  bottom: 11px;
+  width: 1px;
+  background: var(--border-subtle);
+}
+.tab:hover::before,
+.tab:hover + .tab::before,
+.tab--active::before,
+.tab--active + .tab::before {
+  opacity: 0;
 }
 .tab:hover {
   background: var(--bg-hover);
+  color: var(--text-secondary);
 }
-/* The active tab's accent sits on the top edge, so the strip reads as a set of
-   cards standing on the panel rather than underlined labels. */
-.tab--active {
+/* The active tab stands on the panel: the content's ground, hairline sides,
+   and the accent along its top edge. */
+.tab--active,
+.tab--active:hover {
   background: var(--bg-surface);
   color: var(--text-primary);
-  box-shadow: inset 0 2px 0 var(--accent);
+  box-shadow:
+    inset 0 2px 0 var(--accent),
+    inset 1px 0 0 var(--border-subtle),
+    inset -1px 0 0 var(--border-subtle);
 }
 /* Split view shows two tabs at once; the one in the pane that does not have
    the focus keeps its card but gives up the full-strength accent. */
-.tab--dimmed {
+.tab--dimmed,
+.tab--dimmed:hover {
   color: var(--text-secondary);
-  box-shadow: inset 0 2px 0 var(--border-strong);
+  box-shadow:
+    inset 0 2px 0 var(--border-hover),
+    inset 1px 0 0 var(--border-subtle),
+    inset -1px 0 0 var(--border-subtle);
 }
 .tab__icon {
-  font-size: 11px;
+  color: var(--text-muted);
+}
+.tab--active .tab__icon {
+  color: var(--accent-fg);
+}
+.tab--dimmed .tab__icon {
   color: var(--text-muted);
 }
 .tab__title {
@@ -294,39 +342,53 @@ function onDragEnd(event: DragEvent, tabId: string): void {
 .tab__dot {
   width: 7px;
   height: 7px;
-  background: var(--text-dim);
+  margin: 0 3px;
+  border-radius: 50%;
+  background: var(--text-muted);
   flex: 0 0 auto;
 }
 .tab__dot--edit {
   background: var(--accent);
 }
 .tab__close {
+  display: grid;
+  place-items: center;
   flex: 0 0 auto;
-  width: 16px;
-  text-align: center;
-  font-size: 11px;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-xs);
   color: var(--text-muted);
   opacity: 0;
+  transition:
+    opacity var(--transition),
+    background-color var(--transition),
+    color var(--transition);
 }
 .tab:hover .tab__close,
 .tab--active .tab__close {
   opacity: 1;
 }
 .tab__close:hover {
+  background: var(--bg-active);
   color: var(--text-primary);
 }
 .tabbar__new {
+  display: grid;
+  place-items: center;
   flex: 0 0 auto;
-  width: var(--h-tabstrip);
+  width: 30px;
+  margin: 4px 6px;
   border: none;
-  border-left: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-secondary);
-  font-size: 16px;
+  color: var(--text-muted);
   cursor: pointer;
+  transition:
+    background-color var(--transition),
+    color var(--transition);
 }
 .tabbar__new:hover {
-  background: var(--bg-hover);
+  background: var(--bg-hover-strong);
   color: var(--text-primary);
 }
 </style>

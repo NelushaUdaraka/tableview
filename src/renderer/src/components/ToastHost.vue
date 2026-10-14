@@ -1,7 +1,15 @@
 <script setup lang="ts">
+import AppIcon from './AppIcon.vue'
+import type { IconName } from '../lib/icons'
 import { useToastStore } from '../stores/toasts'
 
 const toasts = useToastStore()
+
+const ICON: Record<'info' | 'success' | 'error', IconName> = {
+  info: 'info',
+  success: 'circle-check',
+  error: 'circle-x'
+}
 </script>
 
 <template>
@@ -11,7 +19,9 @@ const toasts = useToastStore()
       :key="toast.id"
       class="toast"
       :class="`toast--${toast.kind}`"
+      :role="toast.kind === 'error' ? 'alert' : 'status'"
     >
+      <AppIcon class="toast__icon" :name="ICON[toast.kind]" :size="16" />
       <div class="toast__body">
         <div class="toast__message">{{ toast.message }}</div>
         <div v-if="toast.detail" class="toast__detail selectable">{{ toast.detail }}</div>
@@ -22,7 +32,7 @@ const toasts = useToastStore()
         aria-label="Dismiss"
         @click="toasts.dismiss(toast.id)"
       >
-        ✕
+        <AppIcon name="x" :size="14" />
       </button>
     </div>
   </div>
@@ -39,7 +49,7 @@ const toasts = useToastStore()
 .toasts {
   position: fixed;
   right: 16px;
-  bottom: calc(var(--h-statusbar) + 12px);
+  bottom: calc(var(--h-statusbar) + 14px);
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -49,26 +59,30 @@ const toasts = useToastStore()
   /* Only the toasts themselves take clicks — not the gaps between them. */
   pointer-events: none;
 }
-/* The state is marked on the leading edge, like every other staged thing. */
+/* The state is said by the icon, in its colour, rather than by a stripe. */
 .toast {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 11px 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: 0;
-  background: var(--bg-surface);
+  padding: 12px 10px 12px 14px;
+  border: 1px solid var(--border-overlay);
+  border-radius: 10px;
+  background: var(--bg-overlay);
   box-shadow: var(--shadow-menu);
   pointer-events: auto;
+  animation: rise-in var(--duration-slow) var(--ease-out);
 }
-.toast--success {
-  box-shadow: inset 3px 0 0 var(--success), var(--shadow-menu);
+.toast__icon {
+  margin-top: 1px;
 }
-.toast--error {
-  box-shadow: inset 3px 0 0 var(--danger), var(--shadow-menu);
+.toast--success .toast__icon {
+  color: var(--success);
 }
-.toast--info {
-  box-shadow: inset 3px 0 0 var(--accent), var(--shadow-menu);
+.toast--error .toast__icon {
+  color: var(--danger);
+}
+.toast--info .toast__icon {
+  color: var(--accent-fg);
 }
 /*
  * The text takes the room the button does not.
@@ -84,16 +98,18 @@ const toasts = useToastStore()
 .toast__message {
   font-weight: 600;
   font-size: 13px;
+  line-height: 18px;
   overflow-wrap: anywhere;
 }
 /* Pinned to the top-right corner, level with the first line of the message. */
 .toast__close {
   flex: 0 0 auto;
-  margin: -3px -7px 0 auto;
+  margin: -3px 0 0 auto;
 }
 .toast__detail {
-  margin-top: 5px;
+  margin-top: 4px;
   font-size: 12px;
+  line-height: 1.5;
   color: var(--text-secondary);
   font-family: var(--font-mono);
   max-height: 160px;

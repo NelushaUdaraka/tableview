@@ -19,10 +19,10 @@ import {
 
 /** The grounds the accent has to work against, from the stylesheet. */
 const GROUND = {
-  appDark: parseHex('#1a1918')!,
-  appLight: parseHex('#eae7e7')!,
-  surfaceDark: parseHex('#201e1d')!,
-  surfaceLight: parseHex('#f3f2f2')!
+  appDark: parseHex('#111317')!,
+  appLight: parseHex('#f4f5f7')!,
+  surfaceDark: parseHex('#16181d')!,
+  surfaceLight: parseHex('#ffffff')!
 }
 
 describe('parseHex', () => {
@@ -48,8 +48,8 @@ describe('parseHex', () => {
 
 describe('accentVariables', () => {
   it('says nothing for a connection with no colour of its own', () => {
-    // Which is how the stylesheet keeps the app's own red, rather than a copy
-    // of it that could drift.
+    // Which is how the stylesheet keeps the app's own indigo, rather than a
+    // copy of it that could drift.
     expect(accentVariables('', 'dark')).toBeNull()
     expect(accentVariables(undefined, 'light')).toBeNull()
     expect(accentVariables('not a colour', 'dark')).toBeNull()

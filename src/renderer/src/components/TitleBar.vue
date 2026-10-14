@@ -19,6 +19,7 @@ import { useSettingsStore } from '../stores/settings'
 import { useTabStore } from '../stores/tabs'
 import { dispatchMenuAction } from '../lib/menuBus'
 import { api } from '../lib/api'
+import BrandMark from './BrandMark.vue'
 
 const connections = useConnectionStore()
 const settings = useSettingsStore()
@@ -193,11 +194,8 @@ onBeforeUnmount(() => {
   >
     <div class="titlebar__left">
       <template v-if="!isMac">
-        <div class="titlebar__logo" aria-hidden="true">
-          <svg viewBox="0 0 16 16">
-            <path d="M8 1.2 14 4.6v6.8L8 14.8 2 11.4V4.6z" fill="currentColor" />
-            <path d="M3.4 6.6h9.2M3.4 9.4h9.2" stroke="var(--bg-raised)" stroke-width="1.6" />
-          </svg>
+        <div class="titlebar__logo">
+          <BrandMark :size="18" />
         </div>
         <nav ref="menuBar" class="titlebar__menus">
           <button
@@ -276,16 +274,17 @@ onBeforeUnmount(() => {
   align-items: stretch;
   height: var(--h-titlebar);
   flex: 0 0 auto;
-  background: var(--bg-raised);
-  border-bottom: var(--rule) solid var(--border-strong);
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--border-subtle);
   font-size: 13px;
   user-select: none;
   -webkit-app-region: drag;
   position: relative;
   z-index: 400;
 }
-.titlebar--blurred {
-  color: var(--text-muted);
+.titlebar--blurred .titlebar__menu,
+.titlebar--blurred .titlebar__title {
+  color: var(--text-dim);
 }
 
 .titlebar__left,
@@ -308,60 +307,61 @@ onBeforeUnmount(() => {
 .titlebar__logo {
   display: flex;
   align-items: center;
-  padding: 0 12px 0 14px;
-  color: var(--accent);
-}
-.titlebar__logo svg {
-  width: 17px;
-  height: 17px;
+  padding: 0 8px 0 12px;
 }
 
 .titlebar__menus {
   position: relative;
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  gap: 1px;
   -webkit-app-region: no-drag;
 }
 .titlebar__menu {
-  padding: 0 12px;
+  height: 28px;
+  padding: 0 9px;
   border: none;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
   font-size: 13px;
   cursor: default;
   white-space: nowrap;
+  transition:
+    background-color var(--transition),
+    color var(--transition);
 }
 .titlebar__menu:hover {
   background: var(--bg-hover-strong);
   color: var(--text-primary);
 }
-/* The open menu drops to the content ground and takes the accent underline,
-   so the strip reads as continuous with the panel below it. */
-.titlebar__menu--open {
-  background: var(--bg-app);
+.titlebar__menu--open,
+.titlebar__menu--open:hover {
+  background: var(--bg-active);
   color: var(--text-primary);
-  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .titlebar__dropdown {
   position: absolute;
-  top: 100%;
-  min-width: 272px;
-  padding: 4px 0;
-  border: 1px solid var(--border-strong);
-  border-radius: 0;
-  background: var(--bg-surface);
+  top: calc(100% + 4px);
+  min-width: 264px;
+  padding: 4px;
+  border: 1px solid var(--border-overlay);
+  border-radius: var(--radius);
+  background: var(--bg-overlay);
   box-shadow: var(--shadow-menu);
   z-index: 500;
+  animation: fade-in var(--duration-fast) var(--ease);
 }
 .titlebar__item {
   display: flex;
   align-items: center;
   gap: 24px;
   width: 100%;
-  padding: 7px 14px;
+  height: 28px;
+  padding: 0 10px;
   border: none;
-  border-radius: 0;
+  border-radius: 5px;
   background: transparent;
   color: var(--text-primary);
   font-size: 13px;
@@ -378,14 +378,13 @@ onBeforeUnmount(() => {
 }
 .titlebar__item-key {
   color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 .titlebar__sep {
   height: 1px;
-  margin: 4px 0;
-  background: var(--border-strong);
+  margin: 4px 6px;
+  background: var(--border-subtle);
 }
 
 .titlebar__title {
@@ -395,9 +394,8 @@ onBeforeUnmount(() => {
   flex: 0 1 auto;
   padding: 0 16px;
   color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.04em;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .titlebar__controls {
@@ -414,11 +412,14 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition:
+    background-color var(--transition),
+    color var(--transition);
 }
 .titlebar__control svg {
   width: 10px;
   height: 10px;
-  stroke-width: 1.2;
+  stroke-width: 1.1;
   fill: none;
   shape-rendering: crispEdges;
 }
@@ -426,9 +427,10 @@ onBeforeUnmount(() => {
   background: var(--bg-hover-strong);
   color: var(--text-primary);
 }
-/* Close is the one window button that earns the accent. */
+/* Close takes the platform's red, not the accent: it is the one window button
+   that ends something. */
 .titlebar__control--close:hover {
-  background: var(--accent);
-  color: var(--accent-text);
+  background: #e5484d;
+  color: #ffffff;
 }
 </style>

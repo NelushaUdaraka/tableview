@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { format as formatSql } from 'sql-formatter'
 import type { CellValue, ColumnMeta } from '@shared/types'
 import { statementAt, statementsInRange } from '@shared/sql/statements'
+import AppIcon from '../components/AppIcon.vue'
 import SqlEditor from '../components/SqlEditor.vue'
 import ResultsPanel from '../components/ResultsPanel.vue'
 import SplitPane from '../components/SplitPane.vue'
@@ -225,14 +226,21 @@ defineExpose({
               title="Ctrl+Enter"
               @click="run()"
             >
-              ▶ Run
-              <span class="query__key mono">CTRL ⏎</span>
+              <AppIcon name="play" :size="12" />
+              Run
+              <span class="query__key">
+                Ctrl
+                <AppIcon name="corner-down-left" :size="11" />
+              </span>
             </button>
             <button class="btn" title="Ctrl+Shift+Enter" @click="runSelection">
               Run selection
             </button>
             <button class="btn" title="Ctrl+Alt+Enter" @click="runCurrent">Run statement</button>
-            <button v-if="tab.running" class="btn btn--danger" @click="cancel">■ Cancel</button>
+            <button v-if="tab.running" class="btn btn--danger" @click="cancel">
+              <AppIcon name="stop" :size="12" />
+              Cancel
+            </button>
             <div class="query__spacer"></div>
 
             <!-- A routine's tab says how far it has moved from what is stored,
@@ -254,7 +262,7 @@ defineExpose({
                   aria-label="Previous change"
                   @click="editor?.previousChange()"
                 >
-                  ‹
+                  <AppIcon name="chevron-left" :size="14" />
                 </button>
                 <button
                   class="seg__opt"
@@ -263,7 +271,7 @@ defineExpose({
                   aria-label="Next change"
                   @click="editor?.nextChange()"
                 >
-                  ›
+                  <AppIcon name="chevron-right" :size="14" />
                 </button>
               </div>
               <button
@@ -278,10 +286,17 @@ defineExpose({
             </template>
 
             <button class="btn btn--muted" title="Ctrl+Shift+F" @click="formatDocument">
+              <AppIcon name="align-left" :size="14" />
               Format
             </button>
-            <button class="btn btn--muted" title="Ctrl+O" @click="openFile">Open…</button>
-            <button class="btn btn--muted" title="Ctrl+S" @click="save">Save</button>
+            <button class="btn btn--muted" title="Ctrl+O" @click="openFile">
+              <AppIcon name="folder-open" :size="14" />
+              Open…
+            </button>
+            <button class="btn btn--muted" title="Ctrl+S" @click="save">
+              <AppIcon name="save" :size="14" />
+              Save
+            </button>
           </div>
 
           <SqlEditor
@@ -333,24 +348,33 @@ defineExpose({
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  border-bottom: var(--rule) solid var(--border-strong);
 }
 .query__toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   height: var(--h-commandbar);
-  padding: 0 12px;
-  border-bottom: var(--rule) solid var(--border-strong);
+  padding: 0 10px 0 12px;
+  border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-surface);
   flex: 0 0 auto;
 }
 .query__toolbar .btn {
   flex: 0 0 auto;
 }
+/* The shortcut, set inside the Run button as a faint key cap. */
 .query__key {
-  font-size: 10px;
-  opacity: 0.75;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+  margin: 0 -4px 0 4px;
+  padding: 0 5px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--accent-text) 16%, transparent);
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.9;
 }
 .query__spacer {
   flex: 1;
@@ -360,23 +384,22 @@ defineExpose({
   align-items: center;
   gap: 7px;
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary);
   white-space: nowrap;
 }
 .query__changes--none {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 /* The gutter's colour for a changed line, so the count reads as those marks. */
 .query__changes-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
   background: var(--warning);
 }
 .query__nav .seg__opt {
-  justify-content: center;
-  width: 28px;
+  width: 26px;
   padding: 0;
-  font-size: 15px;
 }
 </style>

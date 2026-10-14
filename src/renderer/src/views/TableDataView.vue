@@ -29,6 +29,7 @@ import type {
   TableSort,
   TableStructure
 } from '@shared/types'
+import AppIcon from '../components/AppIcon.vue'
 import BaseModal from '../components/BaseModal.vue'
 import DataGrid, { type RowState } from '../components/DataGrid.vue'
 import FilterBuilder from '../components/FilterBuilder.vue'
@@ -1314,7 +1315,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       <span class="data__name mono truncate">
         {{ tab.schema }}.<strong>{{ tab.table }}</strong>
       </span>
-      <span v-if="rowCountLabel" class="data__rows mono">{{ rowCountLabel }}</span>
+      <span v-if="rowCountLabel" class="data__rows">{{ rowCountLabel }}</span>
       <!-- A tab picked again re-reads the page it already had. Nothing on
            screen changes while it does, so this is the only thing that says
            the rows are a moment old and being checked. -->
@@ -1326,7 +1327,8 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       <div class="data__spacer"></div>
 
       <button class="btn" :disabled="loading" @click="withPendingEdits(() => load())">
-        ⟳ Refresh
+        <AppIcon name="refresh" :size="14" />
+        Refresh
       </button>
       <!-- The native select does the choosing; the box around it carries the
            look and says what is chosen, as the sidebar's database switcher
@@ -1342,9 +1344,10 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
           class="data__auto-dot"
           :class="{ 'data__auto-dot--reading': autoReading }"
         ></span>
-        <span>Auto:</span>
+        <AppIcon v-else name="clock" :size="14" />
+        <span>Auto</span>
         <span class="data__auto-value">{{ autoRefreshChoice(autoRefresh).short }}</span>
-        <span class="data__auto-caret" aria-hidden="true">▾</span>
+        <AppIcon class="data__auto-caret" name="chevron-down" :size="12" />
         <select
           class="data__auto-select"
           :value="autoRefresh"
@@ -1361,6 +1364,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
         :class="{ 'btn--armed': showFilters || filters.length > 0 || !!rawWhere }"
         @click="showFilters = !showFilters"
       >
+        <AppIcon name="filter" :size="14" />
         Filter
         <span v-if="filters.length || rawWhere" class="data__dot"></span>
       </button>
@@ -1371,12 +1375,16 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
         :aria-pressed="showRowPanel"
         @click="toggleRowPanel"
       >
-        ▤ Row details
+        <AppIcon name="panel-right" :size="14" />
+        Row details
       </button>
 
       <template v-if="editable">
         <div class="divider-v"></div>
-        <button class="btn" @click="addRow">+ Row</button>
+        <button class="btn" @click="addRow">
+          <AppIcon name="plus" :size="14" />
+          Add row
+        </button>
         <button v-if="pendingCount > 0" class="btn btn--muted" :disabled="applying" @click="discard">
           Discard
         </button>
@@ -1407,6 +1415,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
     />
 
     <div v-if="warnNoPrimaryKey" class="data__warning">
+      <AppIcon name="triangle-alert" :size="14" />
       This table has no primary key. Edits match rows on every column, so a duplicate row would be
       changed more than once.
     </div>
@@ -1479,13 +1488,27 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
     </div>
 
     <div class="data__foot">
-      <button class="btn btn--sm" :disabled="!canPrevious || loading" @click="goToPage(-1)">
-        ‹ Prev
-      </button>
-      <span class="data__page num">{{ pageRange }} <span class="dim">of</span> {{ pageTotal }}</span>
-      <button class="btn btn--sm" :disabled="!canNext || loading" @click="goToPage(1)">
-        Next ›
-      </button>
+      <div class="data__pager">
+        <button
+          class="btn btn--sm btn--icon"
+          title="Previous page"
+          aria-label="Previous page"
+          :disabled="!canPrevious || loading"
+          @click="goToPage(-1)"
+        >
+          <AppIcon name="chevron-left" :size="14" />
+        </button>
+        <span class="data__page num">{{ pageRange }} <span class="dim">of</span> {{ pageTotal }}</span>
+        <button
+          class="btn btn--sm btn--icon"
+          title="Next page"
+          aria-label="Next page"
+          :disabled="!canNext || loading"
+          @click="goToPage(1)"
+        >
+          <AppIcon name="chevron-right" :size="14" />
+        </button>
+      </div>
 
       <select
         v-model.number="pageSize"
@@ -1500,9 +1523,9 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       </select>
 
       <div class="data__spacer"></div>
-      <span class="dim mono data__ms">{{ durationMs }} ms</span>
+      <span class="data__ms">{{ durationMs }} ms</span>
       <div class="divider-v data__foot-rule"></div>
-      <span class="dim mono truncate data__sql" :title="lastSql">
+      <span class="mono truncate data__sql" :title="lastSql">
         {{ lastSql.replace(/\s+/g, ' ') }}
       </span>
     </div>
@@ -1562,38 +1585,48 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
   min-height: 0;
 }
 /* One command bar: the view switch, what you are looking at, and what you can
-   do to it. The Data/Structure strip used to sit above this. */
+   do to it. */
 .data__toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   height: var(--h-commandbar);
-  padding: 0 12px;
-  border-bottom: var(--rule) solid var(--border-strong);
+  padding: 0 10px 0 12px;
+  border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-surface);
   flex: 0 0 auto;
 }
 .data__name {
   flex: 0 1 auto;
   min-width: 0;
+  margin-left: 6px;
   font-size: 13px;
-  color: var(--text-primary);
+  color: var(--text-muted);
 }
 .data__name strong {
-  font-weight: 700;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 .data__rows {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  color: var(--text-muted);
   font-size: 11px;
-  color: var(--text-dim);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 .data__refreshing {
   display: flex;
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
-  font-size: 11px;
-  color: var(--text-dim);
+  font-size: 12px;
+  color: var(--text-muted);
 }
 .data__spacer {
   flex: 1;
@@ -1610,15 +1643,14 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
 }
 .data__auto:focus-within {
   outline: 2px solid var(--accent);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
 .data__auto-value {
-  font-family: var(--font-mono);
-  font-size: 11px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 .data__auto-caret {
-  font-size: 9px;
-  color: var(--text-muted);
+  margin-right: -2px;
 }
 /* Transparent, but the real control: it takes every click on the box. */
 .data__auto-select {
@@ -1632,35 +1664,47 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
   opacity: 0;
   cursor: pointer;
 }
+/* The timer, lit while it runs and pulsing while it reads. */
 .data__auto-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
+  margin: 0 2px;
   flex: 0 0 auto;
+  border-radius: 50%;
   background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .data__auto-dot--reading {
   animation: data-auto-read 520ms ease-in-out infinite alternate;
 }
 .data__auto--paused .data__auto-dot {
   background: var(--text-muted);
+  box-shadow: none;
 }
 @keyframes data-auto-read {
   to {
-    opacity: 0.2;
+    opacity: 0.25;
   }
 }
 .data__dot {
   display: inline-block;
   width: 6px;
   height: 6px;
+  border-radius: 50%;
   background: var(--accent);
 }
 .data__warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--border-strong);
-  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+  background: color-mix(in srgb, var(--warning) 11%, var(--bg-surface));
   color: var(--text-primary);
   font-size: 12px;
+}
+.data__warning .icon {
+  color: var(--warning);
 }
 .data__grid {
   flex: 1;
@@ -1669,34 +1713,54 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
 .data__foot {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   height: var(--h-gridheader);
-  padding: 0 12px;
-  border-top: var(--rule) solid var(--border-strong);
+  padding: 0 12px 0 8px;
+  border-top: 1px solid var(--border-subtle);
   background: var(--bg-app);
-  font-size: 11px;
+  font-size: 12px;
   flex: 0 0 auto;
 }
+.data__pager {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.data__pager .btn {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+.data__pager .btn:hover:not(:disabled) {
+  background: var(--bg-hover-strong);
+}
 .data__page {
+  min-width: 64px;
+  padding: 0 4px;
   font-size: 12px;
   color: var(--text-secondary);
+  text-align: center;
   white-space: nowrap;
 }
 .data__pagesize {
   width: auto;
-  min-width: 72px;
-  padding-right: 24px;
+  min-width: 76px;
+  height: 26px;
+  padding-right: 26px;
   font-size: 12px;
+  background-position: right 6px center;
 }
 .data__ms {
   flex: 0 0 auto;
-  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 .data__foot-rule {
-  height: 16px;
+  height: 14px;
 }
 .data__sql {
   max-width: 44%;
   font-size: 11px;
+  color: var(--text-muted);
 }
 </style>

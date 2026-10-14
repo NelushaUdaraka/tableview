@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { RoutineObject, SchemaObject } from '@shared/types'
+import AppIcon from './AppIcon.vue'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
 import ObjectStructureTree from './ObjectStructureTree.vue'
 import { useConnectionStore } from '../stores/connections'
@@ -9,6 +10,7 @@ import { useSchemaStore } from '../stores/schema'
 import { useTabStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
 import { api } from '../lib/api'
+import type { IconName } from '../lib/icons'
 
 const emit = defineEmits<{
   (event: 'open-table', schema: string, table: string, type: 'table' | 'view'): void
@@ -176,12 +178,12 @@ function expand(object: SchemaObject): void {
   schema.toggleObject(connectionId.value, object.schema, object.name)
 }
 
-function objectIcon(object: SchemaObject): string {
-  return object.type === 'view' ? '◫' : '▤'
+function objectIcon(object: SchemaObject): IconName {
+  return object.type === 'view' ? 'view' : 'table'
 }
 
-function routineIcon(routine: RoutineObject): string {
-  return routine.type === 'procedure' ? '⚙' : 'ƒ'
+function routineIcon(routine: RoutineObject): IconName {
+  return routine.type === 'procedure' ? 'procedure' : 'function'
 }
 
 function formatCount(value?: number): string {
@@ -209,7 +211,7 @@ defineExpose({ focusFilter, refresh })
     <!-- Identity lives here as well as in the status bar: the connection names
          itself at the top of the tree it owns. -->
     <div class="sidebar__conn">
-      <div class="kicker sidebar__conn-kicker">Connection</div>
+      <div class="caps sidebar__conn-kicker">Connection</div>
       <div class="sidebar__conn-name">
         <span class="sidebar__dot" :class="`sidebar__dot--${connectionState}`"></span>
         <span class="truncate">{{ connections.active?.name ?? 'No connection' }}</span>
@@ -218,11 +220,11 @@ defineExpose({ focusFilter, refresh })
 
     <div class="sidebar__db">
       <div class="sidebar__db-field">
-        <div class="caps">Database</div>
+        <AppIcon class="sidebar__db-icon" name="database" :size="14" />
         <div class="sidebar__db-value">
           <span class="mono truncate">{{ currentDatabase || '(no database)' }}</span>
-          <span class="sidebar__db-caret">▾</span>
         </div>
+        <AppIcon class="sidebar__db-caret" name="chevron-down" :size="14" />
         <!-- The native select carries the behaviour; the block above carries the
              look, so the control keeps its platform dropdown. -->
         <select
@@ -239,20 +241,25 @@ defineExpose({ focusFilter, refresh })
       </div>
       <button
         class="sidebar__db-btn"
+        :class="{ 'sidebar__db-btn--on': schema.showSystemDatabases }"
         :title="schema.showSystemDatabases ? 'Hide system databases' : 'Show system databases'"
+        :aria-pressed="schema.showSystemDatabases"
         @click="schema.showSystemDatabases = !schema.showSystemDatabases"
       >
-        {{ schema.showSystemDatabases ? '◉' : '○' }}
+        <AppIcon :name="schema.showSystemDatabases ? 'eye' : 'eye-off'" :size="15" />
       </button>
-      <button class="sidebar__db-btn" title="Refresh (F5)" @click="refresh">⟳</button>
+      <button class="sidebar__db-btn" title="Refresh (F5)" aria-label="Refresh" @click="refresh">
+        <AppIcon name="refresh" :size="15" />
+      </button>
     </div>
 
-    <nav class="sidebar__tabs">
+    <nav class="sidebar__tabs seg">
       <button
         v-for="entry in (['objects', 'history', 'saved'] as Panel[])"
         :key="entry"
-        class="sidebar__tab"
-        :class="{ 'sidebar__tab--active': panel === entry }"
+        class="sidebar__tab seg__opt"
+        :class="{ 'sidebar__tab--active seg__opt--on': panel === entry }"
+        :aria-pressed="panel === entry"
         @click="panel = entry"
       >
         {{ entry === 'objects' ? 'Schema' : entry === 'history' ? 'History' : 'Saved' }}
@@ -263,7 +270,7 @@ defineExpose({ focusFilter, refresh })
     <template v-if="panel === 'objects'">
       <div class="sidebar__filter">
         <div class="search">
-          <span class="search__glyph">⌕</span>
+          <AppIcon class="search__glyph" name="search" :size="14" />
           <input
             ref="filterInput"
             v-model="schema.filter"
@@ -271,7 +278,7 @@ defineExpose({ focusFilter, refresh })
             placeholder="Filter tables…"
             spellcheck="false"
           />
-          <span class="search__hint mono">CTRL F</span>
+          <span class="search__hint">Ctrl F</span>
         </div>
       </div>
 
@@ -282,7 +289,10 @@ defineExpose({ focusFilter, refresh })
 
         <template v-else>
           <section v-if="pinnedObjects.length" class="group">
-            <div class="group__head group__head--pinned">Pinned</div>
+            <div class="group__head group__head--pinned">
+              <AppIcon class="group__chevron" name="star" :size="12" />
+              Pinned
+            </div>
             <button
               v-for="object in pinnedObjects"
               :key="`pin-${object.schema}.${object.name}`"
@@ -291,14 +301,19 @@ defineExpose({ focusFilter, refresh })
               @click="emit('open-table', object.schema, object.name, object.type)"
               @contextmenu.prevent="openMenu($event, object.schema, object.name, object.type)"
             >
-              <span class="item__icon item__icon--pin">★</span>
+              <AppIcon class="item__icon item__icon--pin" name="star" :size="13" />
               <span class="item__name truncate">{{ object.schema }}.{{ object.name }}</span>
             </button>
           </section>
 
           <section v-for="group in schema.groups" :key="group.schema" class="group">
             <button class="group__head" @click="schema.toggleExpanded(group.schema)">
-              <span class="group__chevron">{{ schema.expanded[group.schema] === false ? '▸' : '▾' }}</span>
+              <AppIcon
+                class="group__chevron"
+                :class="{ 'group__chevron--open': schema.expanded[group.schema] !== false }"
+                name="chevron-right"
+                :size="12"
+              />
               <span class="truncate">{{ group.schema }}</span>
               <span class="group__count">
                 {{ group.tables.length + group.views.length + group.routines.length }}
@@ -343,9 +358,12 @@ defineExpose({ focusFilter, refresh })
                       />
                     </svg>
                   </span>
-                  <span class="item__icon" :class="{ 'item__icon--view': object.type === 'view' }">
-                    {{ objectIcon(object) }}
-                  </span>
+                  <AppIcon
+                    class="item__icon"
+                    :class="{ 'item__icon--view': object.type === 'view' }"
+                    :name="objectIcon(object)"
+                    :size="14"
+                  />
                   <span class="item__name truncate">{{ object.name }}</span>
                   <span class="item__count">{{ formatCount(object.rowCountEstimate) }}</span>
                 </button>
@@ -369,7 +387,7 @@ defineExpose({ focusFilter, refresh })
               >
                 <!-- Nothing to open out: a routine is its definition. -->
                 <span class="item__chevron item__chevron--blank"></span>
-                <span class="item__icon item__icon--routine">{{ routineIcon(routine) }}</span>
+                <AppIcon class="item__icon item__icon--routine" :name="routineIcon(routine)" :size="14" />
                 <span class="item__name truncate">{{ routine.name }}</span>
               </button>
             </template>
@@ -386,7 +404,7 @@ defineExpose({ focusFilter, refresh })
     <template v-else-if="panel === 'history'">
       <div class="sidebar__filter">
         <div class="search">
-          <span class="search__glyph">⌕</span>
+          <AppIcon class="search__glyph" name="search" :size="14" />
           <input
             v-model="library.historySearch"
             class="search__input"
@@ -427,8 +445,13 @@ defineExpose({ focusFilter, refresh })
             <div class="saved__name truncate">{{ query.name }}</div>
             <div class="saved__sql mono truncate">{{ query.sql.replace(/\s+/g, ' ').trim() }}</div>
           </button>
-          <button class="saved__del" title="Delete" @click="library.deleteSavedQuery(query.id)">
-            ✕
+          <button
+            class="saved__del"
+            title="Delete"
+            aria-label="Delete saved query"
+            @click="library.deleteSavedQuery(query.id)"
+          >
+            <AppIcon name="trash" :size="14" />
           </button>
         </div>
         <div v-if="library.savedQueries.length === 0" class="sidebar__empty muted">
@@ -449,29 +472,30 @@ defineExpose({ focusFilter, refresh })
 </template>
 
 <style scoped>
+/* The sidebar is chrome: it shares the frame's ground with the title and
+   status bars, and the content beside it sits a step lighter. */
 .sidebar {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: var(--bg-surface);
-  border-right: var(--rule) solid var(--border-strong);
+  background: var(--bg-app);
 }
 
 /* --- connection + database header ---------------------------------------- */
 .sidebar__conn {
-  padding: 12px 14px 11px;
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 14px 14px 8px;
 }
 .sidebar__conn-kicker {
-  margin-bottom: 3px;
+  margin-bottom: 4px;
+  font-size: 10px;
 }
 .sidebar__conn-name {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 15px;
-  font-weight: 800;
+  font-size: 14px;
+  font-weight: 600;
   letter-spacing: -0.01em;
   min-width: 0;
 }
@@ -479,39 +503,65 @@ defineExpose({ focusFilter, refresh })
   width: 8px;
   height: 8px;
   flex: 0 0 auto;
+  border-radius: 50%;
   background: var(--text-muted);
 }
 .sidebar__dot--connected {
   background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
 }
 .sidebar__dot--connecting {
   background: var(--warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 22%, transparent);
 }
 .sidebar__dot--error {
   background: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent);
 }
 
 .sidebar__db {
   display: flex;
-  align-items: stretch;
-  border-bottom: var(--rule) solid var(--border-strong);
+  align-items: center;
+  gap: 2px;
+  padding: 0 10px 12px 14px;
+  border-bottom: 1px solid var(--border-subtle);
 }
+/* Looks like a select, and is one: the real control lies over it. */
 .sidebar__db-field {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex: 1;
   min-width: 0;
-  padding: 9px 14px;
+  height: 30px;
+  margin-right: 4px;
+  padding: 0 8px 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-control);
+  box-shadow: var(--shadow-xs);
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition);
+}
+.sidebar__db-field:hover {
+  border-color: var(--border-hover);
+}
+.sidebar__db-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.sidebar__db-icon,
+.sidebar__db-caret {
+  color: var(--text-muted);
 }
 .sidebar__db-value {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 1px;
-  font-size: 13px;
-}
-.sidebar__db-caret {
-  font-size: 9px;
-  color: var(--text-muted);
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
 }
 /* Transparent, but still the real control — it takes every click on the block. */
 .sidebar__db-select {
@@ -526,72 +576,62 @@ defineExpose({ focusFilter, refresh })
   cursor: pointer;
 }
 .sidebar__db-btn {
-  width: 40px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
   flex: 0 0 auto;
   border: none;
-  border-left: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-secondary);
-  font-size: 14px;
+  color: var(--text-muted);
   cursor: pointer;
+  transition:
+    background-color var(--transition),
+    color var(--transition);
 }
 .sidebar__db-btn:hover {
-  background: var(--bg-hover);
+  background: var(--bg-hover-strong);
   color: var(--text-primary);
 }
+.sidebar__db-btn--on {
+  color: var(--accent-fg);
+}
 
-/* --- panel tabs ----------------------------------------------------------- */
+/* --- panel switch ---------------------------------------------------------- */
 .sidebar__tabs {
   display: flex;
-  align-items: stretch;
-  height: 36px;
-  border-bottom: var(--rule) solid var(--border-strong);
+  margin: 12px 12px 0 14px;
 }
 .sidebar__tab {
   flex: 1;
-  padding: 0 12px;
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  text-align: left;
-  cursor: pointer;
-}
-.sidebar__tab + .sidebar__tab {
-  border-left: 1px solid var(--border-subtle);
-}
-.sidebar__tab:hover {
-  color: var(--text-primary);
-}
-.sidebar__tab--active {
-  color: var(--text-primary);
-  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 /* --- filter --------------------------------------------------------------- */
 .sidebar__filter {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 10px 12px 8px 14px;
 }
 .search {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 34px;
-  padding: 0 10px;
+  height: 30px;
+  padding: 0 6px 0 9px;
   border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition);
+}
+.search:hover {
+  border-color: var(--border-hover);
 }
 .search:focus-within {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 .search__glyph {
-  flex: 0 0 auto;
-  font-size: 12px;
   color: var(--text-muted);
 }
 .search__input {
@@ -609,14 +649,20 @@ defineExpose({ focusFilter, refresh })
 }
 .search__hint {
   flex: 0 0 auto;
-  font-size: 10px;
+  padding: 2px 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
   color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
 }
 
 .sidebar__scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  padding-bottom: 10px;
 }
 .sidebar__loading,
 .sidebar__empty {
@@ -629,62 +675,81 @@ defineExpose({ focusFilter, refresh })
 }
 .sidebar__foot {
   padding: 10px 12px;
-  border-top: var(--rule) solid var(--border-strong);
+  border-top: 1px solid var(--border-subtle);
 }
 
 /* --- the tree ------------------------------------------------------------- */
-/* Group headings sit on the recessed ground, ruled top and bottom, so each
-   schema reads as a band rather than an indented label. */
+/* Schemas are quiet section headings; the objects under them are rounded
+   rows that light up under the pointer. */
+.group + .group {
+  margin-top: 4px;
+}
 .group__head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  height: 26px;
-  padding: 0 14px;
+  height: 28px;
+  padding: 0 14px 0 12px;
   border: none;
-  border-top: 1px solid var(--border-subtle);
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-app);
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   cursor: pointer;
   text-align: left;
+  transition: color var(--transition);
+}
+.group__head:hover {
+  color: var(--text-primary);
 }
 .group__head--pinned {
-  border-top: none;
-  color: var(--accent);
   cursor: default;
 }
+.group__head--pinned:hover {
+  color: var(--text-muted);
+}
+.group__head--pinned .group__chevron {
+  color: var(--key);
+}
 .group__chevron {
-  width: 8px;
-  font-size: 8px;
+  color: var(--text-dim);
+  transition: transform var(--transition);
+}
+.group__chevron--open {
+  transform: rotate(90deg);
 }
 .group__count {
   margin-left: auto;
-  font-weight: 700;
+  font-weight: 500;
+  letter-spacing: 0;
   color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
 }
 
 .item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: 100%;
+  gap: 7px;
+  width: calc(100% - 12px);
   height: 28px;
-  padding: 0 14px 0 6px;
+  margin: 0 6px;
+  padding: 0 8px 0 2px;
   border: none;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-primary);
+  color: var(--text-secondary);
+  font-size: 13px;
   cursor: pointer;
   text-align: left;
+  transition:
+    background-color var(--transition),
+    color var(--transition);
 }
 .item--flush {
-  padding-left: 14px;
+  padding-left: 10px;
 }
 /* The twisty is part of the row, so it takes its own clicks and leaves the
    rest of the line to open the table. It is the full height of the row for the
@@ -695,8 +760,8 @@ defineExpose({ focusFilter, refresh })
   justify-content: center;
   align-self: stretch;
   flex: 0 0 auto;
-  width: 14px;
-  color: var(--text-secondary);
+  width: 16px;
+  color: var(--text-dim);
 }
 .item__chevron svg {
   width: 10px;
@@ -715,116 +780,123 @@ defineExpose({ focusFilter, refresh })
   pointer-events: none;
 }
 .item:hover {
-  background: var(--bg-hover);
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
 }
-/* The object the active tab is showing, marked on its leading edge. */
-.item--active {
-  background: var(--bg-raised);
-  box-shadow: var(--row-staged);
+/* The object the active tab is showing. */
+.item--active,
+.item--active:hover {
+  background: var(--accent-soft);
+  color: var(--text-primary);
 }
 .item__icon {
-  flex: 0 0 auto;
-  width: 11px;
-  color: var(--text-muted);
-  font-size: 11px;
-}
-.item__icon--view {
   color: var(--text-muted);
 }
-.item__icon--routine {
-  color: var(--text-muted);
+.item--active .item__icon {
+  color: var(--accent-fg);
 }
 .item__icon--pin {
-  color: var(--accent);
+  color: var(--key);
 }
 .item__name {
   flex: 1;
   min-width: 0;
-  font-family: var(--font-mono);
-  font-size: 12px;
 }
 .item__count {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
 
 .history {
   display: block;
-  width: 100%;
-  padding: 9px 14px;
+  width: calc(100% - 12px);
+  margin: 0 6px 2px;
+  padding: 8px 10px;
   border: none;
-  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
   text-align: left;
   cursor: pointer;
+  transition: background-color var(--transition);
 }
 .history:hover {
-  background: var(--bg-hover);
-}
-.history--failed {
-  box-shadow: inset 3px 0 0 var(--danger);
-}
-.history--failed .history__sql {
-  color: var(--danger);
+  background: var(--bg-hover-strong);
 }
 .history__sql {
-  font-size: 11px;
-  line-height: 1.4;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-primary);
 }
 .history__meta {
   display: flex;
   gap: 10px;
-  margin-top: 5px;
-  font-size: 10px;
-  color: var(--text-dim);
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
 }
 .history__rows {
   margin-left: auto;
+}
+.history--failed .history__rows {
+  color: var(--danger);
 }
 
 .saved {
   display: flex;
   align-items: center;
-  border-bottom: 1px solid var(--border);
+  margin: 0 6px 2px;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--transition);
+}
+.saved:hover {
+  background: var(--bg-hover-strong);
 }
 .saved__open {
   flex: 1;
   min-width: 0;
-  padding: 9px 14px;
+  padding: 8px 10px;
   border: none;
   background: transparent;
   color: var(--text-primary);
   text-align: left;
   cursor: pointer;
 }
-.saved__open:hover {
-  background: var(--bg-hover);
-}
 .saved__name {
   font-size: 13px;
   font-weight: 600;
 }
 .saved__sql {
-  font-size: 10px;
-  color: var(--text-dim);
-  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 3px;
 }
 .saved__del {
-  width: 28px;
-  height: 28px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
   flex: 0 0 auto;
-  margin-right: 6px;
+  margin-right: 4px;
   border: none;
+  border-radius: 5px;
   background: transparent;
   color: var(--text-muted);
-  font-size: 12px;
   cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--transition),
+    background-color var(--transition),
+    color var(--transition);
+}
+.saved:hover .saved__del,
+.saved__del:focus-visible {
+  opacity: 1;
 }
 .saved__del:hover {
-  background: var(--accent);
-  color: var(--accent-text);
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  color: var(--danger);
 }
 </style>

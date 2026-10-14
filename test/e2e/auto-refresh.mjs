@@ -176,7 +176,7 @@ check(!(await ev(`!!document.querySelector('.data__refreshing')`)), 'the timerâ€
 await shot('01-auto-on')
 
 // --- 3. held while edits are staged --------------------------------------------
-await ev(`[...document.querySelectorAll('.data__toolbar .btn')].find(b => b.textContent.trim() === '+ Row').click()`)
+await ev(`[...document.querySelectorAll('.data__toolbar .btn')].find(b => b.textContent.trim() === 'Add row').click()`)
 await waitFor(`document.querySelector('.data__auto')?.classList.contains('data__auto--paused')`, 'the control paused')
 await insert('five')
 await delay(7000)

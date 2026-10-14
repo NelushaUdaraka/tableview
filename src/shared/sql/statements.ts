@@ -346,6 +346,13 @@ export function returnsRows(sql: string): boolean {
  * (SQL Server 2016 SP1+) replaces it in place, keeping its permissions — so
  * the definition tab is an editor for the object rather than a copy of it.
  * Anything that is not a leading `CREATE` of a module is returned untouched.
+ *
+ * A gap of plain spaces after `CREATE` becomes one. SQL Server drops the
+ * words of an `OR ALTER` it was sent but keeps the spaces either side of
+ * them, so a routine saved from this tab comes back as `CREATE   PROCEDURE`;
+ * putting `OR ALTER` back in front of that gap would widen it by two spaces
+ * on every save. A gap with a line break in it was written that way, and
+ * stays.
  */
 export function asCreateOrAlter(definition: string): string {
   for (const token of tokenize(definition)) {
@@ -356,7 +363,9 @@ export function asCreateOrAlter(definition: string): string {
     const match = /^(\s*)CREATE(\s+)(?!OR\s+ALTER\b)(PROC|PROCEDURE|FUNCTION|VIEW|TRIGGER)\b/i.exec(text)
     if (!match) return definition
     const at = token.start + match[1].length + 'CREATE'.length
-    return `${definition.slice(0, at)} OR ALTER${definition.slice(at)}`
+    const gap = match[2]
+    if (/[\r\n]/.test(gap)) return `${definition.slice(0, at)} OR ALTER${definition.slice(at)}`
+    return `${definition.slice(0, at)} OR ALTER ${definition.slice(at + gap.length)}`
   }
   return definition
 }

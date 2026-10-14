@@ -210,4 +210,34 @@ describe('asCreateOrAlter', () => {
     expect(asCreateOrAlter('SELECT 1 -- CREATE PROCEDURE')).toBe('SELECT 1 -- CREATE PROCEDURE')
     expect(asCreateOrAlter('-- CREATE PROCEDURE p\nSELECT 1')).toBe('-- CREATE PROCEDURE p\nSELECT 1')
   })
+
+  /**
+   * SQL Server drops the words of an `OR ALTER` it was sent and keeps the
+   * spaces either side of them: `CREATE OR ALTER PROCEDURE` is stored as
+   * `CREATE   PROCEDURE`.
+   */
+  it('reads back the gap SQL Server leaves as one space', () => {
+    expect(asCreateOrAlter('CREATE   PROCEDURE dbo.p AS SELECT 1')).toBe(
+      'CREATE OR ALTER PROCEDURE dbo.p AS SELECT 1'
+    )
+    expect(asCreateOrAlter('CREATE \t PROC p AS SELECT 1')).toBe('CREATE OR ALTER PROC p AS SELECT 1')
+  })
+
+  it('opens the same script however many times it is saved and read back', () => {
+    // What SQL Server keeps of a script it is sent.
+    const stored = (script: string): string => script.replace(/\bOR(\s+)ALTER\b/i, '$1')
+    const opened = asCreateOrAlter('CREATE PROCEDURE dbo.p AS SELECT 1')
+    let script = opened
+    for (let save = 0; save < 5; save += 1) script = asCreateOrAlter(stored(script))
+    expect(script).toBe(opened)
+  })
+
+  it('keeps a line break after CREATE where it was written', () => {
+    expect(asCreateOrAlter('CREATE\nPROCEDURE p AS SELECT 1')).toBe(
+      'CREATE OR ALTER\nPROCEDURE p AS SELECT 1'
+    )
+    expect(asCreateOrAlter('CREATE \r\n  PROCEDURE p AS SELECT 1')).toBe(
+      'CREATE OR ALTER \r\n  PROCEDURE p AS SELECT 1'
+    )
+  })
 })

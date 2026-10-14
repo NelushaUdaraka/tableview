@@ -462,7 +462,7 @@ Three layers, all runnable on Linux:
 
 | Command | What it covers |
 | --- | --- |
-| `npm test` | 773 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh |
+| `npm test` | 776 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh |
 | `npm run test:integration` | 66 tests against a **real SQL Server 2022** and a **real sshd** |
 | `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
 

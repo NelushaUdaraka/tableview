@@ -175,7 +175,8 @@ check(steps.at(-1).tab === 'usp_e2e_orders', 'tab is not titled by the routine')
 check(steps.at(-1).label === 'No changes', 'a freshly opened routine reports changes')
 check(steps.at(-1).gutter, 'no change gutter on a routine tab')
 check(steps.at(-1).marked, 'the tree does not mark the open routine')
-check(/^CREATE OR ALTER\s+PROCEDURE/.test(opened[0]), 'not opened as CREATE OR ALTER')
+// SQL Server keeps `CREATE   PROCEDURE` of what it was sent; the gap reads back as one space.
+check(opened[0] === 'CREATE OR ALTER PROCEDURE dbo.usp_e2e_orders', 'not opened as CREATE OR ALTER')
 
 // --- 2. three separate edits ------------------------------------------------
 await toLineEnd(6)
@@ -377,6 +378,8 @@ check((await storedDefinition()).includes('-- saved on close'), 'Save and close 
 // was closed from the background.
 await openRoutine()
 await waitFor(`document.querySelector('.query__changes')?.textContent.includes('No changes')`, 'the routine once more')
+// Saved twice now, and read back: still one space after CREATE OR ALTER.
+check((await editorLines())[0] === 'CREATE OR ALTER PROCEDURE dbo.usp_e2e_orders', 'saving widened the first line')
 await toLineEnd(6)
 await send('Input.insertText', { text: ', no_such_column' })
 await waitFor(`document.querySelector('.query__changes')?.textContent.includes('1 change')`, 'an edit that will not compile')

@@ -266,10 +266,16 @@ function closeIfEmptied(): void {
   if (props.detached && tabs.tabs.length === 0) void api.closeWindow()
 }
 
+/**
+ * Disconnecting takes every tab on the connection with it, so staged edits
+ * and a routine's unsaved changes are asked about first — the same questions
+ * closing those tabs one by one would ask. Any answer of Cancel keeps the
+ * connection, and every tab, as they were.
+ */
 async function disconnect(): Promise<void> {
   const id = connections.activeId
   if (!id) return
-  tabs.closeForConnection(id)
+  if (!(await tabs.closeConnection(id))) return
   schema.reset()
   await connections.disconnect(id)
 }

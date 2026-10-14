@@ -47,6 +47,7 @@ import { serializeError } from '../db/sqlserver/client'
 import { AppData } from '../storage/appData'
 import { runMenuRole } from '../menu'
 import { chromeState } from '../window'
+import { closeGuard } from '../closeGuard'
 import { checkSsmPrerequisites } from '../tunnel/ssmPreflight'
 import { listSsmInstances } from '../tunnel/ec2Instances'
 
@@ -194,6 +195,18 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   handle(CHANNELS.windowMenuRole, (call, role: MenuRole) => {
     runMenuRole(role, call.window)
+  })
+
+  // -- unsaved work ------------------------------------------------------------
+  // The renderer knows what it has not saved; the guard holds the window's
+  // close, and the app's quit, while it says so, and asks it.
+
+  handle(CHANNELS.windowUnsavedWork, (call, unsaved: boolean) => {
+    if (call.window) closeGuard.setUnsaved(call.window, unsaved === true)
+  })
+
+  handle(CHANNELS.windowCloseAnswer, (call, proceed: boolean) => {
+    if (call.window) closeGuard.answer(call.window, proceed === true)
   })
 
   // -- saved connections ----------------------------------------------------

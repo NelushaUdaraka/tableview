@@ -264,6 +264,9 @@ rather than opening a query that would match nothing.
 - Edit cells in place — the editor grows past the cell for long or multi-line values, `Enter`
   commits, `Shift+Enter` adds a line, `Tab` moves on — or edit the same row from the row panel
 - Insert rows, mark rows for deletion — all staged locally
+- **Staged edits are never dropped without a word** — reloading, sorting, filtering or paging,
+  picking another tab, closing the tab, disconnecting, closing the window and quitting all stop and
+  ask first: apply them, discard them, or stay where you are. The question says which of those it is
 - One `Apply` sends the whole change set, executed **inside a transaction**: either all of it lands
   or none of it does
 - Rows are addressed by primary key; a keyless table falls back to matching every column and the UI
@@ -327,6 +330,13 @@ others* and *Close all* all ask about every routine they would close. A save tha
 tab and puts it on screen with the error; dragging the tab into another window takes its text
 along, so that does not ask either.
 
+Disconnecting, closing the window and quitting take every tab with them, so they ask the same
+questions — tables' staged edits first, then each routine — and say which of them it is: "Save and
+disconnect", "Save and quit". Cancel on any one keeps the connection, the window and every tab as
+they were. A window's close is held by the main process while the window says it has unsaved work,
+and quitting asks each such window in turn, bringing it to the front; quitting needs asking for on its
+own, because with connections open the app exits outright and no window ever gets a close event.
+
 **One title bar**
 
 Window controls and the menu live in the same strip, VS Code style: the window is frameless on
@@ -372,7 +382,7 @@ One connection is active per window, and **File → New Window** (`Ctrl+N`) open
 — the intended way to work with several databases at once. Each window keeps its own connection,
 tabs and schema tree; connections are namespaced per window, so two windows opening the *same* saved
 connection get their own pool and tunnel rather than evicting one another. Closing a window closes
-what it opened. Saved connections and settings are shared, since one process owns those files.
+what it opened — once anything unsaved in it has been asked about. Saved connections and settings are shared, since one process owns those files.
 
 **A connection's colour is the window's accent**
 
@@ -462,7 +472,7 @@ Three layers, all runnable on Linux:
 
 | Command | What it covers |
 | --- | --- |
-| `npm test` | 776 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh |
+| `npm test` | 799 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh |
 | `npm run test:integration` | 66 tests against a **real SQL Server 2022** and a **real sshd** |
 | `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
 
@@ -480,7 +490,7 @@ and flips `AllowTcpForwarding` on, which the `linuxserver/openssh-server` image 
 ### End-to-end
 
 ```bash
-scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | routines | auto-refresh | ssm-form
+scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | routines | auto-refresh | unsaved | ssm-form
 ```
 
 On a headless box it starts Xvfb itself. It needs Electron's usual Linux libraries:
@@ -513,6 +523,11 @@ The suites:
   it with changes unsaved: Cancel keeps it, *Close all* from another tab still asks, Discard leaves
   the server alone, an unchanged routine closes without asking, *Save and close* writes it, and a
   save that fails keeps the tab and shows it
+- **unsaved** — disconnects with nothing unsaved and checks nothing is asked; then, with a row staged
+  in a table and a routine changed, checks disconnecting asks about both and says it is
+  disconnecting, and that Cancel keeps the connection; that the window's ✕ and File → Exit ask in
+  their own words and Cancel keeps the window and the app; and that once every question is answered
+  the window really does close and the app goes with it
 - **auto-refresh** — checks a table opens with it off and offers the fixed intervals, turns it on and
   waits for a row written from outside to turn up unprompted, stages an edit and checks it holds
   (and says why) until the edit is discarded, takes the tab away and back, turns it off, and drops
@@ -542,6 +557,7 @@ src/
 │   ├── storage/              JSON stores + credential vault
 │   ├── ipc/                  handlers, each wrapped in a result envelope
 │   ├── menu.ts, window.ts    native menu + roles, frameless windows and their state
+│   ├── closeGuard.ts         holds a window's close, and the quit, while it has unsaved work
 │   └── index.ts
 ├── preload/index.ts          contextBridge façade
 ├── shared/                   used by both sides
@@ -566,6 +582,7 @@ src/
     ├── lib/autoRefresh.ts    a table re-reading itself: the intervals, and what holds a read back
     ├── lib/lineDiff.ts       what differs from a routine's stored definition, and putting one change back
     ├── lib/changeTracking.ts the editor's change marks, the peek under a change, and its revert
+    ├── lib/runQueryTab.ts    runs a query tab, on screen or not, and says whether it saved a routine
     ├── lib/sortConnections.ts the orders the connection list can be read in
     ├── lib/connectionGroups.ts the headings the list is filed under
     ├── stores/               connections, schema, tabs (and panes), library,

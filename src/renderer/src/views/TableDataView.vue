@@ -56,7 +56,7 @@ import { useTabStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
 import { useConnectionStore } from '../stores/connections'
 import { useCredentialsStore } from '../stores/credentials'
-import type { TableTab } from '../stores/tabs'
+import type { LeaveReason, TableTab } from '../stores/tabs'
 import { api } from '../lib/api'
 
 const props = defineProps<{ tab: TableTab }>()
@@ -214,18 +214,38 @@ function revertCell(rowIndex: number, columnIndex: number): void {
 
 type PendingChoice = 'apply' | 'discard' | 'cancel'
 
+/** What is about to take the staged edits with it: a reload, or the view going. */
+type PendingReason = 'reload' | LeaveReason
+
+/** How the prompt says it, so it is not "reloading" when it is disconnecting. */
+const PENDING_CAUSE: Record<PendingReason, string> = {
+  reload: 'Reloading the table',
+  leave: 'Leaving the table',
+  close: 'Closing the table',
+  disconnect: 'Disconnecting',
+  'close-window': 'Closing the window',
+  quit: 'Quitting'
+}
+
 /**
  * Asks what to do with staged edits that are about to be lost.
  *
  * Reloading the table replaces the rows the edits are keyed against, so they
  * cannot survive it — but silently dropping them is how a page of retyped
- * values disappears on a stray Refresh.
+ * values disappears on a stray Refresh. Leaving takes the view, and the edits
+ * with it.
  */
-const pendingPrompt = ref<{ resolve: (choice: PendingChoice) => void } | null>(null)
+const pendingPrompt = ref<{
+  reason: PendingReason
+  resolve: (choice: PendingChoice) => void
+} | null>(null)
 
-function askAboutPendingEdits(): Promise<PendingChoice> {
+function askAboutPendingEdits(reason: PendingReason = 'reload'): Promise<PendingChoice> {
+  // A question already on screen — a sort that asked, then the window being
+  // closed — is withdrawn rather than left waiting for an answer forever.
+  pendingPrompt.value?.resolve('cancel')
   return new Promise((resolve) => {
-    pendingPrompt.value = { resolve }
+    pendingPrompt.value = { reason, resolve }
   })
 }
 
@@ -249,10 +269,13 @@ async function withPendingEdits(action: () => unknown): Promise<void> {
   await action()
 }
 
-/** The tab store asks this before leaving or closing this table's tab. */
-async function confirmLeave(): Promise<boolean> {
+/**
+ * The tab store asks this before this table's view goes: another tab picked,
+ * the tab closed, the connection closed, the window closed.
+ */
+async function confirmLeave(reason: LeaveReason): Promise<boolean> {
   if (pendingCount.value === 0) return true
-  const choice = await askAboutPendingEdits()
+  const choice = await askAboutPendingEdits(reason)
   if (choice === 'cancel') return false
   if (choice === 'apply') return apply()
   discard()
@@ -1493,7 +1516,8 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       @close="menu = null"
     />
 
-    <!-- Reloading rekeys every staged edit, so this is the last chance to keep them. -->
+    <!-- Reloading rekeys every staged edit, and leaving drops them: this is
+         the last chance to keep them. -->
     <BaseModal
       v-if="pendingPrompt"
       kicker="Unsaved changes"
@@ -1504,7 +1528,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
     >
       <p class="prompt__text">
         {{ pendingCount }} staged {{ pendingCount === 1 ? 'change has' : 'changes have' }} not been
-        written to the database. Reloading the table would discard
+        written to the database. {{ PENDING_CAUSE[pendingPrompt.reason] }} would discard
         {{ pendingCount === 1 ? 'it' : 'them' }}.
       </p>
 

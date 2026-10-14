@@ -12,6 +12,8 @@ import { useSettingsStore } from '../../../src/renderer/src/stores/settings'
 import {
   hasUnsavedRoutineChanges,
   useTabStore,
+  type ClosePrompt,
+  type LeaveReason,
   type QueryTab,
   type TableTab
 } from '../../../src/renderer/src/stores/tabs'
@@ -768,5 +770,140 @@ describe('closing a routine\'s tab with its changes unsaved', () => {
     tabs.update<QueryTab>(tabs.activeId!, { sql: 'SELECT 2', dirty: true })
     expect(await tabs.close(tabs.activeId!)).toBe(true)
     expect(tabs.closePrompt).toBeNull()
+  })
+})
+
+/**
+ * Disconnecting, closing the window and quitting each take tabs with them,
+ * so each asks the same questions closing those tabs would — and says which
+ * of them it is, so the prompt is not "reloading" when it is disconnecting.
+ */
+describe('disconnecting and closing the window', () => {
+  const routine = { schema: 'dbo', name: 'usp_orders', baseline: 'CREATE OR ALTER PROCEDURE p AS SELECT 1' }
+
+  async function asked(tabs: ReturnType<typeof useTabStore>): Promise<ClosePrompt | null> {
+    for (let i = 0; i < 20 && !tabs.closePrompt; i += 1) await Promise.resolve()
+    return tabs.closePrompt
+  }
+
+  /** A table on screen holding staged edits, as its view's leave guard reports. */
+  async function tableWithStagedEdits(
+    tabs: ReturnType<typeof useTabStore>,
+    answer: boolean,
+    connectionId = 'c1'
+  ): Promise<{ id: string; reasons: LeaveReason[] }> {
+    await tabs.openTable(connectionId, 'dbo', 'customers')
+    const id = tabs.activeId!
+    const reasons: LeaveReason[] = []
+    tabs.setLeaveGuard(id, async (reason) => {
+      reasons.push(reason)
+      return answer
+    })
+    tabs.update<TableTab>(id, { pendingEdits: 2 })
+    return { id, reasons }
+  }
+
+  it('says why when it asks a view to go', async () => {
+    const tabs = useTabStore()
+    const { id, reasons } = await tableWithStagedEdits(tabs, true)
+    await tabs.openQuery('c1', 'SELECT 1') // picks another tab: leave
+    await tabs.select(id)
+    await tabs.close(id) // close
+    expect(reasons).toEqual(['leave', 'close'])
+  })
+
+  it('asks a tab moving to another window as one being left, not closed', async () => {
+    const tabs = useTabStore()
+    const { id, reasons } = await tableWithStagedEdits(tabs, true)
+    await tabs.close(id, { moving: true })
+    expect(reasons).toEqual(['leave'])
+  })
+
+  it('asks the connection\'s tabs before disconnecting, and keeps them all on a no', async () => {
+    const tabs = useTabStore()
+    await tabs.openRoutine('c1', routine)
+    tabs.update<QueryTab>(tabs.activeId!, { sql: 'CREATE OR ALTER PROCEDURE p AS SELECT 2' })
+    const table = await tableWithStagedEdits(tabs, true)
+
+    const closing = tabs.closeConnection('c1')
+    const prompt = await asked(tabs)
+    expect(table.reasons).toEqual(['disconnect'])
+    expect(prompt?.reason).toBe('disconnect')
+    tabs.answerClose(false)
+
+    expect(await closing).toBe(false)
+    expect(tabs.tabs).toHaveLength(2)
+  })
+
+  it('closes only the connection\'s own tabs once they have said yes', async () => {
+    const tabs = useTabStore()
+    await tabs.openRoutine('c1', routine)
+    tabs.update<QueryTab>(tabs.activeId!, { sql: 'CREATE OR ALTER PROCEDURE p AS SELECT 2' })
+    await tabs.openQuery('c2', 'SELECT 1')
+
+    const closing = tabs.closeConnection('c1')
+    await asked(tabs)
+    tabs.answerClose(true)
+
+    expect(await closing).toBe(true)
+    expect(tabs.tabs.map((tab) => tab.connectionId)).toEqual(['c2'])
+  })
+
+  it('stops at a table that is to stay, before asking any routine', async () => {
+    const tabs = useTabStore()
+    await tabs.openRoutine('c1', routine)
+    tabs.update<QueryTab>(tabs.activeId!, { sql: 'CREATE OR ALTER PROCEDURE p AS SELECT 2' })
+    await tableWithStagedEdits(tabs, false)
+
+    expect(await tabs.closeConnection('c1')).toBe(false)
+    expect(tabs.closePrompt).toBeNull()
+    expect(tabs.tabs).toHaveLength(2)
+  })
+
+  it('disconnects with nothing to ask about without asking', async () => {
+    const tabs = useTabStore()
+    await tabs.openRoutine('c1', routine)
+    await tabs.openQuery('c1', 'SELECT 1')
+    expect(await tabs.closeConnection('c1')).toBe(true)
+    expect(tabs.tabs).toHaveLength(0)
+  })
+
+  it('asks every tab before the window closes or the app quits, and closes nothing itself', async () => {
+    const tabs = useTabStore()
+    await tabs.openRoutine('c1', routine)
+    tabs.update<QueryTab>(tabs.activeId!, { sql: 'CREATE OR ALTER PROCEDURE p AS SELECT 2' })
+    await tabs.openQuery('c2', 'SELECT 1')
+    const table = await tableWithStagedEdits(tabs, true, 'c2')
+
+    const quitting = tabs.canCloseWindow('quit')
+    const prompt = await asked(tabs)
+    expect(prompt?.reason).toBe('quit')
+    expect(table.reasons).toEqual(['quit'])
+    tabs.answerClose(true)
+
+    expect(await quitting).toBe(true)
+    // The window takes its tabs with it; there is nothing to take away here.
+    expect(tabs.tabs).toHaveLength(3)
+  })
+
+  it('knows when anything in the window would be lost', async () => {
+    const tabs = useTabStore()
+    expect(tabs.hasUnsavedWork).toBe(false)
+
+    await tabs.openRoutine('c1', routine)
+    const routineId = tabs.activeId!
+    await tabs.openTable('c1', 'dbo', 'customers')
+    const tableId = tabs.activeId!
+    expect(tabs.hasUnsavedWork).toBe(false)
+
+    tabs.update<QueryTab>(routineId, { sql: 'CREATE OR ALTER PROCEDURE p AS SELECT 2' })
+    expect(tabs.hasUnsavedWork).toBe(true)
+    tabs.update<QueryTab>(routineId, { sql: routine.baseline })
+    expect(tabs.hasUnsavedWork).toBe(false)
+
+    tabs.update<TableTab>(tableId, { pendingEdits: 1 })
+    expect(tabs.hasUnsavedWork).toBe(true)
+    tabs.update<TableTab>(tableId, { pendingEdits: 0 })
+    expect(tabs.hasUnsavedWork).toBe(false)
   })
 })

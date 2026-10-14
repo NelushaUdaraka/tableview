@@ -13,10 +13,20 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import BaseModal from './BaseModal.vue'
 import { diffLines, splitLines } from '../lib/lineDiff'
 import { runQueryTab } from '../lib/runQueryTab'
-import { useTabStore, type QueryTab } from '../stores/tabs'
+import { useTabStore, type CloseReason, type QueryTab } from '../stores/tabs'
 
 const tabs = useTabStore()
 const saving = ref(false)
+
+/** What is about to take the tab, as the prompt says it and as Save says it. */
+const CAUSE: Record<CloseReason, { sentence: string; save: string }> = {
+  close: { sentence: 'Closing the tab', save: 'Save and close' },
+  disconnect: { sentence: 'Disconnecting', save: 'Save and disconnect' },
+  'close-window': { sentence: 'Closing the window', save: 'Save and close' },
+  quit: { sentence: 'Quitting', save: 'Save and quit' }
+}
+
+const cause = computed(() => CAUSE[tabs.closePrompt?.reason ?? 'close'])
 
 const tab = computed(() => {
   const id = tabs.closePrompt?.tabId
@@ -73,7 +83,7 @@ onBeforeUnmount(() => {
   >
     <p class="prompt__text">
       {{ changes === 1 ? '1 change has' : `${changes} changes have` }} not been saved to the
-      database. Closing the tab would discard {{ changes === 1 ? 'it' : 'them' }}.
+      database. {{ cause.sentence }} would discard {{ changes === 1 ? 'it' : 'them' }}.
     </p>
     <p class="prompt__text prompt__text--note">
       Saving runs the script in this tab: its <span class="mono">CREATE OR ALTER</span> replaces
@@ -86,7 +96,7 @@ onBeforeUnmount(() => {
       <button class="btn btn--danger" :disabled="saving" @click="answer(true)">Discard</button>
       <button class="btn btn--primary" :disabled="saving" @click="save">
         <span v-if="saving" class="spinner"></span>
-        Save and close
+        {{ cause.save }}
       </button>
     </template>
   </BaseModal>

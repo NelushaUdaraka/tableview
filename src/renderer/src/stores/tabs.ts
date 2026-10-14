@@ -107,6 +107,18 @@ let paneCounter = 0
 const newPaneId = (): string => `pane-${++paneCounter}`
 
 /**
+ * Why a tab's work is about to go — which is what its prompt should say.
+ *
+ * `leave` is a view being unmounted while its tab stays: another tab picked,
+ * the tab moved to the other pane or to another window. The rest take the tab
+ * with them: closing it, disconnecting, closing the window, quitting.
+ */
+export type LeaveReason = 'leave' | 'close' | 'disconnect' | 'close-window' | 'quit'
+
+/** The reasons a tab itself goes, which is all a routine's changes care about. */
+export type CloseReason = Exclude<LeaveReason, 'leave'>
+
+/**
  * Asked before a tab is unmounted; `false` cancels whatever would unmount it.
  *
  * Only a pane's active tab is mounted, so only those can be holding work that
@@ -115,7 +127,7 @@ const newPaneId = (): string => `pane-${++paneCounter}`
  * workspace has one mounted view per pane, and a single slot would let the
  * second overwrite the first.
  */
-export type LeaveGuard = () => Promise<boolean>
+export type LeaveGuard = (reason: LeaveReason) => Promise<boolean>
 
 /**
  * Whether a routine's tab holds text the server does not have.
@@ -136,6 +148,7 @@ export function hasUnsavedRoutineChanges(tab: Tab | undefined): tab is QueryTab 
  */
 export interface ClosePrompt {
   tabId: string
+  reason: CloseReason
   resolve: (close: boolean) => void
 }
 
@@ -158,18 +171,30 @@ export const useTabStore = defineStore('tabs', () => {
    * holding any; a routine's text lives on the tab, so switching away from it
    * loses nothing — but closing it does, whether it is on screen or not.
    */
-  async function canClose(ids: string[]): Promise<boolean> {
+  async function canClose(ids: string[], reason: CloseReason = 'close'): Promise<boolean> {
     for (const id of ids) {
       if (!hasUnsavedRoutineChanges(byId(id))) continue
       // One question at a time: a close asked for while another is waiting
       // on its answer is dropped rather than left to wait behind it.
       if (closePrompt.value) return false
       const close = await new Promise<boolean>((resolve) => {
-        closePrompt.value = { tabId: id, resolve }
+        closePrompt.value = { tabId: id, reason, resolve }
       })
       if (!close) return false
     }
     return true
+  }
+
+  /**
+   * Asks every tab among `ids` that has work to lose if they all go: the
+   * mounted ones about staged edits first, then every routine about unsaved
+   * changes. Resolves false as soon as one of them is to stay.
+   */
+  async function canDiscard(ids: string[], reason: CloseReason): Promise<boolean> {
+    for (const tabId of mountedExcept([])) {
+      if (ids.includes(tabId) && !(await canLeave(tabId, reason))) return false
+    }
+    return canClose(ids, reason)
   }
 
   function answerClose(close: boolean): void {
@@ -184,10 +209,13 @@ export const useTabStore = defineStore('tabs', () => {
   }
 
   /** Asks a tab that is about to be unmounted whether it is ready to go. */
-  async function canLeave(tabId: string | null | undefined): Promise<boolean> {
+  async function canLeave(
+    tabId: string | null | undefined,
+    reason: LeaveReason = 'leave'
+  ): Promise<boolean> {
     if (!tabId) return true
     const guard = guards.get(tabId)
-    return guard ? guard() : true
+    return guard ? guard(reason) : true
   }
 
   const focusedPane = computed(
@@ -447,7 +475,8 @@ export const useTabStore = defineStore('tabs', () => {
     const pane = paneFor(id)
     if (!pane) return false
     // Only the mounted tab can be holding staged edits.
-    if (pane.activeTabId === id && !(await canLeave(id))) return false
+    const leaving = options.moving ? 'leave' : 'close'
+    if (pane.activeTabId === id && !(await canLeave(id, leaving))) return false
     // Any tab can be holding a routine's unsaved changes.
     if (!options.moving && !(await canClose([id]))) return false
     removeTab(id)
@@ -484,29 +513,59 @@ export const useTabStore = defineStore('tabs', () => {
   }
 
   async function closeOthers(id: string): Promise<void> {
-    for (const tabId of mountedExcept([id])) {
-      if (!(await canLeave(tabId))) return
-    }
-    if (!(await canClose(tabs.value.filter((tab) => tab.id !== id).map((tab) => tab.id)))) return
+    const others = tabs.value.filter((tab) => tab.id !== id).map((tab) => tab.id)
+    if (!(await canDiscard(others, 'close'))) return
     for (const tab of [...tabs.value]) {
       if (tab.id !== id) removeTab(tab.id)
     }
   }
 
   async function closeAll(): Promise<void> {
-    for (const tabId of mountedExcept([])) {
-      if (!(await canLeave(tabId))) return
-    }
-    if (!(await canClose(tabs.value.map((tab) => tab.id)))) return
+    if (!(await canDiscard(tabs.value.map((tab) => tab.id), 'close'))) return
     for (const tab of [...tabs.value]) removeTab(tab.id)
   }
 
-  /** Disconnecting takes its tabs with it; there is nothing left to save to. */
+  /** Takes a connection's tabs away, asking nothing; see `closeConnection`. */
   function closeForConnection(connectionId: string): void {
     for (const tab of [...tabs.value]) {
       if (tab.connectionId === connectionId) removeTab(tab.id)
     }
   }
+
+  /**
+   * Closes a connection's tabs once their unsaved work has been answered for
+   * — which is what disconnecting does. Resolves false when one is to stay,
+   * and then nothing closes.
+   */
+  async function closeConnection(connectionId: string): Promise<boolean> {
+    const ids = tabs.value.filter((tab) => tab.connectionId === connectionId).map((tab) => tab.id)
+    if (!(await canDiscard(ids, 'disconnect'))) return false
+    closeForConnection(connectionId)
+    return true
+  }
+
+  /**
+   * Whether this window may close, or the app quit: every tab with work to
+   * lose is asked, as closing them all would ask them. Nothing is closed here;
+   * the window takes its tabs with it.
+   */
+  function canCloseWindow(reason: 'close-window' | 'quit'): Promise<boolean> {
+    return canDiscard(
+      tabs.value.map((tab) => tab.id),
+      reason
+    )
+  }
+
+  /**
+   * Whether any tab holds work that closing the window would lose: a table's
+   * staged edits, or a routine's unsaved changes. The main process holds a
+   * window's close while this is true, and asks.
+   */
+  const hasUnsavedWork = computed(() =>
+    tabs.value.some((tab) =>
+      tab.kind === 'table' ? tab.pendingEdits > 0 : hasUnsavedRoutineChanges(tab)
+    )
+  )
 
   // --- moving around ---------------------------------------------------------
 
@@ -711,6 +770,9 @@ export const useTabStore = defineStore('tabs', () => {
     closeOthers,
     closeAll,
     closeForConnection,
+    closeConnection,
+    canCloseWindow,
+    hasUnsavedWork,
     select,
     cycle,
     moveToPane,

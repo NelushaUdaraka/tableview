@@ -7,6 +7,7 @@ import { createVault } from './storage/crypto'
 import { registerIpcHandlers, scopeForWindow, setWindowFactory, setWindowLocator } from './ipc'
 import { buildMenu } from './menu'
 import { WindowManager } from './window'
+import { closeGuard } from './closeGuard'
 
 // One process owns the settings files; a second launch focuses the existing
 // window rather than competing for them. Extra windows come from File → New
@@ -27,6 +28,9 @@ function createWindow(position?: { x: number; y: number }): BrowserWindow | null
     void shell.openExternal(url)
     return { action: 'deny' }
   })
+
+  // Unsaved work is asked about before the window goes.
+  closeGuard.watch(window)
 
   // A window's connections belong to it alone, so close them with it.
   window.on('closed', () => {
@@ -84,6 +88,12 @@ app.on('window-all-closed', () => {
 
 // Close pools and SSH/SSM tunnels before the process exits.
 app.on('before-quit', (event) => {
+  // Unsaved work is asked about before anything is closed: the windows holding
+  // some are asked in turn, and the quit starts over once all have said yes.
+  if (!closeGuard.mayQuit(windows?.all ?? [], () => app.quit())) {
+    event.preventDefault()
+    return
+  }
   // Quitting with connections open exits the process outright, so no window
   // gets a close event to write its geometry with; do it here instead.
   windows?.flushState()

@@ -57,6 +57,12 @@ export interface DetachedTab {
   autoRefresh?: number
 }
 
+/**
+ * Why a window is being asked about its unsaved work: it is closing, or the
+ * whole app is quitting.
+ */
+export type WindowCloseReason = 'close-window' | 'quit'
+
 export interface DetachRequest {
   tab: DetachedTab
   /** Screen position the tab was dropped at, so the window opens under it. */
@@ -152,6 +158,8 @@ export const CHANNELS = {
   windowClose: 'window:close',
   windowChrome: 'window:chrome',
   windowMenuRole: 'window:menuRole',
+  windowUnsavedWork: 'window:unsavedWork',
+  windowCloseAnswer: 'window:closeAnswer',
 
   shellOpenExternal: 'shell:openExternal',
 
@@ -196,7 +204,8 @@ export const CHANNELS = {
   eventServerMessage: 'event:serverMessage',
   eventMenuAction: 'event:menuAction',
   eventWindowChrome: 'event:windowChrome',
-  eventAttachTab: 'event:attachTab'
+  eventAttachTab: 'event:attachTab',
+  eventCloseRequested: 'event:closeRequested'
 } as const
 
 /**
@@ -267,6 +276,14 @@ export interface RendererApi {
   toggleMaximizeWindow(): Promise<void>
   closeWindow(): Promise<void>
   getWindowChrome(): Promise<WindowChromeState>
+  /**
+   * Says whether this window holds work that closing it would lose. While it
+   * does, the main process holds the window's close — and the app's quit —
+   * and asks through `onCloseRequested` instead.
+   */
+  setUnsavedWork(unsaved: boolean): Promise<void>
+  /** Answers `onCloseRequested`: true lets the window close, or the app quit. */
+  answerCloseRequest(proceed: boolean): Promise<void>
   /** Runs a menu item the renderer cannot: clipboard, zoom, dev tools, quit. */
   runMenuRole(role: MenuRole): Promise<void>
   openExternal(url: string): Promise<void>
@@ -324,6 +341,8 @@ export interface RendererApi {
   onWindowChrome(handler: (state: WindowChromeState) => void): () => void
   /** A tab dragged onto this window from another one. */
   onAttachTab(handler: (tab: DetachedTab) => void): () => void
+  /** The window is closing, or the app quitting, with unsaved work in it. */
+  onCloseRequested(handler: (reason: WindowCloseReason) => void): () => void
 }
 
 declare global {

@@ -9,7 +9,12 @@ import { computed, nextTick, watch } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useSettingsStore } from '../../../src/renderer/src/stores/settings'
-import { useTabStore, type QueryTab, type TableTab } from '../../../src/renderer/src/stores/tabs'
+import {
+  hasUnsavedRoutineChanges,
+  useTabStore,
+  type QueryTab,
+  type TableTab
+} from '../../../src/renderer/src/stores/tabs'
 import type { TableCache } from '../../../src/renderer/src/lib/tableCache'
 
 beforeEach(() => setActivePinia(createPinia()))
@@ -590,5 +595,178 @@ describe('a routine\'s tab', () => {
       routine.baseline,
       routine.baseline
     ])
+  })
+})
+
+/**
+ * Closing a routine's tab with changes the server does not have asks first,
+ * the way a table with staged edits does — but a routine's text lives on the
+ * tab, not in its view, so any tab can be holding some, on screen or not.
+ */
+describe('closing a routine\'s tab with its changes unsaved', () => {
+  const routine = {
+    schema: 'dbo',
+    name: 'usp_orders',
+    baseline: 'CREATE OR ALTER PROCEDURE dbo.usp_orders AS\r\nSELECT 1'
+  }
+  const EDITED = 'CREATE OR ALTER PROCEDURE dbo.usp_orders AS\nSELECT 2'
+
+  /** The tab the store is asking about, once it has got round to asking. */
+  async function asked(tabs: ReturnType<typeof useTabStore>): Promise<string | null> {
+    for (let i = 0; i < 20 && !tabs.closePrompt; i += 1) await Promise.resolve()
+    return tabs.closePrompt?.tabId ?? null
+  }
+
+  async function editedRoutine(name = routine.name): Promise<{ tabs: ReturnType<typeof useTabStore>; id: string }> {
+    const tabs = useTabStore()
+    await tabs.openRoutine('c1', { ...routine, name })
+    const id = tabs.activeId!
+    tabs.update<QueryTab>(id, { sql: EDITED.replace('usp_orders', name) })
+    return { tabs, id }
+  }
+
+  it('reads the tab, not its editor, and does not count line endings', () => {
+    const base: QueryTab = {
+      id: 't',
+      kind: 'query',
+      title: 'usp_orders',
+      connectionId: 'c1',
+      sql: routine.baseline.replace(/\r\n/g, '\n'),
+      cursor: 0,
+      result: null,
+      running: false,
+      executionId: null,
+      activeResultIndex: 0,
+      dirty: true,
+      statementLine: null,
+      showRowPanel: false,
+      routine
+    }
+    expect(hasUnsavedRoutineChanges(base)).toBe(false)
+    expect(hasUnsavedRoutineChanges({ ...base, sql: EDITED })).toBe(true)
+    // A plain query is never a routine with changes, however dirty.
+    expect(hasUnsavedRoutineChanges({ ...base, routine: undefined })).toBe(false)
+    expect(hasUnsavedRoutineChanges(undefined)).toBe(false)
+  })
+
+  it('closes a routine that has nothing unsaved without asking', async () => {
+    const tabs = useTabStore()
+    await tabs.openRoutine('c1', routine)
+    expect(await tabs.close(tabs.activeId!)).toBe(true)
+    expect(tabs.closePrompt).toBeNull()
+    expect(tabs.tabs).toHaveLength(0)
+  })
+
+  it('asks, and keeps the tab when told to stay', async () => {
+    const { tabs, id } = await editedRoutine()
+    const closing = tabs.close(id)
+    expect(await asked(tabs)).toBe(id)
+
+    tabs.answerClose(false)
+    expect(await closing).toBe(false)
+    expect(tabs.tabs.map((tab) => tab.id)).toEqual([id])
+    expect(tabs.closePrompt).toBeNull()
+  })
+
+  it('asks, and closes when told to', async () => {
+    const { tabs, id } = await editedRoutine()
+    const closing = tabs.close(id)
+    expect(await asked(tabs)).toBe(id)
+
+    tabs.answerClose(true)
+    expect(await closing).toBe(true)
+    expect(tabs.tabs).toHaveLength(0)
+  })
+
+  it('asks about a routine that is not on screen as well', async () => {
+    const { tabs, id } = await editedRoutine()
+    await tabs.openQuery('c1', 'SELECT 1')
+    expect(tabs.activeId).not.toBe(id)
+
+    const closing = tabs.close(id)
+    expect(await asked(tabs)).toBe(id)
+    tabs.answerClose(false)
+    expect(await closing).toBe(false)
+    expect(tabs.tabs).toHaveLength(2)
+  })
+
+  it('does not ask about switching away, which loses nothing', async () => {
+    const { tabs, id } = await editedRoutine()
+    await tabs.openQuery('c1', 'SELECT 1')
+    await tabs.select(id)
+    expect(tabs.activeId).toBe(id)
+    expect(tabs.closePrompt).toBeNull()
+  })
+
+  it('does not ask about a tab moving to another window, which takes its text along', async () => {
+    const { tabs, id } = await editedRoutine()
+    expect(await tabs.close(id, { moving: true })).toBe(true)
+    expect(tabs.closePrompt).toBeNull()
+  })
+
+  it('asks about each unsaved routine in turn when all are closed, and stops at a no', async () => {
+    const tabs = useTabStore()
+    const first = (await editedRoutine('usp_first')).id
+    const second = (await editedRoutine('usp_second')).id
+    await tabs.openQuery('c1', 'SELECT 1')
+
+    const closing = tabs.closeAll()
+    expect(await asked(tabs)).toBe(first)
+    tabs.answerClose(true)
+    // The first said yes; nothing goes until the second has answered too.
+    expect(await asked(tabs)).toBe(second)
+    expect(tabs.tabs).toHaveLength(3)
+    tabs.answerClose(false)
+    await closing
+
+    expect(tabs.tabs).toHaveLength(3)
+  })
+
+  it('closes everything once every unsaved routine has said yes', async () => {
+    const tabs = useTabStore()
+    await editedRoutine('usp_first')
+    await editedRoutine('usp_second')
+
+    const closing = tabs.closeAll()
+    await asked(tabs)
+    tabs.answerClose(true)
+    await asked(tabs)
+    tabs.answerClose(true)
+    await closing
+
+    expect(tabs.tabs).toHaveLength(0)
+  })
+
+  it('leaves the tab being kept out of Close others', async () => {
+    const tabs = useTabStore()
+    const kept = (await editedRoutine('usp_kept')).id
+    const other = (await editedRoutine('usp_other')).id
+
+    const closing = tabs.closeOthers(kept)
+    expect(await asked(tabs)).toBe(other)
+    tabs.answerClose(true)
+    await closing
+
+    expect(tabs.tabs.map((tab) => tab.id)).toEqual([kept])
+  })
+
+  it('refuses a second close while the first is waiting on its answer', async () => {
+    const { tabs, id } = await editedRoutine()
+    const first = tabs.close(id)
+    expect(await asked(tabs)).toBe(id)
+
+    expect(await tabs.close(id)).toBe(false)
+    // The first is still the one being asked about, and still answerable.
+    expect(tabs.closePrompt?.tabId).toBe(id)
+    tabs.answerClose(true)
+    expect(await first).toBe(true)
+  })
+
+  it('still closes a plain query tab with unsaved text without asking', async () => {
+    const tabs = useTabStore()
+    await tabs.openQuery('c1', 'SELECT 1')
+    tabs.update<QueryTab>(tabs.activeId!, { sql: 'SELECT 2', dirty: true })
+    expect(await tabs.close(tabs.activeId!)).toBe(true)
+    expect(tabs.closePrompt).toBeNull()
   })
 })

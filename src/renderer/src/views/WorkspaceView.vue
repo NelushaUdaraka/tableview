@@ -22,6 +22,7 @@ import StatusBar from '../components/StatusBar.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import SettingsDialog from '../components/SettingsDialog.vue'
 import ShortcutsDialog from '../components/ShortcutsDialog.vue'
+import UnsavedRoutineDialog from '../components/UnsavedRoutineDialog.vue'
 import TabPaneView from './TabPaneView.vue'
 import { useConnectionStore } from '../stores/connections'
 import { useSchemaStore } from '../stores/schema'
@@ -213,7 +214,9 @@ async function moveTabOut(
 
   const payload = detachedTabFrom(tab)
 
-  if (!(await tabs.close(tabId))) return
+  // Moving, not closing: a routine's text travels with it, so only staged
+  // edits — which do not — are asked about.
+  if (!(await tabs.close(tabId, { moving: true }))) return
 
   try {
     await hand(payload)
@@ -524,6 +527,8 @@ onBeforeUnmount(() => {
     />
     <SettingsDialog v-if="showSettings" @close="showSettings = false" />
     <ShortcutsDialog v-if="showShortcuts" @close="showShortcuts = false" />
+    <!-- Raised by the tab store from wherever a routine's tab is closed. -->
+    <UnsavedRoutineDialog v-if="tabs.closePrompt" />
   </div>
 </template>
 

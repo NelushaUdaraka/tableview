@@ -318,6 +318,15 @@ A routine already open is shown where it is rather than opened twice — each ta
 what is stored and what has changed, and two of them would quietly undo each other's saves. The
 tab's dot means "differs from the database", so it goes away once the changes are run or reverted.
 
+Closing a routine's tab with its changes unsaved asks first, the way a table with staged edits
+does: **Save and close** runs the script, **Discard** closes without it, **Cancel** keeps the tab.
+The difference is where the work lives. A table's staged edits live in its view and are gone the
+moment it is unmounted; a routine's text lives on the tab, so switching away loses nothing and never
+asks — but closing does, whether the tab is on screen or not: its ✕ in the background, *Close
+others* and *Close all* all ask about every routine they would close. A save that fails keeps the
+tab and puts it on screen with the error; dragging the tab into another window takes its text
+along, so that does not ask either.
+
 **One title bar**
 
 Window controls and the menu live in the same strip, VS Code style: the window is frameless on
@@ -453,7 +462,7 @@ Three layers, all runnable on Linux:
 
 | Command | What it covers |
 | --- | --- |
-| `npm test` | 750 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh |
+| `npm test` | 773 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh |
 | `npm run test:integration` | 66 tests against a **real SQL Server 2022** and a **real sshd** |
 | `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
 
@@ -500,7 +509,10 @@ The suites:
   each is marked as what it is (changed, added, removed); opens a change and reads the stored line
   in it, reverts that change alone and takes the revert back with `Ctrl+Z`, steps between changes
   from the toolbar and the keyboard, reverts the rest, then runs the tab and checks the server has
-  the edit and the marks start again from it — and that a partial run moves nothing
+  the edit and the marks start again from it — and that a partial run moves nothing. Then closes
+  it with changes unsaved: Cancel keeps it, *Close all* from another tab still asks, Discard leaves
+  the server alone, an unchanged routine closes without asking, *Save and close* writes it, and a
+  save that fails keeps the tab and shows it
 - **auto-refresh** — checks a table opens with it off and offers the fixed intervals, turns it on and
   waits for a row written from outside to turn up unprompted, stages an edit and checks it holds
   (and says why) until the edit is discarded, takes the tab away and back, turns it off, and drops

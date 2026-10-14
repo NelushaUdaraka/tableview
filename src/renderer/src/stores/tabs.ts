@@ -7,6 +7,7 @@ import type {
   TableFilter
 } from '@shared/types'
 import type { TableCache } from '../lib/tableCache'
+import { splitLines } from '../lib/lineDiff'
 import { useSettingsStore } from './settings'
 
 export interface QueryTab {
@@ -116,6 +117,28 @@ const newPaneId = (): string => `pane-${++paneCounter}`
  */
 export type LeaveGuard = () => Promise<boolean>
 
+/**
+ * Whether a routine's tab holds text the server does not have.
+ *
+ * Read off the tab itself rather than off its editor: a tab does not have to
+ * be on screen to be closed, and its text is kept on it either way. Line
+ * endings do not count — a definition stored with CRLF opens in an editor that
+ * holds LF, and nothing was changed.
+ */
+export function hasUnsavedRoutineChanges(tab: Tab | undefined): tab is QueryTab {
+  if (tab?.kind !== 'query' || !tab.routine) return false
+  return splitLines(tab.sql).join('\n') !== splitLines(tab.routine.baseline).join('\n')
+}
+
+/**
+ * A routine's tab waiting to hear whether it may close with its changes
+ * unsaved. The workspace's dialog answers it: true to close, false to stay.
+ */
+export interface ClosePrompt {
+  tabId: string
+  resolve: (close: boolean) => void
+}
+
 export const useTabStore = defineStore('tabs', () => {
   const tabs = ref<Tab[]>([])
   const panes = ref<TabPane[]>([{ id: newPaneId(), tabIds: [], activeTabId: null }])
@@ -123,6 +146,37 @@ export const useTabStore = defineStore('tabs', () => {
 
   /** Registered by each mounted view, cleared when it unmounts. */
   const guards = new Map<string, LeaveGuard>()
+
+  const closePrompt = ref<ClosePrompt | null>(null)
+
+  /**
+   * Asks about every routine among `ids` that would close with its changes
+   * unsaved, one at a time, and resolves false as soon as one is to stay.
+   *
+   * This is not a leave guard. A table's staged edits live in its view, so
+   * they are lost the moment it is unmounted and only the mounted tab can be
+   * holding any; a routine's text lives on the tab, so switching away from it
+   * loses nothing — but closing it does, whether it is on screen or not.
+   */
+  async function canClose(ids: string[]): Promise<boolean> {
+    for (const id of ids) {
+      if (!hasUnsavedRoutineChanges(byId(id))) continue
+      // One question at a time: a close asked for while another is waiting
+      // on its answer is dropped rather than left to wait behind it.
+      if (closePrompt.value) return false
+      const close = await new Promise<boolean>((resolve) => {
+        closePrompt.value = { tabId: id, resolve }
+      })
+      if (!close) return false
+    }
+    return true
+  }
+
+  function answerClose(close: boolean): void {
+    const prompt = closePrompt.value
+    closePrompt.value = null
+    prompt?.resolve(close)
+  }
 
   function setLeaveGuard(tabId: string, guard: LeaveGuard | null): void {
     if (guard) guards.set(tabId, guard)
@@ -382,12 +436,20 @@ export const useTabStore = defineStore('tabs', () => {
 
   // --- closing ---------------------------------------------------------------
 
-  /** Resolves false when the tab asked to stay. */
-  async function close(id: string): Promise<boolean> {
+  /**
+   * Resolves false when the tab asked to stay.
+   *
+   * `moving` is a tab on its way to another window rather than being closed:
+   * its view is still unmounted, so staged edits are still asked about, but a
+   * routine's text goes with it and has nothing to lose.
+   */
+  async function close(id: string, options: { moving?: boolean } = {}): Promise<boolean> {
     const pane = paneFor(id)
     if (!pane) return false
-    // Only the mounted tab can be holding work that closing would throw away.
+    // Only the mounted tab can be holding staged edits.
     if (pane.activeTabId === id && !(await canLeave(id))) return false
+    // Any tab can be holding a routine's unsaved changes.
+    if (!options.moving && !(await canClose([id]))) return false
     removeTab(id)
     return true
   }
@@ -425,6 +487,7 @@ export const useTabStore = defineStore('tabs', () => {
     for (const tabId of mountedExcept([id])) {
       if (!(await canLeave(tabId))) return
     }
+    if (!(await canClose(tabs.value.filter((tab) => tab.id !== id).map((tab) => tab.id)))) return
     for (const tab of [...tabs.value]) {
       if (tab.id !== id) removeTab(tab.id)
     }
@@ -434,6 +497,7 @@ export const useTabStore = defineStore('tabs', () => {
     for (const tabId of mountedExcept([])) {
       if (!(await canLeave(tabId))) return
     }
+    if (!(await canClose(tabs.value.map((tab) => tab.id)))) return
     for (const tab of [...tabs.value]) removeTab(tab.id)
   }
 
@@ -654,6 +718,8 @@ export const useTabStore = defineStore('tabs', () => {
     splitTab,
     closeSplit,
     update,
-    setLeaveGuard
+    setLeaveGuard,
+    closePrompt,
+    answerClose
   }
 })

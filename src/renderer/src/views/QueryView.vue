@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, markRaw, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { format as formatSql } from 'sql-formatter'
 import type { CellValue, ColumnMeta } from '@shared/types'
 import { statementAt, statementsInRange } from '@shared/sql/statements'
@@ -9,14 +9,12 @@ import SplitPane from '../components/SplitPane.vue'
 import NameDialog from '../components/NameDialog.vue'
 import type { QueryTab } from '../stores/tabs'
 import { useTabStore } from '../stores/tabs'
-import { useBusyStore } from '../stores/busy'
 import { useSchemaStore } from '../stores/schema'
 import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toasts'
-import { useConnectionStore } from '../stores/connections'
-import { useCredentialsStore } from '../stores/credentials'
 import { useLibraryStore } from '../stores/library'
 import { useRowPanel } from '../lib/rowPanel'
+import { runQueryTab } from '../lib/runQueryTab'
 import { api } from '../lib/api'
 
 const props = defineProps<{ tab: QueryTab }>()
@@ -25,12 +23,9 @@ const emit = defineEmits<{
 }>()
 
 const tabs = useTabStore()
-const busy = useBusyStore()
 const schema = useSchemaStore()
 const settings = useSettingsStore()
 const toasts = useToastStore()
-const connections = useConnectionStore()
-const credentials = useCredentialsStore()
 const library = useLibraryStore()
 
 const editor = ref<InstanceType<typeof SqlEditor> | null>(null)
@@ -74,25 +69,6 @@ function onChanges(count: number): void {
   tabs.update<QueryTab>(props.tab.id, { changeCount: count })
 }
 
-/**
- * Moves a routine's baseline to the script that has just run.
- *
- * Running the whole tab without an error is what saves a routine — its
- * `CREATE OR ALTER` replaces the stored definition — so from then on the
- * changes worth marking are the ones made since. A selection, a single
- * statement, a failure or a cancel leaves it where it was: none of those can
- * be taken to have written the routine.
- *
- * The script that ran, not the definition read back: SQL Server does not
- * keep what it was sent — `CREATE OR ALTER` comes back as `CREATE` with the
- * `OR ALTER` blanked out — so a re-read would mark a change on the first
- * line of every routine the moment it was saved.
- */
-function storeBaseline(script: string): void {
-  const routine = props.tab.routine
-  if (routine) tabs.storeRoutine(props.tab.connectionId, routine, script)
-}
-
 /** lang-sql wants bare table names as well as schema-qualified ones. */
 const completionSchema = computed(() => {
   const out: Record<string, string[]> = {}
@@ -106,63 +82,9 @@ const completionSchema = computed(() => {
 
 const currentStatement = computed(() => statementAt(props.tab.sql, cursor.value))
 
-async function run(text?: string): Promise<void> {
-  const body = (text ?? props.tab.sql).trim()
-  if (!body) return
-  if (props.tab.running) {
-    toasts.info('A query is already running in this tab')
-    return
-  }
-
-  const executionId = `exec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  tabs.update<QueryTab>(props.tab.id, { running: true, executionId })
-  // The bar under the title bar carries the wait for the whole window, so a
-  // query running in a pane that is not on screen is still visible as work.
-  busy.begin()
-
-  // The script as it was sent, whatever is typed while it runs — and whether
-  // it was all of it, which a selection covering the whole tab also is.
-  const script = props.tab.sql
-  const whole = body === script.trim()
-
-  try {
-    const result = await api.runQuery({
-      connectionId: props.tab.connectionId,
-      sql: body,
-      maxRows: settings.settings.maxResultRows,
-      executionId
-    })
-    // markRaw keeps the (potentially huge) result set out of the reactivity
-    // graph; it is only ever replaced, never mutated field by field.
-    tabs.update<QueryTab>(props.tab.id, {
-      result: markRaw(result),
-      running: false,
-      executionId: null
-    })
-
-    const failed = result.statements.find((statement) => statement.error)
-    if (whole && !failed && !result.cancelled && result.statements.length > 0) {
-      storeBaseline(script)
-    }
-    if (failed?.error && !offerCredentialFix(failed.error, () => run(text))) {
-      toasts.error('Query failed', failed.error.message)
-    }
-    void library.loadHistory()
-  } catch (error) {
-    tabs.update<QueryTab>(props.tab.id, { running: false, executionId: null })
-    if (!offerCredentialFix(error, () => run(text))) toasts.fromError('Query failed', error)
-  } finally {
-    busy.end()
-  }
-}
-
-/**
- * A session that ran out mid-query is worth a paste box, not a toast — the
- * query itself was fine and can be rerun once the credentials are fresh.
- */
-function offerCredentialFix(error: unknown, retry: () => Promise<void>): boolean {
-  const connection = connections.saved.find((entry) => entry.id === props.tab.connectionId)
-  return credentials.offerRefresh(connection, error, retry)
+/** Runs the tab, or the part of it given; see `runQueryTab`. */
+function run(text?: string): Promise<boolean> {
+  return runQueryTab(props.tab.id, text)
 }
 
 function runSelection(): void {

@@ -302,6 +302,107 @@ check(!plainGutter, 'a plain query tab has a change gutter')
 check(steps.at(-1).tabs === tabCount, 'opening the routine again opened another tab')
 check(steps.at(-1).label === '1 change', 'the reopened tab lost its edit')
 
+// --- 10. closing it with its changes unsaved asks first -----------------------
+const tabNamed = (title) =>
+  `[...document.querySelectorAll('.tab')].find(t => t.querySelector('.tab__title')?.textContent.trim() === '${title}')`
+const prompt = () =>
+  waitFor(`document.querySelector('.modal__title')?.textContent.includes('This routine has changes')`, 'the close prompt')
+const promptButton = (label) =>
+  ev(`[...document.querySelectorAll('.modal__foot .btn')].find(b => b.textContent.trim() === '${label}').click()`)
+const promptGone = () => waitFor(`!document.querySelector('.modal')`, 'the prompt to go')
+const storedDefinition = () =>
+  ev(`(async () => {
+    const [connection] = await window.api.listConnections()
+    return window.api.getObjectDefinition(connection.id, 'dbo', 'usp_e2e_orders')
+  })()`)
+
+await ev(`${tabNamed('usp_e2e_orders')}.querySelector('.tab__close').click()`)
+await prompt()
+steps.push({
+  step: 'close prompt',
+  subtitle: await ev(`document.querySelector('.modal__subtitle')?.textContent.trim()`),
+  text: await ev(`document.querySelector('.modal__body .prompt__text')?.textContent.replace(/\\s+/g, ' ').trim()`),
+  buttons: await ev(`[...document.querySelectorAll('.modal__foot .btn')].map(b => b.textContent.trim())`)
+})
+check(steps.at(-1).subtitle === 'dbo.usp_e2e_orders', 'the prompt does not say which routine')
+check(JSON.stringify(steps.at(-1).buttons) === JSON.stringify(['Cancel', 'Discard', 'Save and close']), 'the prompt offers the wrong choices')
+await shot('05-close-prompt')
+
+// Cancel keeps it, edits and all.
+await promptButton('Cancel')
+await promptGone()
+check(await ev(`!!${tabNamed('usp_e2e_orders')}`), 'Cancel closed the tab')
+check((await changesLabel()) === '1 change', 'Cancel lost the edit')
+
+// From the background too: Close all, with the plain tab on screen, still asks.
+await ev(`${tabNamed('Query')}.click()`)
+await waitFor(`document.querySelector('.tab--active .tab__title')?.textContent.trim() === 'Query'`, 'the plain tab on screen')
+await ev(`${tabNamed('Query')}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 200, clientY: 60 })), true`)
+await waitFor(`!!document.querySelector('.menu')`, 'the tab menu')
+await ev(`[...document.querySelectorAll('.menu .menu__item')].find(b => b.textContent.includes('Close all')).click()`)
+await prompt()
+await promptButton('Cancel')
+await promptGone()
+check((await ev(`document.querySelectorAll('.tab').length`)) === 2, 'Close all went ahead past a Cancel')
+
+// Discard closes it, and the server keeps what it had.
+await ev(`${tabNamed('usp_e2e_orders')}.querySelector('.tab__close').click()`)
+await prompt()
+await promptButton('Discard')
+await promptGone()
+await waitFor(`!${tabNamed('usp_e2e_orders')}`, 'the discarded tab to close')
+const afterDiscard = await storedDefinition()
+check(!afterDiscard.includes('-- note') && afterDiscard.includes('customer_id, total'), 'Discard wrote to the server')
+
+// Nothing unsaved, nothing to ask.
+await openRoutine()
+await waitFor(`document.querySelector('.query__changes')?.textContent.includes('No changes')`, 'the routine, unchanged')
+await ev(`${tabNamed('usp_e2e_orders')}.querySelector('.tab__close').click()`)
+await waitFor(`!${tabNamed('usp_e2e_orders')}`, 'an unchanged routine to close')
+check(!(await ev(`!!document.querySelector('.modal')`)), 'an unchanged routine asked before closing')
+
+// Save and close writes it to the server, then closes.
+await openRoutine()
+await waitFor(`document.querySelector('.query__changes')?.textContent.includes('No changes')`, 'the routine again')
+await toLineEnd(5)
+await send('Input.insertText', { text: ' -- saved on close' })
+await waitFor(`document.querySelector('.query__changes')?.textContent.includes('1 change')`, 'an edit to save')
+await ev(`${tabNamed('usp_e2e_orders')}.querySelector('.tab__close').click()`)
+await prompt()
+await promptButton('Save and close')
+await waitFor(`!${tabNamed('usp_e2e_orders')}`, 'the saved tab to close', 30000)
+check((await storedDefinition()).includes('-- saved on close'), 'Save and close did not save')
+
+// A save that fails keeps the tab — and shows it, error and all, even when it
+// was closed from the background.
+await openRoutine()
+await waitFor(`document.querySelector('.query__changes')?.textContent.includes('No changes')`, 'the routine once more')
+await toLineEnd(6)
+await send('Input.insertText', { text: ', no_such_column' })
+await waitFor(`document.querySelector('.query__changes')?.textContent.includes('1 change')`, 'an edit that will not compile')
+await ev(`${tabNamed('Query')}.click()`)
+await waitFor(`document.querySelector('.tab--active .tab__title')?.textContent.trim() === 'Query'`, 'the plain tab on screen again')
+await ev(`${tabNamed('usp_e2e_orders')}.querySelector('.tab__close').click()`)
+await prompt()
+await promptButton('Save and close')
+await promptGone()
+await waitFor(`document.querySelector('.tab--active .tab__title')?.textContent.trim() === 'usp_e2e_orders'`, 'the failed tab on screen')
+steps.push({
+  step: 'failed save',
+  open: await ev(`!!${tabNamed('usp_e2e_orders')}`),
+  label: await changesLabel(),
+  toast: await ev(`[...document.querySelectorAll('.toast__detail')].map(t => t.textContent.trim()).find(t => t.includes('no_such_column')) ?? null`)
+})
+check(steps.at(-1).label === '1 change', 'a failed save lost the edit')
+check(steps.at(-1).toast, 'a failed save did not say why')
+check(!(await storedDefinition()).includes('no_such_column'), 'a failed save reached the server')
+await shot('06-failed-save')
+
+await ev(`${tabNamed('usp_e2e_orders')}.querySelector('.tab__close').click()`)
+await prompt()
+await promptButton('Discard')
+await waitFor(`!${tabNamed('usp_e2e_orders')}`, 'the tab to close at last')
+
 await runSql('DROP PROCEDURE IF EXISTS dbo.usp_e2e_orders')
 
 console.log('ROUTINES E2E PASS')

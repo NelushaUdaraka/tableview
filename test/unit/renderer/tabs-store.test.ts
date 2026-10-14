@@ -907,3 +907,78 @@ describe('disconnecting and closing the window', () => {
     expect(tabs.hasUnsavedWork).toBe(false)
   })
 })
+
+/**
+ * A table's structure replaces its rows on screen, and the rows' view is
+ * where staged edits live — so trading one for the other asks first, the way
+ * leaving the tab does.
+ */
+describe('switching a table between its rows and its structure', () => {
+  async function tableOnScreen(answer: boolean): Promise<{
+    tabs: ReturnType<typeof useTabStore>
+    id: string
+    asked: LeaveReason[]
+  }> {
+    const tabs = useTabStore()
+    await tabs.openTable('c1', 'dbo', 'customers')
+    const id = tabs.activeId!
+    const asked: LeaveReason[] = []
+    tabs.setLeaveGuard(id, async (reason) => {
+      asked.push(reason)
+      return answer
+    })
+    return { tabs, id, asked }
+  }
+
+  const viewOf = (tabs: ReturnType<typeof useTabStore>, id: string): string =>
+    (tabs.tabs.find((tab) => tab.id === id) as TableTab).view
+
+  it('asks before the structure takes the rows off screen, and stays on a no', async () => {
+    const { tabs, id, asked } = await tableOnScreen(false)
+    expect(await tabs.setTableView(id, 'structure')).toBe(false)
+    expect(asked).toEqual(['leave'])
+    expect(viewOf(tabs, id)).toBe('data')
+  })
+
+  it('switches once the rows have said yes', async () => {
+    const { tabs, id } = await tableOnScreen(true)
+    expect(await tabs.setTableView(id, 'structure')).toBe(true)
+    expect(viewOf(tabs, id)).toBe('structure')
+  })
+
+  it('goes back to the rows without asking — the structure holds nothing', async () => {
+    const { tabs, id, asked } = await tableOnScreen(true)
+    await tabs.setTableView(id, 'structure')
+    await tabs.setTableView(id, 'data')
+    expect(asked).toEqual(['leave'])
+    expect(viewOf(tabs, id)).toBe('data')
+  })
+
+  it('switches a table that is not on screen without asking', async () => {
+    const { tabs, id, asked } = await tableOnScreen(true)
+    await tabs.openQuery('c1', 'SELECT 1')
+    expect(tabs.activeId).not.toBe(id)
+    expect(await tabs.setTableView(id, 'structure')).toBe(true)
+    // Asked once, by the query tab taking its place — not again for the switch.
+    expect(asked).toEqual(['leave'])
+    expect(viewOf(tabs, id)).toBe('structure')
+  })
+
+  it('asks when the tree opens the structure of a table whose rows are showing', async () => {
+    const { tabs, id, asked } = await tableOnScreen(false)
+    await tabs.openTable('c1', 'dbo', 'customers', 'table', 'structure')
+    expect(asked).toEqual(['leave'])
+    expect(viewOf(tabs, id)).toBe('data')
+  })
+
+  it('still lands new filters on a table that is reopened with them', async () => {
+    const { tabs, id } = await tableOnScreen(true)
+    const before = (tabs.tabs[0] as TableTab).filterRevision
+    await tabs.openTable('c1', 'dbo', 'customers', 'table', 'data', [
+      { column: 'customer_id', operator: '=', value: '2' }
+    ])
+    const tab = tabs.tabs.find((entry) => entry.id === id) as TableTab
+    expect(tab.filterRevision).toBe(before + 1)
+    expect(tab.filters).toEqual([{ column: 'customer_id', operator: '=', value: '2' }])
+  })
+})

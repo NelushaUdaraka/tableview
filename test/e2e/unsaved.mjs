@@ -202,8 +202,17 @@ await promptGone()
 check(await ev(`!!document.querySelector('.workspace')`), 'Cancel on the routine disconnected anyway')
 check((await ev(`document.querySelectorAll('.tab').length`)) >= 2, 'Cancel on the routine closed its tab')
 
-// --- 4. closing the window asks ---------------------------------------------
+// --- 4. the structure view asks before it takes the rows off screen ----------
 await stageRow()
+await ev(`[...document.querySelectorAll('.data__toolbar .seg__opt')].find(b => b.textContent.trim() === 'Structure').click()`)
+await promptFor('This table has staged edits')
+steps.push({ step: 'structure: table', ...(await modal()) })
+check(steps.at(-1).text.includes('Leaving the table would discard it'), 'the table prompt does not say the rows are being left')
+await press('Cancel')
+await promptGone()
+check(await ev(`[...document.querySelectorAll('.data__toolbar .btn')].some(b => b.textContent.includes('Apply'))`), 'Cancel switched to the structure anyway')
+
+// --- 5. closing the window asks ---------------------------------------------
 await closeWindow()
 await promptFor('This table has staged edits')
 steps.push({ step: 'close window: table', ...(await modal()) })
@@ -218,7 +227,7 @@ await promptGone()
 await delay(1000)
 check(!exited && (await ev('true')), 'the window closed after Cancel')
 
-// --- 5. quitting asks ---------------------------------------------------------
+// --- 6. quitting asks ---------------------------------------------------------
 await quit()
 await promptFor('This routine has changes')
 steps.push({ step: 'quit: routine', ...(await modal()) })
@@ -230,7 +239,7 @@ await promptGone()
 await delay(1000)
 check(!exited && (await ev('true')), 'the app quit after Cancel')
 
-// --- 6. once everything has been answered, the window does close --------------
+// --- 7. once everything has been answered, the window does close --------------
 await runSql('DROP PROCEDURE IF EXISTS dbo.usp_e2e_unsaved')
 await closeWindow()
 await promptFor('This routine has changes')

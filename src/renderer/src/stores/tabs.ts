@@ -429,10 +429,11 @@ export const useTabStore = defineStore('tabs', () => {
       // A table already open is shown where it is, split pane included.
       const pane = paneFor(existing.id)
       if (pane && pane.activeTabId !== existing.id && !(await canLeave(pane.activeTabId))) return
-      existing.view = view
+      if (!(await setTableView(existing.id, view))) return
       if (filters) {
-        existing.filters = filters
-        existing.filterRevision += 1
+        // Read again: answering a question can have replaced the tab object.
+        const current = byId(existing.id) as TableTab
+        update<TableTab>(existing.id, { filters, filterRevision: current.filterRevision + 1 })
       }
       if (pane) {
         pane.activeTabId = existing.id
@@ -460,6 +461,23 @@ export const useTabStore = defineStore('tabs', () => {
       },
       focusedPaneId.value
     )
+  }
+
+  /**
+   * Shows a table tab's rows or its structure. Resolves false when the tab
+   * asked to stay where it was.
+   *
+   * The rows' view is where staged edits live, and the structure replaces
+   * it, so leaving the rows on screen asks first — as leaving the tab would.
+   * A tab that is not on screen has no view, and nothing to lose.
+   */
+  async function setTableView(tabId: string, view: 'data' | 'structure'): Promise<boolean> {
+    const tab = byId(tabId)
+    if (tab?.kind !== 'table' || tab.view === view) return true
+    const onScreen = paneFor(tabId)?.activeTabId === tabId
+    if (tab.view === 'data' && onScreen && !(await canLeave(tabId))) return false
+    update<TableTab>(tabId, { view })
+    return true
   }
 
   // --- closing ---------------------------------------------------------------
@@ -766,6 +784,7 @@ export const useTabStore = defineStore('tabs', () => {
     routineTab,
     storeRoutine,
     openTable,
+    setTableView,
     close,
     closeOthers,
     closeAll,

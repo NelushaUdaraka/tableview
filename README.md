@@ -265,8 +265,9 @@ rather than opening a query that would match nothing.
   commits, `Shift+Enter` adds a line, `Tab` moves on — or edit the same row from the row panel
 - Insert rows, mark rows for deletion — all staged locally
 - **Staged edits are never dropped without a word** — reloading, sorting, filtering or paging,
-  picking another tab, closing the tab, disconnecting, closing the window and quitting all stop and
-  ask first: apply them, discard them, or stay where you are. The question says which of those it is
+  picking another tab, switching to the table's structure, closing the tab, disconnecting, closing
+  the window and quitting all stop and ask first: apply them, discard them, or stay where you are.
+  The question says which of those it is
 - One `Apply` sends the whole change set, executed **inside a transaction**: either all of it lands
   or none of it does
 - Rows are addressed by primary key; a keyless table falls back to matching every column and the UI
@@ -472,7 +473,7 @@ Three layers, all runnable on Linux:
 
 | Command | What it covers |
 | --- | --- |
-| `npm test` | 799 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh |
+| `npm test` | 805 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh |
 | `npm run test:integration` | 66 tests against a **real SQL Server 2022** and a **real sshd** |
 | `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
 
@@ -525,7 +526,8 @@ The suites:
   save that fails keeps the tab and shows it
 - **unsaved** — disconnects with nothing unsaved and checks nothing is asked; then, with a row staged
   in a table and a routine changed, checks disconnecting asks about both and says it is
-  disconnecting, and that Cancel keeps the connection; that the window's ✕ and File → Exit ask in
+  disconnecting, and that Cancel keeps the connection; that switching the table to its structure
+  asks too; that the window's ✕ and File → Exit ask in
   their own words and Cancel keeps the window and the app; and that once every question is answered
   the window really does close and the app goes with it
 - **auto-refresh** — checks a table opens with it off and offers the fixed intervals, turns it on and

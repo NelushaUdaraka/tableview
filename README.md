@@ -669,10 +669,16 @@ The design tokens and shared controls live in `src/renderer/src/styles/index.css
 components, motion, and what not to do — and is the first thing to read before changing how
 something looks.
 
+---
+
+## Claude Code setup
+
+`.claude/` holds project skills and one hook. Claude Code picks them up in any session on this
+repository, local or in the cloud, with nothing to install.
+
 **UI UX Pro Max** ([nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill),
-MIT) is installed as a project skill in `.claude/skills/ui-ux-pro-max/`, so Claude Code picks it up
-in any session on this repository, local or in the cloud. Ask for it by name, or let a UI task
-trigger it. It searches a local database of styles, palettes, font pairings and UX guidelines with
+MIT) lives in `.claude/skills/ui-ux-pro-max/`. Ask for it by name, or let a UI task trigger it. It
+searches a local database of styles, palettes, font pairings and UX guidelines with
 `python3 .claude/skills/ui-ux-pro-max/scripts/search.py` — Python 3 and the standard library, no
 network. Its instructions have Claude read `MASTER.md` before building a screen and leave it
 unchanged without your say-so, so new work follows the shipped system rather than a freshly
@@ -685,6 +691,39 @@ npx ui-ux-pro-max-cli@latest init --ai claude --force
 # The installer also adds six companion skills (banners, brand, logos, slides,
 # design tokens, shadcn/Tailwind) that this project has no use for.
 rm -rf .claude/skills/{banner-design,brand,design,design-system,slides,ui-styling}
+```
+
+**Superpowers** ([obra/superpowers](https://github.com/obra/superpowers), MIT) is Jesse Vincent's
+library of working-method skills: brainstorming a design before building it, writing and executing
+plans, test-driven development, systematic debugging, verifying before calling something done,
+requesting and receiving code review, worktrees, subagent-driven development and finishing a branch.
+Its fifteen skills sit beside UI UX Pro Max in `.claude/skills/` (`brainstorming` through
+`writing-skills`), copied unmodified from the v7.0.0 release.
+
+What makes it more than a shelf of skills is its session-start hook, and that is wired up too:
+`.claude/settings.json` runs Superpowers' own script (`.claude/hooks/`, also unmodified) at the
+start of a session, after `/clear` and after compaction. It loads the `using-superpowers` skill into
+the conversation, which has Claude check for a skill that applies before it acts — brainstorming
+before building, systematic debugging before fixing — the way the plugin does. The command sets
+`CLAUDE_PLUGIN_ROOT` only because that is what makes the script answer in Claude Code's format;
+Claude Code sets it for plugins but not for project hooks. Instructions in `CLAUDE.md`, or given
+directly, still take precedence over the skills.
+
+- **To keep the skills but drop the always-on behaviour**, delete the `SessionStart` entry from
+  `.claude/settings.json`. The skills stay available when asked for by name.
+- **The skills refer to each other as `superpowers:<name>`**, the plugin's namespace. As project
+  skills they are named without it: `brainstorming`, not `superpowers:brainstorming`.
+- **Don't also install the Superpowers plugin** (`/plugin install superpowers@claude-plugins-official`)
+  for this repository, or every skill and the hook will be loaded twice.
+
+To move to a newer release, copy its skills and hook script over these, and delete any skill the
+release dropped:
+
+```bash
+TAG=v7.0.0   # the release to move to
+git clone --depth 1 --branch "$TAG" https://github.com/obra/superpowers /tmp/superpowers
+cp -R /tmp/superpowers/skills/. .claude/skills/
+cp /tmp/superpowers/hooks/run-hook.cmd /tmp/superpowers/hooks/session-start .claude/hooks/
 ```
 
 ---

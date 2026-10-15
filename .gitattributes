@@ -5,6 +5,11 @@
 *.sh   text eol=lf
 *.mjs  text eol=lf
 
+# Claude Code's hook and the skills' helper scripts run under bash, and most
+# have no extension; run-hook.cmd is read by both cmd and bash.
+.claude/hooks/*            text eol=lf
+.claude/skills/*/scripts/* text eol=lf
+
 # Never touch binaries.
 *.png  binary
 *.ico  binary

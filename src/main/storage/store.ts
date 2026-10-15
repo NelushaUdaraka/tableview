@@ -1,7 +1,7 @@
 /**
  * A tiny JSON document store with atomic writes.
  *
- * Beekeeper's own app data is small and read whole on startup, so a file per
+ * TableView's own app data is small and read whole on startup, so a file per
  * collection keeps the app free of native dependencies — which matters because
  * a native module would have to be rebuilt for every target platform.
  *

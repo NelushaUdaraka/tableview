@@ -18,7 +18,7 @@ describe('buildMenuModel', () => {
   })
 
   it('adds the application menu on macOS only', () => {
-    expect(buildMenuModel('darwin')[0].label).toBe('Beekeeper Clone')
+    expect(buildMenuModel('darwin')[0].label).toBe('TableView')
     expect(buildMenuModel('linux')[0].label).toBe('File')
   })
 

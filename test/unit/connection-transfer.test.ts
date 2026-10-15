@@ -169,12 +169,26 @@ describe('reading a file back', () => {
     expect(parsed.connections[1].group).toBeUndefined()
   })
 
+  // TableView was called Beekeeper Clone, and files exported under that name
+  // are still lying around in download folders.
+  it('still reads a file Beekeeper Clone wrote', () => {
+    const old = JSON.stringify({
+      kind: 'beekeeper-clone/connections',
+      version: 1,
+      exportedAt: '2026-09-16T12:31:00.000Z',
+      connections: [{ name: 'Production reporting', host: 'prod-sql.internal' }]
+    })
+    expect(parseExportFile(old).connections.map((entry) => entry.name)).toEqual([
+      'Production reporting'
+    ])
+  })
+
   it('turns down something that is not JSON', () => {
     expect(() => parseExportFile('nope')).toThrow(/not JSON/)
   })
 
   it('turns down JSON that is not one of ours', () => {
-    expect(() => parseExportFile('{"some":"other file"}')).toThrow(/not a Beekeeper Clone/)
+    expect(() => parseExportFile('{"some":"other file"}')).toThrow(/not a TableView/)
     expect(() => parseExportFile('[]')).toThrow(/does not hold a connection export/)
   })
 
@@ -283,7 +297,7 @@ describe('turning one back into a connection', () => {
 describe('the file it is offered as', () => {
   it('is dated, so two exports do not overwrite each other', () => {
     expect(exportFileName(new Date('2026-09-16T12:31:00.000Z'))).toBe(
-      'beekeeper-connections-2026-09-16.json'
+      'tableview-connections-2026-09-16.json'
     )
   })
 })

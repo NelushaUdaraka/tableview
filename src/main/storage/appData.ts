@@ -16,7 +16,8 @@ import {
   DEFAULT_SSM_CONFIG,
   QueryHistoryEntry,
   SavedConnection,
-  SavedQuery
+  SavedQuery,
+  SqlServerOptions
 } from '../../shared/types'
 import { normalizeHex } from '../../shared/accent'
 import { copyNameFor } from '../../shared/copyName'
@@ -37,6 +38,19 @@ import {
 } from '../../shared/aws/credentials'
 
 const MAX_HISTORY = 2000
+
+/** The name Beekeeper Clone gave SQL Server unless a connection said otherwise. */
+const LEGACY_APPLICATION_NAME = 'Beekeeper Clone'
+
+/**
+ * Options with Beekeeper Clone's default application name swapped for
+ * TableView's. SQL Server shows that name against every session, so it should
+ * say what is actually connecting; a name somebody chose is left alone.
+ */
+function withCurrentAppName(options: SqlServerOptions): SqlServerOptions {
+  if (options.applicationName !== LEGACY_APPLICATION_NAME) return options
+  return { ...options, applicationName: DEFAULT_SQLSERVER_OPTIONS.applicationName }
+}
 
 /** A timestamp that can be trusted into a record, or nothing. */
 function validDate(value: string | undefined): string | undefined {
@@ -85,6 +99,19 @@ export class AppData {
     this.settings = new JsonStore(path.join(userDataDir, 'settings.json'), () => ({
       ...DEFAULT_SETTINGS
     }))
+    this.retireLegacyAppName()
+  }
+
+  /** Moves connections saved before the rename off Beekeeper Clone's default name. */
+  private retireLegacyAppName(): void {
+    const file = this.connections.read()
+    const connections = file.connections.map((entry) => {
+      const options = entry.options && withCurrentAppName(entry.options)
+      return options === entry.options ? entry : { ...entry, options }
+    })
+    if (connections.some((entry, index) => entry !== file.connections[index])) {
+      this.connections.write({ ...file, connections })
+    }
   }
 
   get secretsAreOsBacked(): boolean {
@@ -135,7 +162,12 @@ export class AppData {
       // Omitted leaves it as it was: a safety setting must not come off
       // because an edit was about something else.
       readOnly: (input.readOnly ?? existing?.readOnly) === true,
-      options: { ...DEFAULT_SQLSERVER_OPTIONS, ...existing?.options, ...input.options },
+      // An import from a Beekeeper Clone export arrives on its old default name.
+      options: withCurrentAppName({
+        ...DEFAULT_SQLSERVER_OPTIONS,
+        ...existing?.options,
+        ...input.options
+      }),
       ssh: { ...DEFAULT_SSH_CONFIG, ...existing?.ssh, ...input.ssh },
       ssm: { ...DEFAULT_SSM_CONFIG, ...existing?.ssm, ...input.ssm },
       // An import brings the day a connection was made with it; anything that

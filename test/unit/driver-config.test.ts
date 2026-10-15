@@ -81,6 +81,11 @@ describe('buildMssqlConfig', () => {
     expect(cfg.requestTimeout).toBe(7000)
   })
 
+  it('names the app to SQL Server when the connection leaves the name blank', () => {
+    const cfg = built(config({ options: { ...DEFAULT_SQLSERVER_OPTIONS, applicationName: '' } }))
+    expect(cfg.options.appName).toBe('TableView')
+  })
+
   it('sets domain for Windows auth, which switches mssql to NTLM', () => {
     const cfg = built(config({ authType: 'windows', username: 'dev', domain: 'CORP' }))
     expect(cfg.domain).toBe('CORP')

@@ -4,6 +4,7 @@ import { BrowserWindow, Menu, app, shell } from 'electron'
 import { ConnectionRegistry } from './db/registry'
 import { AppData } from './storage/appData'
 import { createVault } from './storage/crypto'
+import { carryOverLegacyProfile } from './storage/legacyProfile'
 import { registerIpcHandlers, scopeForWindow, setWindowFactory, setWindowLocator } from './ipc'
 import { buildMenu } from './menu'
 import { WindowManager } from './window'
@@ -14,6 +15,19 @@ import { closeGuard } from './closeGuard'
 // Window, which keeps every window inside this process.
 if (!app.requestSingleInstanceLock()) {
   app.quit()
+} else {
+  // TableView was called Beekeeper Clone, and its data is still in a folder of
+  // that name. The first launch copies it across — here, before the profile is
+  // read by anything, Chromium's start-up included.
+  const carried = carryOverLegacyProfile({
+    appData: app.getPath('appData'),
+    userData: app.getPath('userData'),
+    name: app.getName()
+  })
+  if (carried.length > 0) {
+    // eslint-disable-next-line no-console
+    console.log(`[profile] brought ${carried.join(', ')} over from Beekeeper Clone`)
+  }
 }
 
 const registry = new ConnectionRegistry()

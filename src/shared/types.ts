@@ -625,7 +625,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export const DEFAULT_SQLSERVER_OPTIONS: SqlServerOptions = {
   encrypt: true,
   trustServerCertificate: true,
-  applicationName: 'Beekeeper Clone',
+  applicationName: 'TableView',
   connectTimeoutMs: 15000,
   requestTimeoutMs: 60000,
   readOnlyIntent: false,

@@ -22,8 +22,11 @@ import type {
   SsmConfig
 } from './types'
 
-export const CONNECTION_EXPORT_KIND = 'beekeeper-clone/connections'
+export const CONNECTION_EXPORT_KIND = 'tableview/connections'
 export const CONNECTION_EXPORT_VERSION = 1
+
+/** What files said before TableView was renamed from Beekeeper Clone; still read. */
+const LEGACY_EXPORT_KIND = 'beekeeper-clone/connections'
 
 /** A secret the exporting machine held that the file deliberately leaves behind. */
 export type MissingSecret = 'password' | 'sshPassword' | 'sshPassphrase' | 'awsCredentials'
@@ -131,7 +134,7 @@ export function buildExport(
 /** What the save dialog offers to call it. */
 export function exportFileName(now: Date = new Date()): string {
   const [date] = now.toISOString().split('T')
-  return `beekeeper-connections-${date}.json`
+  return `tableview-connections-${date}.json`
 }
 
 function fail(reason: string): never {
@@ -163,8 +166,8 @@ export function parseExportFile(contents: string): ConnectionExportFile {
   }
 
   const file = asRecord(parsed, 'That file does not hold a connection export.')
-  if (file.kind !== CONNECTION_EXPORT_KIND) {
-    fail('That file is not a Beekeeper Clone connection export.')
+  if (file.kind !== CONNECTION_EXPORT_KIND && file.kind !== LEGACY_EXPORT_KIND) {
+    fail('That file is not a TableView connection export.')
   }
   if (typeof file.version !== 'number' || file.version > CONNECTION_EXPORT_VERSION) {
     fail(`That export was written by a newer version (format ${String(file.version)}).`)

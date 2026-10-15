@@ -1,6 +1,6 @@
 # Design System Master File
 
-> **LOGIC:** When building a specific screen, first check `design-system/beekeeper-clone/pages/[page-name].md`.
+> **LOGIC:** When building a specific screen, first check `design-system/tableview/pages/[page-name].md`.
 > If that file exists, its rules **override** this Master file.
 > If not, strictly follow the rules below.
 >
@@ -12,7 +12,7 @@
 
 ---
 
-**Project:** Beekeeper Clone
+**Project:** TableView
 **Recorded:** 2026-10-15
 **Category:** Developer Tool / IDE — a desktop (Electron) SQL Server client
 **Stack:** Vue 3 single-file components with scoped CSS, over CSS custom properties. No Tailwind.
@@ -125,7 +125,9 @@ Use the shared classes in `index.css` and the shared components rather than rest
 - **Overlays:** `BaseModal` (kicker, title, subtitle, footer slot), `ContextMenu`, and the toasts store (`info`, `success`, `error`).
 - **Drop-downs from a toolbar button:** `PopoverPanel` hangs under the button that opened it (right edges flush by default), in the overlay ground, and closes on Escape or a click elsewhere, giving the focus back. `ChoiceMenu` is one choice out of a few in it (radio items, the current one ticked); `ColumnPicker` is a checklist in it. A native `<select>` hidden under a styled button draws its list in the hidden control's colours — give that control `--bg-input` and `--text-primary`, or use `ChoiceMenu`.
 - **Icons:** `lib/icons.ts`, drawn by `components/AppIcon.vue` (24px grid, Lucide-style strokes, decorative by default). Icon-only buttons need an `aria-label`. Never type glyphs such as ✕ ⋮ ▾ ⟳ ⌕; add an icon to `lib/icons.ts` instead.
-- **Brand:** `components/BrandMark.vue`, the app icon's amber honeycomb. It uses brand colours, not the accent.
+- **Brand:** `components/BrandMark.vue`, the app icon's graphite T-grid: a table whose header row and middle
+  column make a T. `build/icon.svg` is its source, and `build/icon.png` is rendered from that. It uses brand
+  colours, not the accent.
 
 ---
 

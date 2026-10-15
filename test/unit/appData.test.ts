@@ -522,6 +522,77 @@ describe('connections', () => {
   })
 })
 
+// SQL Server lists every session under the application name its client gave,
+// so a connection saved before the rename would still turn up there as
+// Beekeeper Clone. Only the old default moves; a name someone chose stays.
+describe('the name each connection gives SQL Server', () => {
+  /** One saved connection, written the way Beekeeper Clone wrote it. */
+  function storedByBeekeeperClone(applicationName: string): void {
+    fs.writeFileSync(
+      path.join(dir, 'connections.json'),
+      JSON.stringify({
+        version: 1,
+        connections: [
+          {
+            id: 'c1',
+            name: 'Production',
+            engine: 'sqlserver',
+            host: 'prod-sql.internal',
+            port: 1433,
+            authType: 'sql',
+            username: 'reporting',
+            savePassword: false,
+            readOnly: false,
+            options: { ...DEFAULT_SQLSERVER_OPTIONS, applicationName },
+            ssh: { ...DEFAULT_SSH_CONFIG },
+            ssm: { ...DEFAULT_SSM_CONFIG },
+            createdAt: '2026-09-01T09:00:00.000Z',
+            updatedAt: '2026-09-01T09:00:00.000Z'
+          }
+        ]
+      })
+    )
+  }
+
+  const reopen = (): AppData => new AppData(dir, new LocalKeyVault(path.join(dir, 'secret.key')))
+
+  it("moves a saved connection off Beekeeper Clone's default name", () => {
+    storedByBeekeeperClone('Beekeeper Clone')
+    const reopened = reopen()
+    expect(reopened.listConnections()[0].options.applicationName).toBe('TableView')
+    expect(reopened.getConnectionWithSecrets('c1')?.options.applicationName).toBe('TableView')
+  })
+
+  it('keeps a name someone typed in', () => {
+    storedByBeekeeperClone('Nightly ETL')
+    expect(reopen().listConnections()[0].options.applicationName).toBe('Nightly ETL')
+  })
+
+  it('brings a Beekeeper Clone export in on the TableView name', () => {
+    appData.importConnections(
+      JSON.stringify({
+        kind: 'beekeeper-clone/connections',
+        version: 1,
+        exportedAt: '2026-09-16T12:31:00.000Z',
+        connections: [
+          {
+            name: 'Production',
+            host: 'prod-sql.internal',
+            port: 1433,
+            authType: 'sql',
+            savePassword: false,
+            options: { ...DEFAULT_SQLSERVER_OPTIONS, applicationName: 'Beekeeper Clone' },
+            ssh: { ...DEFAULT_SSH_CONFIG },
+            ssm: { ...DEFAULT_SSM_CONFIG },
+            missingSecrets: []
+          }
+        ]
+      })
+    )
+    expect(appData.listConnections()[0].options.applicationName).toBe('TableView')
+  })
+})
+
 describe('query history', () => {
   const entry = (sql: string, success = true) => ({
     connectionId: 'c1',
@@ -706,7 +777,7 @@ describe('moving connections between machines', () => {
   it('refuses a file that is not an export, without touching the list', () => {
     seed()
     expect(() => appData.importConnections('{"kind":"something else"}')).toThrow(
-      /not a Beekeeper Clone/
+      /not a TableView/
     )
     expect(appData.listConnections()).toHaveLength(2)
   })

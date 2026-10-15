@@ -127,7 +127,7 @@ export class WindowManager {
       minWidth: 900,
       minHeight: 560,
       show: false,
-      title: 'Beekeeper Clone',
+      title: 'TableView',
       backgroundColor: '#16181d',
       // The custom title bar replaces the system one. On macOS the traffic
       // lights stay, inset over the renderer's strip.

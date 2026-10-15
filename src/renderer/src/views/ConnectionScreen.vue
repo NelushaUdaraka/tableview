@@ -422,7 +422,7 @@ function relativeTime(iso?: string): string {
       <div class="brand">
         <BrandMark class="brand__mark" :size="44" />
         <div class="brand__text">
-          <h1 class="brand__title">Beekeeper Clone</h1>
+          <h1 class="brand__title">TableView</h1>
           <p class="brand__sub">
             SQL Server client · {{ connections.saved.length }} saved
             {{ connections.saved.length === 1 ? 'connection' : 'connections' }}

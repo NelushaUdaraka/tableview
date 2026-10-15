@@ -5,8 +5,8 @@
  * Turning it off is the moment the window starts writing to whatever the
  * connection points at — production, as often as not — so it waits for the
  * user to say they mean it. The question lives here because the status bar,
- * the connection list's menu and the form all raise it, and one dialog over
- * the whole window answers it.
+ * the connection list and the form all raise it, and one dialog over the whole
+ * window answers it.
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'

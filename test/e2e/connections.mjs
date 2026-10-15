@@ -216,9 +216,9 @@ const menuAnchor = (name) => ev(`
   })()
 `).then(JSON.parse)
 
-check('the row shows Connect and nothing else', await ev(`
+check('the row shows its read-only padlock, Connect and nothing else', await ev(`
   JSON.stringify([...${row('Local dev')}.querySelectorAll('.row__buttons .btn')].map((b) => b.textContent.trim() || b.getAttribute('aria-label')))
-`).then(JSON.parse), ['Connect', 'More for Local dev'])
+`).then(JSON.parse), ['Read-only for Local dev', 'Connect', 'More for Local dev'])
 
 await clickOn(menuOf('Local dev'), 'the ⋮ on Local dev')
 await waitFor(`!!document.querySelector('.menu')`, 'the ⋮ menu')

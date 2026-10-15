@@ -602,6 +602,24 @@ function relativeTime(iso?: string): string {
             </div>
 
             <div class="row__buttons">
+              <!-- Read-only, switched without opening the form or connecting:
+                   on at once, off once asked. On every row, so it is there to
+                   be found; the badge by the name says which way it is. -->
+              <button
+                class="btn btn--sm btn--muted btn--icon row__lock"
+                :class="{ 'btn--armed': connection.readOnly }"
+                :title="
+                  connection.readOnly
+                    ? 'Read-only — click to turn it off'
+                    : 'Make this connection read-only'
+                "
+                :aria-label="`Read-only for ${connection.name}`"
+                :aria-pressed="connection.readOnly === true"
+                @click.stop="readOnly.setReadOnly(connection, !connection.readOnly)"
+                @dblclick.stop
+              >
+                <AppIcon :name="connection.readOnly ? 'lock' : 'lock-open'" :size="15" />
+              </button>
               <button
                 class="btn btn--sm row__connect"
                 :disabled="connections.connectingId === connection.id"
@@ -719,7 +737,7 @@ function relativeTime(iso?: string): string {
 <style scoped>
 /* The seven tracks the header and every row share. */
 .screen {
-  --conn-cols: 64px minmax(0, 1.5fr) minmax(0, 2fr) 92px 92px 140px 136px;
+  --conn-cols: 64px minmax(0, 1.5fr) minmax(0, 2fr) 92px 92px 140px 170px;
   /* Content keeps to a readable measure, centred, however wide the window. */
   --screen-gutter: max(32px, calc((100% - 1120px) / 2));
   display: flex;
@@ -1080,7 +1098,8 @@ function relativeTime(iso?: string): string {
 .row:hover .row__connect:not(:disabled):hover {
   background: var(--accent-hover);
 }
-.row__menu {
+.row__menu,
+.row__lock {
   width: 28px;
 }
 .row__menu[aria-expanded='true'] {

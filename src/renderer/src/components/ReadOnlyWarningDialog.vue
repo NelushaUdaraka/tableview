@@ -2,7 +2,7 @@
 /**
  * The question asked before a read-only connection may write again.
  *
- * Whichever toggle raised it — the status bar, the list's menu, the form — the
+ * Whichever toggle raised it — the status bar, the list, the form — the
  * answer is the same: a connection that was kept read-only on purpose is about
  * to accept edits, truncate, drop and whatever is run in it. The safe answer
  * has the focus, so Enter or Escape keeps the lock on; only the button that

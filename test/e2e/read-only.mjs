@@ -7,9 +7,10 @@
  * whole and reads carry on. Then the window is gone round: the same writes
  * sent straight to the main process are refused there too, and the rows are
  * counted afterwards to show none of it happened. Last, the switch: the status
- * bar's padlock, the File menu, the list's menu and the form each turn it on at
- * once and ask before turning it off — and Escape on that question closes the
- * question, not the form under it.
+ * bar's Read-only switch — labelled whichever way it is, so it can be found —
+ * the File menu, the padlock on each row of the list and the row's menu, and the
+ * form each turn it on at once and ask before turning it off — and Escape on
+ * that question closes the question, not the form under it.
  */
 import { spawn } from 'node:child_process'
 import { writeFileSync, mkdirSync } from 'node:fs'
@@ -156,9 +157,17 @@ await waitFor(`document.querySelectorAll('.sidebar .item').length > 0`, 'sidebar
 steps.push({
   step: 'connected',
   statusBar: await ev(`document.querySelector('.status__lock--on')?.textContent.trim() ?? null`),
+  statusSwitch: await ev(`(() => {
+    const b = document.querySelector('.status__lock')
+    return b && { role: b.getAttribute('role'), checked: b.getAttribute('aria-checked') }
+  })()`),
   queryToolbar: await ev(`document.querySelector('.query__readonly')?.textContent.trim() ?? null`)
 })
 check(steps.at(-1).statusBar === 'Read-only', 'the status bar does not say the connection is read-only')
+check(
+  steps.at(-1).statusSwitch?.role === 'switch' && steps.at(-1).statusSwitch?.checked === 'true',
+  'the status bar does not offer read-only as a switch that is on'
+)
 check(steps.at(-1).queryToolbar === 'Read-only', 'the query toolbar does not say the connection is read-only')
 
 // --- 4. a script that writes is refused whole; reads go on ------------------
@@ -323,16 +332,25 @@ await answer('Turn off read-only')
 await waitFor(`!document.querySelector('.status__lock--on')`, 'the padlock to open')
 steps.push({
   step: 'status bar: turned off',
-  padlock: await ev(`${lock}.getAttribute('aria-pressed')`),
+  switchChecked: await ev(`${lock}.getAttribute('aria-checked')`),
+  switchLabel: await ev(`${lock}.textContent.trim()`),
   queryBadge: await ev(`!!document.querySelector('.query__readonly')`),
   tableToolbar: await ev(`[...document.querySelectorAll('.data__toolbar .btn')].map(b => b.textContent.trim())`),
   saved: await ev(`(async () => (await window.api.listConnections()).find(c => c.name === 'Production').readOnly)()`),
   write: await sql(`DELETE FROM dbo.${TABLE} WHERE id = 3`)
 })
+check(
+  steps.at(-1).switchChecked === 'false' && steps.at(-1).switchLabel === 'Read-only',
+  'the status bar switch is not there, labelled, once read-only is off'
+)
 check(steps.at(-1).tableToolbar.includes('Add row'), 'the table cannot be edited once read-only is off')
 check(steps.at(-1).saved === false, 'turning it off was not saved')
 check(steps.at(-1).write.error === null && steps.at(-1).write.count === 2, 'a write did not go through')
 await shot('08-writable')
+await ev(`document.documentElement.setAttribute('data-theme', 'light')`)
+await delay(150)
+await shot('08-writable-light')
+await ev(`document.documentElement.setAttribute('data-theme', 'dark')`)
 
 // --- 8. back on at once, without a question --------------------------------------
 await ev(`${lock}.click()`)
@@ -357,7 +375,7 @@ steps.push({ step: 'file menu: same question, kept read-only' })
 await ev(`document.querySelector('.status__btn--disconnect').click()`)
 await waitFor(`!!document.querySelector('.row .row__buttons')`, 'the connection screen')
 
-// --- 9. the list's menu switches it without connecting ----------------------------
+// --- 9. the list switches it without connecting: each row's padlock, and its menu ---
 const fromRowMenu = async (name, label) => {
   await ev(`${rowOf(name)}.querySelector('.row__menu').click()`)
   await waitFor(`!!document.querySelector('.menu')`, 'the row menu')
@@ -365,14 +383,45 @@ const fromRowMenu = async (name, label) => {
   await ev(`[...document.querySelectorAll('.menu .menu__item')].find(b => b.textContent.trim() === ${JSON.stringify(label)}).click()`)
   return items
 }
-const writableMenu = await fromRowMenu('Writable', 'Turn on read-only')
+const rowLock = (name) => `${rowOf(name)}.querySelector('.row__lock')`
+const padlockOn = (name) => ev(`${rowLock(name)}?.getAttribute('aria-pressed') ?? null`)
+const writableLock = {
+  label: await ev(`${rowLock('Writable')}?.getAttribute('aria-label') ?? null`),
+  before: await padlockOn('Writable'),
+  production: await padlockOn('Production')
+}
+await ev(`${rowLock('Writable')}.click()`)
 await waitFor(`!!${rowOf('Writable')}.querySelector('.row__readonly')`, 'the badge on Writable')
-await fromRowMenu('Writable', 'Turn off read-only…')
-await waitFor(asking, 'the question from the list')
+check(!(await ev(`!!document.querySelector('.modal')`)), 'turning read-only on from the list asked something')
+writableLock.after = await padlockOn('Writable')
+await ev(`${rowLock('Writable')}.click()`)
+await waitFor(asking, 'the question from the padlock')
 await answer('Turn off read-only')
 await waitFor(`!${rowOf('Writable')}.querySelector('.row__readonly')`, 'the badge to go')
-steps.push({ step: 'list menu', writableMenu })
-await shot('09-list-menu')
+writableLock.answered = await padlockOn('Writable')
+// One row each way: Production's padlock closed, Writable's open.
+await shot('09-list-padlocks')
+await ev(`document.documentElement.setAttribute('data-theme', 'light')`)
+await delay(150)
+await shot('09-list-padlocks-light')
+await ev(`document.documentElement.setAttribute('data-theme', 'dark')`)
+check(
+  writableLock.label === 'Read-only for Writable' &&
+    writableLock.before === 'false' &&
+    writableLock.production === 'true' &&
+    writableLock.after === 'true' &&
+    writableLock.answered === 'false',
+  'the padlock on the row does not show or switch read-only'
+)
+
+// The row's menu holds the same switch, and asks the same question.
+const writableMenu = await fromRowMenu('Writable', 'Turn on read-only')
+await waitFor(`!!${rowOf('Writable')}.querySelector('.row__readonly')`, 'the badge from the menu')
+await fromRowMenu('Writable', 'Turn off read-only…')
+await waitFor(asking, 'the question from the menu')
+await answer('Turn off read-only')
+await waitFor(`!${rowOf('Writable')}.querySelector('.row__readonly')`, 'the badge to go again')
+steps.push({ step: 'list', writableLock, writableMenu })
 
 // --- 10. the form asks before unticking, and Escape closes only the question ------
 await fromRowMenu('Production', 'Edit…')

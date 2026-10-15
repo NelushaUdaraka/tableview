@@ -93,13 +93,14 @@ const version = computed(() => {
 
     <!-- The switch sits with the connection it belongs to, for the whole
          session, dropped or not: the connection is still the read-only one
-         while it is being put back. Off, it is just the open padlock. -->
+         while it is being put back. It is labelled either way, so it can be
+         found before it is needed rather than only once it is on. -->
     <button
       v-if="connections.inSession && connections.active"
       class="status__seg status__lock"
       :class="{ 'status__lock--on': connections.readOnly }"
-      aria-label="Read-only"
-      :aria-pressed="connections.readOnly"
+      role="switch"
+      :aria-checked="connections.readOnly"
       :title="
         connections.readOnly
           ? 'Read-only: edits, truncate and drop are off, and statements that would change the database are refused. Click to turn it off.'
@@ -108,7 +109,8 @@ const version = computed(() => {
       @click="toggleReadOnly"
     >
       <AppIcon :name="connections.readOnly ? 'lock' : 'lock-open'" :size="12" />
-      <span v-if="connections.readOnly">Read-only</span>
+      Read-only
+      <span class="switch" :class="{ 'switch--on': connections.readOnly }" aria-hidden="true"></span>
     </button>
 
     <template v-if="status?.state === 'connected'">
@@ -202,10 +204,10 @@ const version = computed(() => {
 .status__seg--tunnel {
   gap: 6px;
 }
-/* The read-only switch: a quiet open padlock while the connection can write,
-   the closed one and its name while it cannot. */
+/* The read-only switch: its name and padlock quiet while the connection can
+   write, brought forward with the closed padlock while it cannot. */
 .status__lock {
-  gap: 5px;
+  gap: 6px;
   height: 22px;
   border: none;
   border-radius: 5px;
@@ -222,8 +224,11 @@ const version = computed(() => {
   color: var(--text-primary);
 }
 .status__lock--on {
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-weight: 500;
+}
+.status__lock--on .icon {
+  color: var(--accent-fg);
 }
 .status__transport {
   display: inline-flex;

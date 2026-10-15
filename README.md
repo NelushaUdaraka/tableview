@@ -64,9 +64,10 @@ TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind
   that would change the database: the grid offers no edits, *Truncate* and *Drop* are greyed, and a
   script with a statement that writes is turned down whole, before any of it is sent. The check is
   made in the main process, so no window can get round it, and the list, the status bar and the
-  toolbars all say which connection it applies to. It is switched from the padlock in the status
-  bar while connected, or from the list's ⋮ menu, without opening the connection's settings; it
-  changes at once, with no reconnect, and turning it off always asks first (see below)
+  toolbars all say which connection it applies to. It is switched from the *Read-only* switch in
+  the status bar while connected, or from the padlock beside each connection in the list, without
+  opening the connection's settings; it changes at once, with no reconnect, and turning it off
+  always asks first (see below)
 - **Kept alive, and put back when it drops** — an idle connection is poked once a minute (the
   *Keepalive* option; 0 turns it off) so an SSM session, an SSH forward or a firewall does not tear
   it down for want of traffic. A connection that goes anyway is reopened in the background with a
@@ -434,14 +435,16 @@ Reads go on as before: `SELECT`, CTEs, variables, `SET` options, cursors, transa
 is, the status bar and the query and table toolbars carry a lock.
 
 It is switched where it is used rather than in the connection's settings. While connected, the
-padlock in the status bar is the switch — open while the connection can write, closed and labelled
-*Read-only* while it cannot — and *File → Toggle Read-only* does the same from the menu. In the
-connection list, a connection's ⋮ menu turns it on or off without connecting, and the *Read-only*
-box on the General tab is still there. Whichever is used, it is one setting saved with the
-connection, and it changes at once in every window that has the connection open: the next statement
-is checked against it, with no reconnect, so nothing open in the window is lost. Edits staged in a
-table before it went on stay staged, with *Discard* to let them go, and a connection still opening
-when it is switched opens the way it was switched.
+status bar carries a *Read-only* switch beside the connection's name, labelled whichever way it is
+so it can be found before it is needed: on, its padlock is closed and the switch filled; off, the
+padlock is open and the switch empty. *File → Toggle Read-only* does the same from the menu. In the
+connection list, the padlock beside each connection's *Connect* button turns it on or off without
+connecting, as does the row's ⋮ menu, and the *Read-only* box on the General tab is still there.
+Whichever is used, it is one setting saved with the connection, and it changes at once in every
+window that has the connection open: the next statement is checked against it, with no reconnect,
+so nothing open in the window is lost. Edits staged in a table before it went on stay staged, with
+*Discard* to let them go, and a connection still opening when it is switched opens the way it was
+switched.
 
 Turning it on just happens. Turning it off always asks first — *Turn off read-only?* — naming the
 connection and the server and database it is about to write to. *Keep read-only* has the focus, so
@@ -618,12 +621,13 @@ The suites:
   be edited, and that *Truncate* and *Drop* are greyed in the tree's menu. Then it goes round the
   window: staged edits, truncate, drop and a raw filter with a `DELETE` in it, sent straight to the
   main process, are each refused, and the rows are counted to show none of it happened. Last it
-  switches it where it is used: the status bar's padlock asks before turning it off, with the focus
-  on *Keep read-only* and Escape keeping it; once told, a delete goes through with no reconnect, and
-  turned back on — without a question — the next one is refused. *File → Toggle Read-only* asks the
-  same; the list's ⋮ menu turns a connection on and, after the question, off without connecting it;
-  and in the form, unticking it asks over the form, Escape answers only the question, and *Cancel*
-  leaves the saved setting as it was
+  switches it where it is used: the status bar's *Read-only* switch asks before turning it off, with
+  the focus on *Keep read-only* and Escape keeping it; once told, a delete goes through with no
+  reconnect, the switch still there and still labelled, and turned back on — without a question —
+  the next one is refused. *File → Toggle Read-only* asks the same; the padlock on a row of the
+  list, and the row's ⋮ menu, turn a connection on and, after the question, off without connecting
+  it; and in the form, unticking it asks over the form, Escape answers only the question, and
+  *Cancel* leaves the saved setting as it was
 - **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block
   with *Paste from clipboard* (after checking that something else on the clipboard never reaches
   the box), fetches the account's instances and picks the bastion from the list (including the

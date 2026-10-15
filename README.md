@@ -662,6 +662,33 @@ what Vue reactive state is. `lib/api.ts` handles this once for every call site.
 
 ---
 
+## Working on the UI
+
+The design tokens and shared controls live in `src/renderer/src/styles/index.css`.
+`design-system/beekeeper-clone/MASTER.md` writes the same system down — palette, type, spacing,
+components, motion, and what not to do — and is the first thing to read before changing how
+something looks.
+
+**UI UX Pro Max** ([nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill),
+MIT) is installed as a project skill in `.claude/skills/ui-ux-pro-max/`, so Claude Code picks it up
+in any session on this repository, local or in the cloud. Ask for it by name, or let a UI task
+trigger it. It searches a local database of styles, palettes, font pairings and UX guidelines with
+`python3 .claude/skills/ui-ux-pro-max/scripts/search.py` — Python 3 and the standard library, no
+network. Its instructions have Claude read `MASTER.md` before building a screen and leave it
+unchanged without your say-so, so new work follows the shipped system rather than a freshly
+generated one.
+
+It was installed from `ui-ux-pro-max-cli` 2.15.0. To move to a newer release:
+
+```bash
+npx ui-ux-pro-max-cli@latest init --ai claude --force
+# The installer also adds six companion skills (banners, brand, logos, slides,
+# design tokens, shadcn/Tailwind) that this project has no use for.
+rm -rf .claude/skills/{banner-design,brand,design,design-system,slides,ui-styling}
+```
+
+---
+
 ## Known limitations
 
 Deliberately out of scope for phase 1, in rough priority order for phase 2:

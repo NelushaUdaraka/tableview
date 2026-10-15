@@ -19,6 +19,7 @@ import {
 import type { CellValue, ColumnMeta } from '@shared/types'
 import { formatCellForDisplay, formatCellFull, parseCellInput } from '@shared/serialize'
 import { api } from '../lib/api'
+import AppIcon from './AppIcon.vue'
 
 export type RowState = 'normal' | 'inserted' | 'deleted'
 
@@ -161,11 +162,11 @@ const visibleRows = computed<VisibleRow[]>(() => {
 })
 
 const CELL_CHAR_PX = 7.8      // 13px monospace
-const HEADER_NAME_PX = 7      // 10px mono caps, tracked 0.1em
-const HEADER_TYPE_PX = 6      // 10px monospace type label
-const PK_BADGE_PX = 28
-const SORT_ARROW_PX = 16
-const CELL_PADDING_PX = 28    // 10px each side, plus the 7px gaps between parts
+const HEADER_NAME_PX = 7.3    // 12px monospace column name
+const HEADER_TYPE_PX = 6.7    // 11px monospace type label
+const PK_BADGE_PX = 28        // the badge and the gap before it
+const SORT_ARROW_PX = 18      // the 12px arrow and the gap before it
+const CELL_PADDING_PX = 28    // 10px each side, plus the 6px gaps between parts
 
 /**
  * The header carries more than the column name — the type label, an optional
@@ -482,10 +483,10 @@ function isRowSelected(row: number): boolean {
   return selectedRows.value.has(row)
 }
 
-function sortIndicator(column: ColumnMeta): string {
+function sortIndicator(column: ColumnMeta): 'asc' | 'desc' | '' {
   const sort = props.sorts.find((entry) => entry.column === column.name)
   if (!sort) return ''
-  return sort.direction === 'asc' ? '▲' : '▼'
+  return sort.direction === 'asc' ? 'asc' : 'desc'
 }
 
 function canEditColumn(columnIndex: number): boolean {
@@ -757,7 +758,12 @@ defineExpose({
           <span class="grid__th-name truncate">{{ column.name }}</span>
           <span v-if="primaryKey.includes(column.name)" class="grid__th-key" title="Primary key">PK</span>
           <span class="grid__th-type truncate">{{ column.dataType }}</span>
-          <span v-if="sortIndicator(column)" class="grid__th-sort">{{ sortIndicator(column) }}</span>
+          <AppIcon
+            v-if="sortIndicator(column)"
+            class="grid__th-sort"
+            :name="sortIndicator(column) === 'asc' ? 'arrow-up' : 'arrow-down'"
+            :size="12"
+          />
           <span
             class="grid__resizer"
             @mousedown="onResizeStart(index, $event)"
@@ -785,6 +791,7 @@ defineExpose({
       </div>
 
       <div v-else-if="rows.length === 0" class="empty-state">
+        <div class="empty-state__icon"><AppIcon name="table" :size="20" /></div>
         <div class="empty-state__title">{{ emptyMessage }}</div>
       </div>
 
@@ -917,7 +924,7 @@ defineExpose({
 
 .grid__header {
   height: var(--h-gridheader);
-  border-bottom: var(--rule) solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
   background: var(--bg-app);
   /* Scrolled in step with the viewport rather than by the user, so the bar
      itself never shows one. */
@@ -941,44 +948,47 @@ defineExpose({
   position: relative;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   padding: 0 10px;
   border-right: 1px solid var(--border-subtle);
   cursor: pointer;
   overflow: hidden;
   user-select: none;
+  transition: background-color var(--transition);
 }
 .grid__th:hover {
   background: var(--bg-hover);
 }
+/* Column names are identifiers, so they keep the face and the case they were
+   given — set in the mono at full strength, with the type quieter beside it. */
 .grid__th-name {
   font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
 }
-/* The key badge is solid accent — it marks identity in a field of grey. */
+/* The key badge is gold, the way a key is marked in every database tool. */
 .grid__th-key {
   flex: 0 0 auto;
-  padding: 1px 5px;
-  border-radius: 0;
-  background: var(--accent);
-  color: var(--accent-text);
-  font-family: var(--font-mono);
-  font-size: 9px;
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--key) 18%, transparent);
+  color: var(--key);
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
 }
 .grid__th-type {
-  font-size: 10px;
-  color: var(--text-dim);
+  font-size: 11px;
+  color: var(--text-muted);
   font-family: var(--font-mono);
 }
 .grid__th-sort {
   margin-left: auto;
-  font-size: 9px;
-  color: var(--accent);
+  color: var(--accent-fg);
 }
 
 .grid__resizer {
@@ -990,9 +1000,23 @@ defineExpose({
   cursor: col-resize;
   z-index: 2;
 }
-.grid__resizer:hover {
+.grid__resizer::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 3px;
+  width: 1px;
+  border-radius: 1px;
+  background: transparent;
+  transition: background-color var(--transition);
+}
+.grid__resizer:hover::after {
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 3px;
   background: var(--accent);
-  opacity: 0.5;
 }
 
 .grid__viewport {
@@ -1022,8 +1046,12 @@ defineExpose({
 .grid__row--odd {
   background: var(--row-odd);
 }
+.grid__row:hover {
+  background: color-mix(in srgb, var(--text-primary) 3.5%, transparent);
+}
 /* Staged rows are marked on their leading edge rather than washed in colour. */
-.grid__row--inserted {
+.grid__row--inserted,
+.grid__row--inserted:hover {
   background: var(--bg-inserted);
 }
 .grid__row--inserted .grid__rownum,
@@ -1040,7 +1068,8 @@ defineExpose({
 }
 /* Picked-out rows carry the accent wash the rest of the app selects with, and
    a solid leading edge so a run of them reads as one block. */
-.grid__row--selected {
+.grid__row--selected,
+.grid__row--selected:hover {
   background: var(--selection-idle);
 }
 .grid__row--selected .grid__rownum {
@@ -1109,12 +1138,12 @@ defineExpose({
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   margin-left: auto;
   padding: 0;
   border: none;
-  border-radius: 0;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--warning);
   cursor: pointer;
@@ -1124,8 +1153,7 @@ defineExpose({
   height: 11px;
 }
 .grid__revert:hover {
-  background: var(--accent);
-  color: var(--accent-text);
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
 }
 /* A right-aligned value keeps its edge; the control sits after it. */
 .grid__cell--number .grid__revert,
@@ -1142,16 +1170,19 @@ defineExpose({
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   margin-left: auto;
   padding: 0;
   border: none;
-  border-radius: 0;
+  border-radius: var(--radius-xs);
   background: transparent;
-  color: var(--accent);
-  opacity: 0.65;
+  color: var(--accent-fg);
+  opacity: 0.6;
   cursor: pointer;
+  transition:
+    opacity var(--transition),
+    background-color var(--transition);
 }
 /* Right-aligned values keep their edge; the arrow follows the number. */
 .grid__cell--number .grid__fk,
@@ -1167,14 +1198,13 @@ defineExpose({
   opacity: 1;
 }
 .grid__fk:hover {
-  background: var(--accent);
-  color: var(--accent-text);
+  background: var(--accent-soft);
   opacity: 1;
 }
 .grid__null {
   color: var(--text-dim);
   font-style: italic;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .grid__editor {
@@ -1189,9 +1219,11 @@ defineExpose({
   min-height: var(--row-height);
   padding: 6px 9px;
   border: 1px solid var(--accent);
-  border-radius: 0;
+  border-radius: var(--radius-xs);
   background: var(--bg-input);
-  box-shadow: var(--shadow-menu);
+  box-shadow:
+    0 0 0 3px var(--accent-ring),
+    var(--shadow-menu);
   color: var(--text-primary);
   font-family: var(--font-mono);
   font-size: 13px;

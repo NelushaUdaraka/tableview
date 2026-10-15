@@ -23,6 +23,7 @@ import {
   type TableKey
 } from '../lib/schemaTree'
 import { useSchemaStore } from '../stores/schema'
+import AppIcon from './AppIcon.vue'
 
 const props = defineProps<{ schema: string; table: string }>()
 const emit = defineEmits<{
@@ -110,9 +111,13 @@ function indexTitle(index: TableIndex): string {
               class="leaf"
               :title="columnTitle(column)"
             >
-              <span class="leaf__mark" :class="{ 'leaf__mark--key': column.isPrimaryKey }">
-                {{ column.isPrimaryKey ? '◆' : '▪' }}
-              </span>
+              <AppIcon
+                v-if="column.isPrimaryKey"
+                class="leaf__mark leaf__mark--key"
+                name="key"
+                :size="12"
+              />
+              <span v-else class="leaf__mark leaf__mark--dot"></span>
               <span class="leaf__name mono truncate">{{ column.name }}</span>
               <span class="leaf__meta mono truncate">{{ column.fullType }}</span>
             </div>
@@ -125,7 +130,7 @@ function indexTitle(index: TableIndex): string {
               class="leaf"
               :title="keyTitle(key)"
             >
-              <span class="leaf__mark leaf__mark--key">◆</span>
+              <AppIcon class="leaf__mark leaf__mark--key" name="key" :size="12" />
               <span class="leaf__name mono truncate">{{ key.name }}</span>
               <span class="leaf__meta mono truncate">{{ key.columns.join(', ') }}</span>
             </div>
@@ -141,7 +146,7 @@ function indexTitle(index: TableIndex): string {
               :title="`${key.name}: ${key.columns.join(', ')} → ${foreignKeyTarget(key)}`"
               @click="emit('open-table', key.referencedSchema, key.referencedTable)"
             >
-              <span class="leaf__mark">→</span>
+              <AppIcon class="leaf__mark leaf__mark--link" name="arrow-right" :size="12" />
               <span class="leaf__name mono truncate">{{ key.columns.join(', ') }}</span>
               <span class="leaf__meta mono truncate">{{ foreignKeyTarget(key) }}</span>
             </button>
@@ -154,7 +159,12 @@ function indexTitle(index: TableIndex): string {
               class="leaf"
               :title="indexTitle(index)"
             >
-              <span class="leaf__mark" :class="{ 'leaf__mark--key': index.isUnique }">≡</span>
+              <AppIcon
+                class="leaf__mark"
+                :class="{ 'leaf__mark--key': index.isUnique }"
+                name="list"
+                :size="12"
+              />
               <span class="leaf__name mono truncate">{{ index.name }}</span>
               <span class="leaf__meta mono truncate">{{ indexColumnList(index) }}</span>
             </div>
@@ -166,21 +176,21 @@ function indexTitle(index: TableIndex): string {
 </template>
 
 <style scoped>
-/* The whole subtree sits under one rule dropped from the table's own row, so
-   an opened table reads as a block rather than as more rows in the list. The
-   indent puts the folders' twisties under the table's icon. */
+/* The whole subtree hangs from a guide line dropped under the table's own
+   twisty, so an opened table reads as a block rather than as more rows. */
 .objtree {
+  position: relative;
+  margin: 2px 6px 4px 22px;
+  padding-left: 6px;
   border-left: 1px solid var(--border-subtle);
-  margin-left: 22px;
-  background: var(--bg-app);
 }
 
 .objtree__note {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 14px;
-  font-size: 11px;
+  padding: 6px 10px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 .objtree__note--error {
@@ -190,34 +200,37 @@ function indexTitle(index: TableIndex): string {
 .folder {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
   height: 24px;
-  padding: 0 12px 0 8px;
+  padding: 0 8px 0 4px;
   border: none;
+  border-radius: var(--radius-xs);
   background: transparent;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
+  color: var(--text-muted);
   font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   text-align: left;
   cursor: pointer;
+  transition:
+    background-color var(--transition),
+    color var(--transition);
 }
 .folder:hover {
-  background: var(--bg-hover);
+  background: var(--bg-hover-strong);
   color: var(--text-primary);
 }
-/* The same mark as the table's own twisty, a level in: drawn rather than
-   typed, and turned a quarter when the folder is open. */
+/* The same mark as the table's own twisty, a level in: turned a quarter when
+   the folder is open. */
 .folder__chevron {
   display: flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 10px;
-  color: var(--text-secondary);
+  width: 12px;
+  color: var(--text-dim);
 }
 .folder__chevron svg {
   width: 9px;
@@ -234,43 +247,65 @@ function indexTitle(index: TableIndex): string {
 .folder__count {
   flex: 0 0 auto;
   color: var(--text-dim);
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 
 .leaf {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   width: 100%;
   height: 24px;
-  padding: 0 12px 0 24px;
+  padding: 0 8px 0 20px;
   border: none;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-secondary);
   text-align: left;
 }
 .leaf--link {
   cursor: pointer;
+  transition:
+    background-color var(--transition),
+    color var(--transition);
 }
 .leaf--link:hover {
-  background: var(--bg-hover);
+  background: var(--bg-hover-strong);
   color: var(--text-primary);
 }
 .leaf--empty {
   color: var(--text-dim);
   font-size: 11px;
   font-style: italic;
-  padding-left: 32px;
+  padding-left: 22px;
 }
 .leaf__mark {
   flex: 0 0 auto;
-  width: 8px;
-  font-size: 9px;
   color: var(--text-muted);
 }
-/* What identifies a row, marked the way the grid marks it: in the accent. */
+/* A plain column: a small dot where a key would have its key. */
+.leaf__mark--dot {
+  width: 12px;
+  height: 12px;
+  position: relative;
+}
+.leaf__mark--dot::after {
+  content: '';
+  position: absolute;
+  top: 4.5px;
+  left: 4.5px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+/* What identifies a row is gold, the way the grid marks it. */
 .leaf__mark--key {
-  color: var(--accent);
+  color: var(--key);
+}
+.leaf__mark--link {
+  color: var(--accent-fg);
 }
 .leaf__name {
   flex: 0 1 auto;

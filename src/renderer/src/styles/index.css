@@ -1,34 +1,26 @@
-/* Design tokens — the Modernist system.
+/* Design tokens.
 
-   Modernist is flat and architectural: zero corner radius, 2px rules doing the
-   organising, Archivo throughout, and a single red accent spent only where an
-   action or a staged change lives. The system ships on a light ground; the dark
-   palette below is that ground inverted through its own neutral ramp, and is the
-   default here. `data-theme="light"` swaps back to the system's native ground.
+   A calm, layered workbench: cool neutral grounds that step up in lightness
+   as they come forward (chrome → content → raised → overlay), hairline
+   borders instead of heavy rules, soft radii, and one accent spent on what
+   acts, what is selected and what has focus. Inter sets the interface and
+   JetBrains Mono sets anything that is data or code, so the two never blur.
 
-   Fonts are vendored under assets/fonts — the renderer's CSP is `font-src 'self'`,
-   so nothing is fetched at runtime. Archivo and JetBrains Mono are both OFL-1.1. */
+   The accent is indigo by default, and a connection's colour replaces it for
+   the window that connection is open in (see lib/accent.ts) — so the accent
+   is never also the colour of danger, and a red connection can still say
+   "production" without every Save button saying it too.
+
+   Fonts are vendored under assets/fonts — the renderer's CSP is
+   `font-src 'self'`, so nothing is fetched at runtime. Inter and JetBrains
+   Mono are both OFL-1.1. */
 
 @font-face {
-  font-family: 'Archivo';
+  font-family: 'Inter';
   font-style: normal;
-  font-weight: 400;
+  font-weight: 100 900;
   font-display: swap;
-  src: url('../assets/fonts/archivo-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Archivo';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('../assets/fonts/archivo-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Archivo';
-  font-style: normal;
-  font-weight: 800;
-  font-display: swap;
-  src: url('../assets/fonts/archivo-800.woff2') format('woff2');
+  src: url('../assets/fonts/inter-latin-wght.woff2') format('woff2');
 }
 @font-face {
   font-family: 'JetBrains Mono';
@@ -53,16 +45,23 @@
 }
 
 :root {
-  /* Surfaces. `app` is the recessed chrome ground (tab strip, grid header,
-     dialog header and footer bars); `surface` is the content ground. */
-  --bg-app: #1a1918;
-  --bg-surface: #201e1d;
-  --bg-raised: #2d2b2b;
-  --bg-input: #151413;
-  --bg-hover: #2d2b2b;
-  --bg-hover-strong: #3a3736;
-  --bg-active: #3a3736;
-  --bg-selected: #2d2b2b;
+  color-scheme: dark;
+
+  /* Grounds, back to front. `app` is the chrome that frames the work (title
+     bar, sidebar, tab strip, status bar, grid and dialog header bands);
+     `surface` is the content itself; `raised` lifts a block off it; `overlay`
+     is anything floating — menus, dialogs, toasts. */
+  --bg-app: #111317;
+  --bg-surface: #16181d;
+  --bg-raised: #1d2026;
+  --bg-overlay: #1c1f25;
+  --bg-input: #121418;
+  --bg-control: #1f2228;
+  --bg-control-hover: #272a31;
+  --bg-hover: #1f2228;
+  --bg-hover-strong: #262a31;
+  --bg-active: #2c3038;
+  --bg-selected: color-mix(in srgb, var(--accent) 14%, var(--bg-surface));
   /* Selected text. An accent wash rather than another grey: the greys are all
      spoken for — hover, active row, raised surface — and a selection has to be
      legible on top of any of them. */
@@ -71,98 +70,161 @@
   /* The editor's current-line band. Translucent on purpose: CodeMirror paints
      the selection in a layer beneath the text, so an opaque band here would
      hide the selection on the very line the caret is on. */
-  --editor-active-line: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  --editor-active-line: color-mix(in srgb, var(--text-primary) 4.5%, transparent);
 
-  --text-primary: #f3f2f2;
-  --text-secondary: #bab6b6;
-  --text-muted: #7d7979;
-  --text-dim: #605d5d;
+  /* Text, strongest first. Primary, secondary and muted all clear 4.5:1 on
+     every ground above; `dim` is for what is only ever a hint beside
+     something stronger — line numbers, separators, counts. */
+  --text-primary: #e6e8eb;
+  --text-secondary: #a9aeb7;
+  --text-muted: #858b96;
+  --text-dim: #686e79;
 
   /* Three rule weights, in ascending strength: `border` separates data rows,
-     `border-subtle` divides chrome, `border-strong` draws controls and the 2px
-     rules that carry the layout. */
-  --border: #2d2b2b;
-  --border-subtle: #3a3736;
-  --border-strong: #444141;
-  --rule: 2px;
+     `border-subtle` divides chrome, `border-strong` draws controls. */
+  --border: #212429;
+  --border-subtle: #262a30;
+  --border-strong: #343840;
+  --border-hover: #474c56;
+  --border-overlay: #2e323a;
+  --rule: 1px;
 
-  --accent: #ec3013;
-  --accent-hover: #dd2b0f;
-  --accent-bright: #ff9783;
+  /* The app's own accent. A connection's colour overrides `--accent` and the
+     three shades below it; this one is never overridden, so the colour picker
+     can always show what "no colour of its own" looks like. */
+  --accent-default: #3e63dd;
+  --accent: var(--accent-default);
+  --accent-hover: #395bcb;
+  --accent-bright: #a8b9f0;
   --accent-text: #ffffff;
+  /* The accent as text: lifted towards white on this ground so it reads at
+     body size, whichever colour a connection brought. */
+  --accent-fg: color-mix(in srgb, var(--accent) 60%, white);
+  --accent-soft: color-mix(in srgb, var(--accent) 17%, transparent);
+  --accent-ring: color-mix(in srgb, var(--accent) 42%, transparent);
+
   --success: #3fb950;
   --warning: #d29922;
   --danger: #f85149;
+  /* Keys are gold, the way every database tool has always marked them. */
+  --key: #e3b341;
 
-  --row-odd: rgba(255, 255, 255, 0.018);
-  --cell-edited: inset 0 -3px 0 var(--accent);
-  --row-staged: inset 3px 0 0 var(--accent);
+  --row-odd: rgba(255, 255, 255, 0.016);
+  --cell-edited: inset 0 -2px 0 var(--accent);
+  --row-staged: inset 2px 0 0 var(--accent);
   /* Mixed from the accent rather than written out, so a connection that brings
      its own colour takes the staged-row wash with it. */
-  --bg-inserted: color-mix(in srgb, var(--accent) 13%, transparent);
+  --bg-inserted: color-mix(in srgb, var(--accent) 12%, transparent);
 
-  --font-ui: 'Archivo', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* Syntax. Keywords take the accent's own tint, so the editor still says
+     which connection it is in; the rest are fixed hues tuned for this ground. */
+  --syntax-keyword: var(--accent-bright);
+  --syntax-string: #e2a77d;
+  --syntax-number: #7fd3b3;
+  --syntax-function: #cdb2ff;
+  --syntax-type: #74c7da;
+  --syntax-comment: #7d838e;
+
+  --scrollbar: rgba(255, 255, 255, 0.13);
+  --scrollbar-hover: rgba(255, 255, 255, 0.24);
+
+  --font-ui: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Mono', 'SF Mono', Consolas, 'Liberation Mono', Menlo,
     monospace;
   --font-size: 13px;
 
-  /* Nothing is rounded — `--radius` is 0 on purpose. */
-  --radius: 0px;
-  --radius-sm: 0px;
+  /* Soft, and smaller the denser the thing: a tag, a control, a floating
+     panel, a dialog. */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
 
-  /* Density — one step roomier than the shipping UI. */
   --row-height: 30px;
   --h-titlebar: 40px;
   --h-tabstrip: 38px;
   --h-commandbar: 44px;
-  --h-statusbar: 30px;
+  --h-statusbar: 28px;
   --h-gridheader: 36px;
   --h-control: 28px;
-  --h-control-sm: 26px;
-  --h-control-lg: 34px;
-  --h-field: 36px;
+  --h-control-sm: 24px;
+  --h-control-lg: 32px;
+  --h-field: 32px;
 
-  --shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
-  --shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.55);
-  --transition: 120ms ease;
+  /* One elevation scale: a control's lip, a lifted block, a floating menu, a
+     dialog. */
+  --shadow-xs: 0 1px 0 rgba(0, 0, 0, 0.28);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 1px rgba(0, 0, 0, 0.2);
+  --shadow-menu: 0 14px 32px -8px rgba(0, 0, 0, 0.6), 0 4px 12px -4px rgba(0, 0, 0, 0.45);
+  --shadow: 0 32px 80px -20px rgba(0, 0, 0, 0.75), 0 12px 28px -12px rgba(0, 0, 0, 0.55);
+  --scrim: rgba(6, 7, 9, 0.62);
+
+  /* Motion: quick for state, a touch longer for things that arrive. */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 110ms;
+  --duration: 160ms;
+  --duration-slow: 220ms;
+  --transition: var(--duration-fast) var(--ease);
 }
 
-/* The system's native ground: ink on #f3f2f2, same single red. */
+/* The light ground: white content on a pale chrome, ink text, the same accent. */
 :root[data-theme='light'] {
-  --bg-app: #eae7e7;
-  --bg-surface: #f3f2f2;
-  --bg-raised: #d7d3d3;
+  color-scheme: light;
+
+  --bg-app: #f4f5f7;
+  --bg-surface: #ffffff;
+  --bg-raised: #eef0f3;
+  --bg-overlay: #ffffff;
   --bg-input: #ffffff;
-  --bg-hover: #e4e0e0;
-  --bg-hover-strong: #d7d3d3;
-  --bg-active: #d7d3d3;
-  --bg-selected: #e4e0e0;
-  --selection: color-mix(in srgb, var(--accent) 26%, transparent);
-  --selection-idle: color-mix(in srgb, var(--accent) 13%, transparent);
-  --editor-active-line: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  --bg-control: #ffffff;
+  --bg-control-hover: #f5f6f8;
+  --bg-hover: #f0f2f5;
+  --bg-hover-strong: #e8ebef;
+  --bg-active: #e0e4e9;
+  --bg-selected: color-mix(in srgb, var(--accent) 10%, var(--bg-surface));
+  --selection: color-mix(in srgb, var(--accent) 24%, transparent);
+  --selection-idle: color-mix(in srgb, var(--accent) 12%, transparent);
+  --editor-active-line: color-mix(in srgb, var(--text-primary) 4%, transparent);
 
-  --text-primary: #201e1d;
-  --text-secondary: #605d5d;
-  --text-muted: #7d7979;
-  --text-dim: #9b9797;
+  --text-primary: #16181d;
+  --text-secondary: #4b5260;
+  --text-muted: #646c79;
+  --text-dim: #8a919d;
 
-  --border: #d7d3d3;
-  --border-subtle: #cbc7c7;
-  --border-strong: #9c9a99;
+  --border: #eceef2;
+  --border-subtle: #e4e7eb;
+  --border-strong: #d3d8de;
+  --border-hover: #b9c0c9;
+  --border-overlay: #dfe3e8;
 
-  --accent: #ec3013;
-  --accent-hover: #dd2b0f;
-  --accent-bright: #ae1800;
-  --accent-text: #ffffff;
+  --accent-bright: #2d479f;
+  --accent-fg: color-mix(in srgb, var(--accent) 86%, black);
+  --accent-soft: color-mix(in srgb, var(--accent) 11%, transparent);
+  --accent-ring: color-mix(in srgb, var(--accent) 30%, transparent);
+
   --success: #1a7f37;
   --warning: #9a6700;
   --danger: #cf222e;
+  --key: #9a6700;
 
-  --row-odd: rgba(0, 0, 0, 0.022);
+  --row-odd: rgba(16, 24, 40, 0.022);
   --bg-inserted: color-mix(in srgb, var(--accent) 8%, transparent);
 
-  --shadow: 0 24px 64px rgba(45, 43, 43, 0.22);
-  --shadow-menu: 0 12px 32px rgba(45, 43, 43, 0.18);
+  --syntax-string: #a3501a;
+  --syntax-number: #0f7b53;
+  --syntax-function: #6f42c1;
+  --syntax-type: #0b7285;
+  --syntax-comment: #6e7681;
+
+  --scrollbar: rgba(16, 24, 40, 0.18);
+  --scrollbar-hover: rgba(16, 24, 40, 0.32);
+
+  --shadow-xs: 0 1px 1px rgba(16, 24, 40, 0.05);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.1), 0 1px 1px rgba(16, 24, 40, 0.04);
+  --shadow-menu: 0 14px 32px -8px rgba(16, 24, 40, 0.18), 0 4px 12px -4px rgba(16, 24, 40, 0.1);
+  --shadow: 0 32px 80px -20px rgba(16, 24, 40, 0.32), 0 12px 28px -12px rgba(16, 24, 40, 0.16);
+  --scrim: rgba(16, 20, 28, 0.36);
 }
 
 *,
@@ -182,9 +244,14 @@ body,
 body {
   font-family: var(--font-ui);
   font-size: var(--font-size);
+  line-height: 1.4;
   color: var(--text-primary);
   background: var(--bg-app);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* Inter's tailed l and serifed I, so l, I and 1 stay distinct in a tool
+     that is mostly identifiers. */
+  font-feature-settings: 'cv05', 'cv08';
   user-select: none;
 }
 
@@ -196,8 +263,13 @@ textarea {
   font-size: inherit;
   color: inherit;
 }
+button {
+  font-feature-settings: inherit;
+}
 
-/* Keyboard focus is the accent ring, never the browser default. */
+/* Keyboard focus is the accent ring, never the browser default. Drawn inside
+   the box by default, because most of what takes focus here sits in a strip
+   that clips its children; free-standing controls draw it outside. */
 :focus {
   outline: none;
 }
@@ -209,6 +281,11 @@ textarea {
   background: var(--selection);
 }
 
+.icon {
+  display: block;
+  flex: 0 0 auto;
+}
+
 /* --- scrollbars --------------------------------------------------------- */
 ::-webkit-scrollbar {
   width: 12px;
@@ -218,12 +295,14 @@ textarea {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
+  min-height: 36px;
   border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar);
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+  background: var(--scrollbar-hover);
   background-clip: content-box;
 }
 ::-webkit-scrollbar-corner {
@@ -231,81 +310,122 @@ textarea {
 }
 
 /* --- shared controls ----------------------------------------------------- */
-/* Labels sit flush left, even when the button is wider than its label. */
+/* A button is a raised control: a fill a step off the ground, a hairline
+   edge and a one-pixel lip. Labels are centred, icons sit before them. */
 .btn {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 7px;
+  justify-content: center;
+  gap: 6px;
   height: var(--h-control);
   padding: 0 11px;
   border: 1px solid var(--border-strong);
-  border-radius: 0;
-  background: transparent;
+  border-radius: var(--radius-sm);
+  background: var(--bg-control);
+  box-shadow: var(--shadow-xs);
   color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
   cursor: pointer;
   white-space: nowrap;
-  transition: background var(--transition), border-color var(--transition),
-    color var(--transition);
+  transition:
+    background-color var(--transition),
+    border-color var(--transition),
+    color var(--transition),
+    box-shadow var(--transition);
 }
 .btn:hover:not(:disabled) {
-  background: var(--bg-hover);
+  border-color: var(--border-hover);
+  background: var(--bg-control-hover);
 }
 .btn:active:not(:disabled) {
   background: var(--bg-active);
+}
+.btn:focus-visible {
+  outline-offset: 2px;
 }
 .btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
+.btn .icon {
+  color: var(--text-secondary);
+}
+.btn:hover:not(:disabled) .icon {
+  color: inherit;
+}
 
 /* The one filled control on a screen — the primary action. */
 .btn--primary {
-  padding: 0 14px;
+  padding: 0 13px;
   border-color: transparent;
   background: var(--accent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    var(--shadow-sm);
   color: var(--accent-text);
   font-weight: 600;
 }
+.btn--primary .icon,
+.btn--primary:hover:not(:disabled) .icon {
+  color: inherit;
+}
 .btn--primary:hover:not(:disabled) {
+  border-color: transparent;
   background: var(--accent-hover);
 }
 .btn--primary:active:not(:disabled) {
-  background: var(--accent-hover);
+  background: color-mix(in srgb, var(--accent-hover) 88%, black);
 }
 
-/* Secondary: the label drops to the muted ramp, the rule stays. */
-.btn--muted {
+/* Quiet: no fill and no edge until it is pointed at — for the actions that
+   sit beside the one that matters. */
+.btn--muted,
+.btn--ghost {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
   color: var(--text-secondary);
 }
-.btn--muted:hover:not(:disabled) {
+.btn--muted:hover:not(:disabled),
+.btn--ghost:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--bg-hover-strong);
   color: var(--text-primary);
+}
+.btn--muted:active:not(:disabled),
+.btn--ghost:active:not(:disabled) {
+  background: var(--bg-active);
 }
 
 .btn--danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border-strong));
   color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+}
+.btn--danger .icon {
+  color: inherit;
 }
 .btn--danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 70%, transparent);
+  background: color-mix(in srgb, var(--danger) 13%, var(--bg-control));
 }
-.btn--ghost {
-  border-color: transparent;
-  color: var(--text-secondary);
-}
-.btn--ghost:hover:not(:disabled) {
-  background: var(--bg-hover);
-  border-color: transparent;
-  color: var(--text-primary);
-}
+
 /* Marks a button as carrying live state — a filter is set, the row panel is open. */
-.btn--armed {
-  border-color: var(--accent);
+.btn--armed,
+.btn--armed:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: var(--accent-soft);
   color: var(--text-primary);
 }
+.btn--armed .icon {
+  color: var(--accent-fg);
+}
+
 .btn--sm {
   height: var(--h-control-sm);
-  padding: 0 10px;
+  padding: 0 9px;
+  border-radius: 5px;
   font-size: 12px;
 }
 .btn--lg {
@@ -313,15 +433,17 @@ textarea {
   padding: 0 14px;
 }
 .btn--lg.btn--primary {
-  padding: 0 18px;
+  padding: 0 16px;
 }
 .btn--icon {
   width: var(--h-control);
   padding: 0;
-  justify-content: center;
 }
 .btn--icon.btn--sm {
   width: var(--h-control-sm);
+}
+.btn--icon.btn--lg {
+  width: var(--h-control-lg);
 }
 
 .input,
@@ -331,33 +453,40 @@ textarea {
   height: var(--h-field);
   padding: 0 10px;
   border: 1px solid var(--border-strong);
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
+  box-shadow: var(--shadow-xs);
   color: var(--text-primary);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
+  font-size: 13px;
   outline: none;
   user-select: text;
-  transition: border-color var(--transition);
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition);
 }
 .input--sm,
 .select--sm {
-  height: 30px;
+  height: var(--h-control);
 }
 .textarea {
   height: auto;
-  padding: 7px 10px;
+  padding: 8px 10px;
   resize: vertical;
   line-height: 1.5;
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 .input:hover:not(:disabled),
 .select:hover:not(:disabled),
 .textarea:hover {
-  border-color: var(--text-muted);
+  border-color: var(--border-hover);
 }
 .input:focus,
 .select:focus,
 .textarea:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
   outline: none;
 }
 .input::placeholder,
@@ -373,45 +502,60 @@ textarea {
 .select {
   cursor: pointer;
   appearance: none;
-  padding-right: 26px;
-  /* A single square caret, drawn flat — no gradient bevel. */
-  background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
-    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
-  background-position: calc(100% - 15px) calc(50% + 1px), calc(100% - 10px) calc(50% + 1px);
-  background-size: 5px 5px, 5px 5px;
+  padding-right: 30px;
+  /* An up/down caret, drawn as an image so it needs no wrapper; the grey is
+     the same mid-tone on either ground. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238a909b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 15 5 5 5-5'/%3E%3Cpath d='m7 9 5-5 5 5'/%3E%3C/svg%3E");
+  background-position: right 8px center;
+  background-size: 14px 14px;
   background-repeat: no-repeat;
 }
+/* Number spinners are the platform's and clash with everything around them. */
+.input[type='number']::-webkit-inner-spin-button,
+.input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
 
-/* Field labels are mono micro-caps, flush left. */
+/* Field labels sit above their control in sentence case. */
 .field {
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-width: 0;
 }
-.field__label,
+/* A segmented control under a label keeps its own width. */
+.field > .seg {
+  align-self: flex-start;
+}
+.field__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+/* Small caps for section headings and inline labels, never for prose. */
 .caps {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 .field__hint {
   font-size: 12px;
-  color: var(--text-dim);
+  line-height: 1.45;
+  color: var(--text-muted);
 }
-/* The accent micro-caps that title a section or a dialog. */
+/* The accent caps that title a dialog. */
 .kicker {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.16em;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--accent-fg);
 }
 
-/* A square accent tick — no native checkbox anywhere. */
+/* An accent tick in a softly rounded box. */
 .checkbox {
   display: flex;
   align-items: center;
@@ -425,136 +569,171 @@ textarea {
   height: 16px;
   flex: 0 0 auto;
   margin: 0;
-  border: 1px solid var(--border-strong);
-  background: transparent;
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-xs);
+  background: var(--bg-input);
   cursor: pointer;
-  transition: background var(--transition), border-color var(--transition);
+  transition:
+    background-color var(--transition),
+    border-color var(--transition);
+}
+.checkbox:hover input:not(:disabled):not(:checked) {
+  border-color: var(--text-muted);
 }
 .checkbox input:checked {
   border-color: var(--accent);
-  background: var(--accent);
-  /* The tick, drawn rather than typed, so it lands on the pixel grid. */
-  background-image: linear-gradient(
-      to bottom right,
-      transparent 46%,
-      var(--accent-text) 46%,
-      var(--accent-text) 60%,
-      transparent 60%
-    ),
-    linear-gradient(
-      to bottom left,
-      transparent 62%,
-      var(--accent-text) 62%,
-      var(--accent-text) 76%,
-      transparent 76%
-    );
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+  background-position: center;
+  background-size: 12px 12px;
+  background-repeat: no-repeat;
+}
+.checkbox input:focus-visible {
+  outline-offset: 2px;
 }
 .checkbox input:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
-/* Tags and badges are ruled outlines, not pills. */
+/* Tags and badges: small tinted chips. */
 .badge {
   display: inline-flex;
   align-items: center;
-  padding: 2px 7px;
-  border: 1px solid var(--border-strong);
-  border-radius: 0;
-  background: transparent;
+  height: 18px;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
   color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
 }
 .badge--accent {
-  border-color: var(--accent);
-  color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-fg);
 }
-/* The key badges — solid accent, because they mark identity in a dense grid. */
+/* The key badges — gold for a primary key, the accent for a foreign one. */
+.badge--pk,
+.badge--fk {
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
 .badge--pk {
-  padding: 1px 5px;
-  border-color: transparent;
-  background: var(--accent);
-  color: var(--accent-text);
-  font-size: 9px;
-  letter-spacing: 0.06em;
+  background: color-mix(in srgb, var(--key) 18%, transparent);
+  color: var(--key);
 }
 .badge--fk {
-  padding: 1px 5px;
-  border-color: var(--accent);
-  background: transparent;
-  color: var(--accent);
-  font-size: 9px;
-  letter-spacing: 0.06em;
+  background: var(--accent-soft);
+  color: var(--accent-fg);
 }
 
-/* A segmented control: one ruled box, dividers between, accent fill on the
-   selected option. Used for view switches, tunnel modes, formats and themes. */
+/* A segmented control: a recessed track with the chosen option lifted out of
+   it. Used for view switches, tunnel modes, formats and themes. */
 .seg {
   display: inline-flex;
   flex: 0 0 auto;
-  border: 1px solid var(--border-strong);
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-app);
 }
 .seg__opt {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  height: var(--h-control);
-  padding: 0 12px;
+  justify-content: center;
+  gap: 6px;
+  height: calc(var(--h-control) - 6px);
+  padding: 0 10px;
   border: none;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  transition: background var(--transition), color var(--transition);
-}
-.seg__opt + .seg__opt {
-  border-left: 1px solid var(--border-strong);
+  transition:
+    background-color var(--transition),
+    color var(--transition),
+    box-shadow var(--transition);
 }
 .seg__opt:hover:not(.seg__opt--on):not(:disabled) {
-  background: var(--bg-hover);
   color: var(--text-primary);
+  background: var(--bg-hover);
 }
 .seg__opt--on {
-  background: var(--accent);
-  color: var(--accent-text);
-  font-weight: 600;
+  background: var(--bg-active);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-primary);
+}
+:root[data-theme='light'] .seg__opt--on {
+  background: var(--bg-surface);
+  box-shadow:
+    var(--shadow-sm),
+    0 0 0 1px var(--border-subtle);
 }
 .seg__opt:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
-/* Mono micro-caps inside a segment — the table view switch and the filter modes. */
+/* The compact variant — the table view switch and the filter modes. */
 .seg--caps .seg__opt {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-.seg--caps .seg__opt--on {
-  font-weight: 700;
+  font-size: 12px;
 }
 .seg__count {
-  padding: 1px 5px;
-  background: rgba(0, 0, 0, 0.28);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
   font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   letter-spacing: 0;
 }
+.btn--primary .seg__count {
+  background: color-mix(in srgb, var(--accent-text) 22%, transparent);
+  color: var(--accent-text);
+}
 
-/* A strong 2px rule, the system's main organising device. */
+kbd {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* A hairline that divides sections of a form. */
 .rule {
-  height: var(--rule);
+  height: 1px;
   border: 0;
   margin: 0;
-  background: var(--border-strong);
+  background: var(--border-subtle);
 }
 .divider-v {
   width: 1px;
-  height: 22px;
+  height: 18px;
   flex: 0 0 auto;
   background: var(--border-strong);
 }
@@ -586,26 +765,56 @@ textarea {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   height: 100%;
   padding: 32px;
   text-align: center;
   color: var(--text-muted);
 }
-.empty-state__title {
-  font-size: 15px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
+.empty-state p {
+  max-width: 380px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.empty-state .btn {
+  margin-top: 8px;
+}
+/* An icon in a soft tile, above the title. */
+.empty-state__icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
   color: var(--text-secondary);
 }
+.empty-state__title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--text-primary);
+}
 
-/* Square, because nothing here is round. */
 .spinner {
+  display: inline-block;
+  flex: 0 0 auto;
   width: 14px;
   height: 14px;
-  border: 2px solid var(--border-strong);
+  border: 2px solid color-mix(in srgb, var(--text-muted) 35%, transparent);
   border-top-color: var(--accent);
-  animation: spin 620ms linear infinite;
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+/* In a button the spinner takes the label's colour, so it reads on any fill. */
+.btn .spinner {
+  width: 12px;
+  height: 12px;
+  border-color: color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
 }
 @keyframes spin {
   to {
@@ -616,4 +825,40 @@ textarea {
 .error-text {
   color: var(--danger);
   user-select: text;
+}
+
+/* --- motion -------------------------------------------------------------- */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+
+/* Asked for less motion: nothing slides or fades, but a spinner still turns —
+   a frozen one would read as a hang. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .spinner {
+    animation-duration: 1400ms !important;
+    animation-iteration-count: infinite !important;
+  }
 }

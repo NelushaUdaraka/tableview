@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import type { TableForeignKey, TableStructure } from '@shared/types'
 import { buildCreateTableDdl } from '@shared/sql/builder'
+import AppIcon from '../components/AppIcon.vue'
 import TableViewSwitch from '../components/TableViewSwitch.vue'
 import { useSchemaStore } from '../stores/schema'
 import { useToastStore } from '../stores/toasts'
@@ -77,12 +78,18 @@ function nullLabel(value: string | null): string {
           {{ structure.schema }}.<strong>{{ structure.name }}</strong>
         </span>
         <span class="badge">{{ structure.type }}</span>
-        <span v-if="structure.rowCountEstimate !== null" class="structure__rows mono">
+        <span v-if="structure.rowCountEstimate !== null" class="structure__rows">
           ~{{ structure.rowCountEstimate.toLocaleString() }} rows
         </span>
         <div class="structure__spacer"></div>
-        <button class="btn btn--muted" @click="copyDdl">Copy DDL</button>
-        <button class="btn" @click="openDdl">Open DDL in editor</button>
+        <button class="btn btn--muted" @click="copyDdl">
+          <AppIcon name="copy" :size="14" />
+          Copy DDL
+        </button>
+        <button class="btn" @click="openDdl">
+          <AppIcon name="terminal" :size="14" />
+          Open DDL in editor
+        </button>
       </div>
 
       <div class="structure__scroll">
@@ -108,7 +115,11 @@ function nullLabel(value: string | null): string {
                   <span v-if="column.isPrimaryKey" class="badge badge--pk">PK</span>
                 </td>
                 <td class="mono muted">{{ column.fullType }}</td>
-                <td>{{ column.nullable ? 'YES' : 'NO' }}</td>
+                <td>
+                  <span class="structure__flag" :class="{ 'structure__flag--on': column.nullable }">
+                    {{ column.nullable ? 'YES' : 'NO' }}
+                  </span>
+                </td>
                 <td class="mono muted truncate">{{ nullLabel(column.defaultValue) }}</td>
                 <td class="mono muted">
                   <span v-if="column.isIdentity">
@@ -280,24 +291,35 @@ function nullLabel(value: string | null): string {
 .structure__toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   height: var(--h-commandbar);
-  padding: 0 12px;
-  border-bottom: var(--rule) solid var(--border-strong);
+  padding: 0 10px 0 12px;
+  border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-surface);
   flex: 0 0 auto;
 }
 .structure__title {
   flex: 0 1 auto;
   min-width: 0;
+  margin-left: 6px;
   font-size: 13px;
+  color: var(--text-muted);
 }
 .structure__title strong {
-  font-weight: 700;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 .structure__rows {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  color: var(--text-muted);
   font-size: 11px;
-  color: var(--text-dim);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 .structure__spacer {
   flex: 1;
@@ -309,33 +331,44 @@ function nullLabel(value: string | null): string {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  padding: 16px 20px 24px;
+  background: var(--bg-app);
 }
 
-/* Headings sit above the 2px rule that opens their table, and the tables run
-   the full width of the pane rather than floating in a padded card. */
+/* Each part of the table's definition is a card: a title bar, then its table. */
 .panel {
-  margin: 0;
+  margin: 0 0 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-xs);
+  /* Clipped for the corners, without becoming a scroller — so the column
+     headings below can still stick to the top of the pane. */
+  overflow: clip;
 }
 .panel__title {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
   margin: 0;
-  padding: 26px 24px 10px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-.panel:first-child .panel__title {
-  padding-top: 18px;
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 .panel__count {
-  font-weight: 400;
-  letter-spacing: 0;
-  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .table {
   width: 100%;
@@ -348,44 +381,53 @@ function nullLabel(value: string | null): string {
   top: 0;
   z-index: 1;
   padding: 8px 10px;
-  border-top: var(--rule) solid var(--border-strong);
-  border-bottom: var(--rule) solid var(--border-strong);
-  background: var(--bg-app);
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-app) 50%, var(--bg-surface));
   text-align: left;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
   white-space: nowrap;
 }
 .table td {
-  padding: 9px 10px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border);
-  vertical-align: top;
+  vertical-align: middle;
   max-width: 340px;
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-muted);
 }
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
 /* The name column is the one that reads at full strength. */
 .table td.mono:first-child,
 .table td:nth-child(2) {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-primary);
 }
 .table td.muted {
   color: var(--text-muted);
 }
-/* Flush the outer columns with the section heading above them. */
+.table td .badge {
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+/* Flush the outer columns with the card's title above them. */
 .table th:first-child,
 .table td:first-child {
-  padding-left: 24px;
+  padding-left: 16px;
 }
 .table th:last-child,
 .table td:last-child {
-  padding-right: 24px;
+  padding-right: 16px;
+}
+.table tbody tr {
+  transition: background-color var(--transition);
 }
 .table tbody tr:hover {
   background: var(--bg-hover);
@@ -396,15 +438,32 @@ function nullLabel(value: string | null): string {
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
+/* YES/NO as a quiet chip, the YES a step brighter. */
+.structure__flag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.structure__flag--on {
+  color: var(--text-secondary);
+}
 .code {
-  margin: 0 24px 24px;
-  padding: 16px;
-  border: 1px solid var(--border-strong);
-  border-radius: 0;
+  margin: 0 16px 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
   background: var(--bg-input);
   font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 12px;
+  line-height: 1.65;
   color: var(--text-secondary);
   overflow-x: auto;
   white-space: pre;

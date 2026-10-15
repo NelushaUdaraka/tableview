@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import AppIcon from './AppIcon.vue'
 import type { FilterOperator, TableColumn, TableFilter } from '@shared/types'
 
 const props = defineProps<{
@@ -100,7 +101,10 @@ function placeholderFor(operator: FilterOperator): string {
         </button>
       </div>
       <div class="filters__spacer"></div>
-      <button v-if="mode === 'builder'" class="btn btn--sm" @click="add">+ Add filter</button>
+      <button v-if="mode === 'builder'" class="btn btn--sm" @click="add">
+        <AppIcon name="plus" :size="13" />
+        Add filter
+      </button>
       <button class="btn btn--sm btn--primary" :disabled="!canApply" @click="emit('apply')">
         Apply
       </button>
@@ -155,7 +159,7 @@ function placeholderFor(operator: FilterOperator): string {
 
         <input
           v-if="needsValue(filter.operator)"
-          class="input filters__value"
+          class="input mono filters__value"
           :value="filter.value"
           :placeholder="placeholderFor(filter.operator)"
           spellcheck="false"
@@ -164,7 +168,7 @@ function placeholderFor(operator: FilterOperator): string {
         />
         <input
           v-if="needsSecondValue(filter.operator)"
-          class="input filters__value"
+          class="input mono filters__value"
           :value="filter.value2"
           placeholder="and"
           spellcheck="false"
@@ -172,27 +176,34 @@ function placeholderFor(operator: FilterOperator): string {
           @keydown.enter="emit('apply')"
         />
 
-        <button class="filters__remove" title="Remove" @click="remove(index)">✕</button>
+        <button
+          class="filters__remove"
+          title="Remove this filter"
+          aria-label="Remove this filter"
+          @click="remove(index)"
+        >
+          <AppIcon name="x" :size="14" />
+        </button>
       </div>
     </div>
 
-    <p v-else class="filters__empty muted">No filters — every row is shown.</p>
+    <p v-else class="filters__empty">No filters — every row is shown.</p>
   </div>
 </template>
 
 <style scoped>
 .filters {
-  padding: 12px;
-  border-bottom: var(--rule) solid var(--border-strong);
+  padding: 10px 12px 12px;
+  border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-app);
 }
 .filters__head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 .filters__mode {
-  height: var(--h-control-sm);
+  height: calc(var(--h-control-sm) - 6px);
 }
 .filters__spacer {
   flex: 1;
@@ -212,17 +223,19 @@ function placeholderFor(operator: FilterOperator): string {
   width: 76px;
   flex: 0 0 76px;
   height: 30px;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
 }
 .filters__conj--fixed {
   display: flex;
   align-items: center;
-  height: 30px;
+  justify-content: flex-end;
+  padding-right: 4px;
 }
 .filters__column {
   flex: 0 0 190px;
   height: 30px;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 .filters__op {
@@ -236,21 +249,26 @@ function placeholderFor(operator: FilterOperator): string {
   height: 30px;
   font-size: 12px;
 }
-/* Square, and it takes the accent on hover — removing is the destructive act here. */
+/* Quiet until pointed at; it turns the danger colour, since removing is the
+   destructive act here. */
 .filters__remove {
+  display: grid;
+  place-items: center;
   width: 30px;
   height: 30px;
   flex: 0 0 auto;
-  border: 1px solid var(--border-strong);
+  border: none;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
+  color: var(--text-muted);
   cursor: pointer;
+  transition:
+    background-color var(--transition),
+    color var(--transition);
 }
 .filters__remove:hover {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-text);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
 }
 .filters__raw {
   margin-top: 12px;
@@ -261,12 +279,16 @@ function placeholderFor(operator: FilterOperator): string {
 }
 .filters__hint,
 .filters__empty {
-  margin: 8px 0 0;
+  margin: 10px 0 0;
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 .filters__hint code {
+  padding: 1px 4px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
   font-family: var(--font-mono);
+  font-size: 11px;
   color: var(--text-secondary);
 }
 </style>

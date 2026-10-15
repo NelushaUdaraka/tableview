@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from 'vue'
+import AppIcon from './AppIcon.vue'
 
 withDefaults(
   defineProps<{
@@ -36,7 +37,9 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown, true))
           <h2 class="modal__title">{{ title }}</h2>
           <p v-if="subtitle" class="modal__subtitle mono">{{ subtitle }}</p>
         </div>
-        <button class="modal__close" title="Close" @click="emit('close')">✕</button>
+        <button class="modal__close" title="Close" aria-label="Close" @click="emit('close')">
+          <AppIcon name="x" :size="16" />
+        </button>
       </header>
       <div class="modal__body" :class="{ 'modal__body--flush': flush }">
         <slot />
@@ -56,57 +59,69 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown, true))
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--scrim);
+  backdrop-filter: blur(2px);
   z-index: 100;
+  animation: fade-in var(--duration) var(--ease);
 }
 .modal {
   display: flex;
   flex-direction: column;
+  max-width: 100%;
   max-height: 88vh;
-  border: 1px solid var(--border-strong);
-  border-radius: 0;
-  background: var(--bg-surface);
+  border: 1px solid var(--border-overlay);
+  border-radius: var(--radius-lg);
+  background: var(--bg-overlay);
   box-shadow: var(--shadow);
   overflow: hidden;
+  animation: dialog-in var(--duration-slow) var(--ease-out);
 }
 .modal__head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding: 16px 20px;
-  border-bottom: var(--rule) solid var(--border-strong);
-  background: var(--bg-app);
+  padding: 18px 16px 16px 20px;
+  border-bottom: 1px solid var(--border-subtle);
   flex: 0 0 auto;
 }
 .modal__heading {
   min-width: 0;
 }
+.modal__heading .kicker {
+  margin-bottom: 4px;
+}
 .modal__title {
-  margin: 2px 0 0;
-  font-size: 20px;
-  font-weight: 800;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
   letter-spacing: -0.01em;
 }
 .modal__subtitle {
-  margin: 4px 0 0;
+  margin: 3px 0 0;
   font-size: 12px;
   color: var(--text-muted);
 }
 .modal__close {
-  width: 32px;
-  height: 32px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
   flex: 0 0 auto;
-  border: 1px solid var(--border-strong);
+  margin-top: -2px;
+  border: none;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-secondary);
-  font-size: 13px;
+  color: var(--text-muted);
   cursor: pointer;
+  transition:
+    background-color var(--transition),
+    color var(--transition);
 }
 .modal__close:hover {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-text);
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
 }
 .modal__body {
   flex: 1;
@@ -121,10 +136,10 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown, true))
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
-  padding: 14px 20px;
-  border-top: var(--rule) solid var(--border-strong);
-  background: var(--bg-app);
+  gap: 8px;
+  padding: 12px 16px 12px 20px;
+  border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-app) 55%, var(--bg-overlay));
   flex: 0 0 auto;
 }
 .modal__foot .btn {

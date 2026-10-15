@@ -303,7 +303,7 @@ await setInput('input[placeholder="aws (found on PATH)"]', '')
 await delay(200)
 await ev(`[...document.querySelectorAll('.preflight .btn')].find(b => b.textContent.includes('Check')).click()`)
 await waitFor(
-  `[...document.querySelectorAll('.preflight__mark')].every(m => m.textContent.trim() === '✓')`,
+  `[...document.querySelectorAll('.preflight__mark')].every(m => m.classList.contains('preflight__mark--ok'))`,
   'all prerequisites green',
   40000
 )

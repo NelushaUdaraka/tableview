@@ -149,7 +149,7 @@ steps.push({
 await shot('01-cell-edited')
 
 // --- 2. stage an inserted row ----------------------------------------------
-await ev(`[...document.querySelectorAll('.data__toolbar .btn')].find(b=>b.textContent.includes('+ Row')).click()`)
+await ev(`[...document.querySelectorAll('.data__toolbar .btn')].find(b=>b.textContent.trim()==='Add row').click()`)
 await waitFor(`!!document.querySelector('.grid__row--inserted')`, 'inserted row')
 const emailIndex = await ev(
   `[...document.querySelectorAll('.grid__th-name')].findIndex(e => e.textContent.trim() === 'email')`

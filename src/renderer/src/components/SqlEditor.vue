@@ -83,6 +83,21 @@ function changesExtension(): Extension {
   return props.baseline === null ? [] : changeTracking(props.baseline)
 }
 
+/**
+ * The fold marker, drawn as the same chevron the trees use rather than the
+ * typed `⌄` and `›`, which came out in whatever font the platform had.
+ */
+function foldMarker(open: boolean): HTMLElement {
+  const marker = document.createElement('span')
+  marker.className = `cm-foldMarker${open ? ' cm-foldMarker--open' : ''}`
+  marker.title = open ? 'Fold' : 'Unfold'
+  marker.innerHTML =
+    '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" ' +
+    'stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="m9 18 6-6-6-6"/></svg>'
+  return marker
+}
+
 function baseTheme(): ReturnType<typeof EditorView.theme> {
   return EditorView.theme(
     {
@@ -96,24 +111,52 @@ function baseTheme(): ReturnType<typeof EditorView.theme> {
         fontFamily: props.fontFamily,
         caretColor: 'var(--accent)',
         userSelect: 'text',
-        padding: '10px 0'
+        padding: '12px 0'
       },
-      '.cm-scroller': { fontFamily: props.fontFamily, overflow: 'auto', lineHeight: '20px' },
-      '.cm-line': { padding: '0 14px' },
+      '.cm-scroller': { fontFamily: props.fontFamily, overflow: 'auto', lineHeight: '21px' },
+      '.cm-line': { padding: '0 16px 0 12px' },
+      // The gutter shares the editor's ground; the numbers are what set it off.
       '.cm-gutters': {
-        backgroundColor: 'var(--bg-app)',
+        backgroundColor: 'var(--bg-surface)',
         color: 'var(--text-dim)',
-        border: 'none',
-        borderRight: '1px solid var(--border-subtle)'
+        border: 'none'
         // No vertical padding here: CodeMirror already offsets each gutter
         // row by the content's top padding, so padding the gutter as well
         // pushed every line number below the line it belongs to.
       },
-      '.cm-lineNumbers .cm-gutterElement': { padding: '0 12px 0 20px', minWidth: '52px' },
+      '.cm-lineNumbers .cm-gutterElement': { padding: '0 8px 0 16px', minWidth: '48px' },
       '.cm-activeLine': { backgroundColor: 'var(--editor-active-line)' },
       '.cm-activeLineGutter': {
-        backgroundColor: 'var(--editor-active-line)',
-        color: 'var(--text-secondary)'
+        backgroundColor: 'transparent',
+        color: 'var(--text-primary)'
+      },
+      '.cm-foldGutter .cm-gutterElement': { display: 'flex', alignItems: 'center' },
+      '.cm-foldMarker': {
+        display: 'grid',
+        placeItems: 'center',
+        width: '16px',
+        height: '16px',
+        borderRadius: '4px',
+        color: 'var(--text-dim)',
+        cursor: 'pointer'
+      },
+      '.cm-foldMarker:hover': { color: 'var(--text-primary)', backgroundColor: 'var(--bg-hover-strong)' },
+      '.cm-foldMarker--open svg': { transform: 'rotate(90deg)' },
+      '.cm-foldPlaceholder': {
+        margin: '0 3px',
+        padding: '0 5px',
+        border: '1px solid var(--border-strong)',
+        borderRadius: '4px',
+        backgroundColor: 'var(--bg-raised)',
+        color: 'var(--text-muted)'
+      },
+      '&.cm-focused .cm-matchingBracket': {
+        backgroundColor: 'var(--accent-soft)',
+        outline: '1px solid color-mix(in srgb, var(--accent) 45%, transparent)',
+        borderRadius: '2px'
+      },
+      '.cm-nonmatchingBracket': {
+        backgroundColor: 'color-mix(in srgb, var(--danger) 18%, transparent)'
       },
       // The selection has to read on top of the active line, which is already
       // --bg-hover — so it gets the accent wash the rest of the app uses, and a
@@ -132,15 +175,85 @@ function baseTheme(): ReturnType<typeof EditorView.theme> {
       '.cm-selectionMatch': { backgroundColor: 'var(--bg-hover-strong)' },
       '.cm-cursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
       '.cm-tooltip': {
-        backgroundColor: 'var(--bg-surface)',
-        border: '1px solid var(--border-strong)',
-        borderRadius: '0',
+        backgroundColor: 'var(--bg-overlay)',
+        border: '1px solid var(--border-overlay)',
+        borderRadius: '8px',
         boxShadow: 'var(--shadow-menu)',
-        color: 'var(--text-primary)'
+        color: 'var(--text-primary)',
+        overflow: 'hidden'
+      },
+      '.cm-tooltip.cm-tooltip-autocomplete > ul': {
+        padding: '4px',
+        fontFamily: props.fontFamily,
+        maxHeight: '18em'
+      },
+      '.cm-tooltip.cm-tooltip-autocomplete > ul > li': {
+        padding: '3px 8px',
+        borderRadius: '5px',
+        lineHeight: '20px'
       },
       '.cm-tooltip-autocomplete ul li[aria-selected]': {
-        backgroundColor: 'var(--bg-selected)',
+        backgroundColor: 'var(--accent-soft)',
         color: 'var(--text-primary)'
+      },
+      '.cm-completionIcon': { opacity: '0.7', paddingRight: '6px' },
+      '.cm-completionDetail': { color: 'var(--text-muted)', fontStyle: 'normal', marginLeft: '8px' },
+      '.cm-completionMatchedText': { textDecoration: 'none', color: 'var(--accent-fg)', fontWeight: '600' },
+      // The find bar, in the window's own controls rather than the browser's.
+      '.cm-panels': {
+        backgroundColor: 'var(--bg-app)',
+        color: 'var(--text-primary)'
+      },
+      '.cm-panels.cm-panels-bottom': { borderTop: '1px solid var(--border-subtle)' },
+      '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--border-subtle)' },
+      '.cm-panel.cm-search': {
+        padding: '8px 36px 8px 12px',
+        fontFamily: 'var(--font-ui)',
+        fontSize: '12px'
+      },
+      '.cm-panel.cm-search label': { fontSize: '12px', color: 'var(--text-secondary)' },
+      '.cm-textfield': {
+        height: '26px',
+        padding: '0 8px',
+        border: '1px solid var(--border-strong)',
+        borderRadius: '6px',
+        backgroundColor: 'var(--bg-input)',
+        color: 'var(--text-primary)',
+        fontFamily: 'var(--font-ui)',
+        fontSize: '12px',
+        outline: 'none'
+      },
+      '.cm-textfield:focus': {
+        borderColor: 'var(--accent)',
+        boxShadow: '0 0 0 3px var(--accent-ring)'
+      },
+      '.cm-button': {
+        height: '26px',
+        padding: '0 10px',
+        border: '1px solid var(--border-strong)',
+        borderRadius: '6px',
+        backgroundImage: 'none',
+        backgroundColor: 'var(--bg-control)',
+        color: 'var(--text-primary)',
+        fontFamily: 'var(--font-ui)',
+        fontSize: '12px'
+      },
+      '.cm-button:hover': { backgroundColor: 'var(--bg-control-hover)' },
+      '.cm-panel.cm-search [name=close]': {
+        top: '8px',
+        right: '10px',
+        width: '22px',
+        height: '22px',
+        borderRadius: '5px',
+        color: 'var(--text-muted)',
+        fontSize: '16px'
+      },
+      '.cm-searchMatch': {
+        backgroundColor: 'color-mix(in srgb, var(--warning) 24%, transparent)',
+        outline: '1px solid color-mix(in srgb, var(--warning) 45%, transparent)'
+      },
+      '.cm-searchMatch.cm-searchMatch-selected': {
+        backgroundColor: 'color-mix(in srgb, var(--warning) 45%, transparent)'
       }
     },
     { dark: props.theme === 'dark' }
@@ -156,26 +269,28 @@ function sqlExtension(): ReturnType<typeof sql> {
 }
 
 /**
- * SQL in the Modernist palette: keywords carry the accent, the values they act
- * on drop back to the secondary ramp, and everything else is plain ink. There
- * is no second hue — the system is mono by design.
+ * SQL in the window's syntax palette (the --syntax-* tokens): keywords carry
+ * the accent's own tint, so the editor still says which connection it is in,
+ * and strings, numbers, functions and types each get a hue of their own —
+ * tuned per theme in the stylesheet, so this table never has to know which
+ * one is showing.
  */
-const modernistHighlight = HighlightStyle.define([
-  { tag: [tags.keyword, tags.operatorKeyword, tags.modifier], color: 'var(--accent-bright)' },
-  { tag: [tags.controlKeyword, tags.definitionKeyword], color: 'var(--accent-bright)' },
-  { tag: [tags.function(tags.variableName), tags.standard(tags.name)], color: 'var(--text-primary)', fontWeight: '500' },
-  { tag: [tags.string, tags.special(tags.string)], color: 'var(--text-secondary)' },
-  { tag: [tags.number, tags.bool, tags.null], color: 'var(--text-secondary)' },
-  { tag: [tags.comment, tags.lineComment, tags.blockComment], color: 'var(--text-dim)', fontStyle: 'italic' },
+const sqlHighlight = HighlightStyle.define([
+  { tag: [tags.keyword, tags.operatorKeyword, tags.modifier], color: 'var(--syntax-keyword)' },
+  { tag: [tags.controlKeyword, tags.definitionKeyword], color: 'var(--syntax-keyword)' },
+  { tag: [tags.function(tags.variableName), tags.standard(tags.name)], color: 'var(--syntax-function)' },
+  { tag: [tags.string, tags.special(tags.string)], color: 'var(--syntax-string)' },
+  { tag: [tags.number, tags.bool, tags.null], color: 'var(--syntax-number)' },
+  { tag: [tags.comment, tags.lineComment, tags.blockComment], color: 'var(--syntax-comment)', fontStyle: 'italic' },
   { tag: [tags.variableName, tags.propertyName, tags.name], color: 'var(--text-primary)' },
-  { tag: [tags.typeName, tags.className], color: 'var(--text-primary)' },
+  { tag: [tags.typeName, tags.className], color: 'var(--syntax-type)' },
   { tag: tags.operator, color: 'var(--text-secondary)' },
   { tag: [tags.punctuation, tags.separator, tags.bracket], color: 'var(--text-muted)' },
   { tag: tags.invalid, color: 'var(--danger)' }
 ])
 
 function themeExtension(): unknown[] {
-  return [syntaxHighlighting(modernistHighlight, { fallback: true })]
+  return [syntaxHighlighting(sqlHighlight, { fallback: true })]
 }
 
 onMounted(() => {
@@ -197,7 +312,7 @@ onMounted(() => {
       changesCompartment.of(changesExtension()),
       highlightActiveLineGutter(),
       highlightActiveLine(),
-      foldGutter(),
+      foldGutter({ markerDOM: foldMarker }),
       drawSelection(),
       history(),
       indentOnInput(),
@@ -365,14 +480,5 @@ defineExpose({
 }
 :deep(.cm-editor.cm-focused) {
   outline: none;
-}
-/* Square selections and no rounded autocomplete card. */
-:deep(.cm-tooltip-autocomplete ul li) {
-  border-radius: 0;
-}
-:deep(.cm-panels) {
-  background: var(--bg-app);
-  border-color: var(--border-strong);
-  color: var(--text-primary);
 }
 </style>

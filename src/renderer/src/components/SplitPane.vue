@@ -126,20 +126,41 @@ onBeforeUnmount(onMouseUp)
 .split__pane--flex {
   flex: 1;
 }
-/* The divider is one of the system's rules, so it is 2px and it stays put. */
+/* A hairline to look at, with a wider strip either side of it to grab: the
+   line stays 1px, the target does not. */
 .split__divider {
-  flex: 0 0 var(--rule);
-  background: var(--border-strong);
-  transition: background var(--transition);
+  position: relative;
+  z-index: 5;
+  flex: 0 0 1px;
+  background: var(--border-subtle);
+  transition:
+    background-color var(--transition),
+    box-shadow var(--transition);
+}
+.split__divider::after {
+  content: '';
+  position: absolute;
 }
 .split--horizontal > .split__divider {
   cursor: col-resize;
 }
+.split--horizontal > .split__divider::after {
+  inset: 0 -4px;
+}
 .split--vertical > .split__divider {
   cursor: row-resize;
+}
+.split--vertical > .split__divider::after {
+  inset: -4px 0;
+}
+/* Lit only once the pointer settles on it, so crossing it on the way to
+   somewhere else does not flash. */
+.split__divider:hover {
+  transition-delay: 150ms;
 }
 .split__divider:hover,
 .split__divider--active {
   background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 </style>

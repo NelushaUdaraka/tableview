@@ -191,8 +191,8 @@ opens it into the four folders that say what is in it:
     ▸ INDEXES                                     3
 ```
 
-The primary key is marked in the accent, as it is everywhere else; a foreign key names what it
-points at and opens that table when it is clicked. "Keys" is the primary key and the unique ones,
+The primary key is marked with a gold key, as it is in the grid and the row panel; a foreign key
+names what it points at and opens that table when it is clicked. "Keys" is the primary key and the unique ones,
 each shown once however the DDL declared it — SQL Server backs a `PRIMARY KEY` and a `UNIQUE`
 constraint with an index of the same name, so the same key is reported two or three ways. The
 structure is the schema store's copy, the one the structure tab and the statement builders already
@@ -387,7 +387,7 @@ what it opened — once anything unsaved in it has been asked about. Saved conne
 
 **A connection's colour is the window's accent**
 
-One colour runs through this UI — the button that acts, the tab that is showing, the key badges, the
+One colour runs through this UI — the button that acts, the tab that is showing, the selection, the
 focus ring — so giving a connection a colour colours the window it is open in, and two windows side
 by side stop looking alike. It is not the theme: dark and light are still yours to choose, and the
 connection tints whichever one you are in.
@@ -397,7 +397,9 @@ the SQL keywords take (lighter on the dark theme, darker on the light one), and 
 of the accent should be white or ink — which is what keeps a pale colour readable rather than
 leaving a button nobody can read. The swatches offered are chosen to carry at least 3:1 against both
 grounds, since the accent is used as text as well as as a fill. A connection with no colour is the
-app's own red, exactly as the stylesheet defines it.
+app's own indigo, exactly as the stylesheet defines it. Red is a swatch rather than the default: it
+is the colour people reach for to mark production, which is exactly why every window should not
+already be wearing it.
 
 **Everything else**
 - Export result sets or whole tables to CSV, TSV, JSON, JSON Lines, SQL `INSERT`s or Markdown —
@@ -406,6 +408,11 @@ app's own red, exactly as the stylesheet defines it.
   directions, check/unique/default constraints, triggers, and a regenerated `CREATE TABLE` script
 - Dark and light themes (and "follow the system"), window state persistence, full menu bar and
   keyboard shortcuts (`Ctrl+/` lists them)
+- **A calm, layered interface** — cool neutral grounds that step forward in lightness from the
+  chrome to the content to anything floating, hairline borders, soft radii and one accent. Inter
+  sets the interface and JetBrains Mono sets anything that is data or code; one SVG icon set
+  replaces the typed glyphs that used to render differently on every platform. Menus, dialogs and
+  toasts arrive with a short fade, and all of it stands still when the OS asks for reduced motion
 
 ---
 
@@ -587,6 +594,8 @@ src/
     ├── lib/runQueryTab.ts    runs a query tab, on screen or not, and says whether it saved a routine
     ├── lib/sortConnections.ts the orders the connection list can be read in
     ├── lib/connectionGroups.ts the headings the list is filed under
+    ├── lib/icons.ts          the one icon set, drawn by components/AppIcon.vue
+    ├── styles/index.css      design tokens for both themes, and the shared controls
     ├── stores/               connections, schema, tabs (and panes), library,
     │                         settings, toasts, busy (the window's progress bar)
     ├── components/           title bar, grid, row panel (and its JSON tree),

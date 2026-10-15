@@ -280,14 +280,14 @@ await shot('05-cell-editor')
 await ev(`document.querySelector('.grid__editor').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), true`)
 
 // --- 6. the row panel can be hidden ----------------------------------------
-await ev(`[...document.querySelectorAll('.data__toolbar .btn')].find(b=>b.textContent.trim()==='Row').click()`)
+await ev(`[...document.querySelectorAll('.data__toolbar .btn')].find(b=>b.textContent.trim()==='Add row').click()`)
 await delay(400)
 steps.push({
   step: 'row panel toggled off',
   visible: await ev(`!!document.querySelector('.rowpanel')?.offsetParent`)
 })
 await shot('06-row-panel-hidden')
-await ev(`[...document.querySelectorAll('.data__toolbar .btn')].find(b=>b.textContent.trim()==='Row').click()`)
+await ev(`[...document.querySelectorAll('.data__toolbar .btn')].find(b=>b.textContent.trim()==='Add row').click()`)
 
 // Leave the seeded data as it was found.
 await ev(`

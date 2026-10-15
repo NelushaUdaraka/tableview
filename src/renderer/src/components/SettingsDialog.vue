@@ -1,14 +1,16 @@
 <script setup lang="ts">
+import AppIcon from './AppIcon.vue'
 import BaseModal from './BaseModal.vue'
+import type { IconName } from '../lib/icons'
 import { useSettingsStore } from '../stores/settings'
 
 defineEmits<{ (event: 'close'): void }>()
 const settings = useSettingsStore()
 
-const THEMES: { value: 'dark' | 'light' | 'system'; label: string }[] = [
-  { value: 'dark', label: 'Dark' },
-  { value: 'light', label: 'Light' },
-  { value: 'system', label: 'System' }
+const THEMES: { value: 'dark' | 'light' | 'system'; label: string; icon: IconName }[] = [
+  { value: 'dark', label: 'Dark', icon: 'moon' },
+  { value: 'light', label: 'Light', icon: 'sun' },
+  { value: 'system', label: 'System', icon: 'monitor' }
 ]
 </script>
 
@@ -25,6 +27,7 @@ const THEMES: { value: 'dark' | 'light' | 'system'; label: string }[] = [
             :class="{ 'seg__opt--on': settings.settings.theme === entry.value }"
             @click="settings.update({ theme: entry.value })"
           >
+            <AppIcon :name="entry.icon" :size="14" />
             {{ entry.label }}
           </button>
         </div>
@@ -120,7 +123,7 @@ const THEMES: { value: 'dark' | 'light' | 'system'; label: string }[] = [
         <span>Confirm before applying a change set</span>
       </label>
 
-      <p v-if="settings.appInfo" class="settings__about muted">
+      <p v-if="settings.appInfo" class="settings__about">
         Beekeeper Clone {{ settings.appInfo.version }} · Electron
         {{ settings.appInfo.electronVersion }} · Node {{ settings.appInfo.nodeVersion }}<br />
         Data directory: <span class="mono selectable">{{ settings.appInfo.userDataPath }}</span
@@ -150,15 +153,18 @@ const THEMES: { value: 'dark' | 'light' | 'system'; label: string }[] = [
   gap: 16px;
 }
 .settings__seg-opt {
-  height: 32px;
-  padding: 0 16px;
+  height: calc(var(--h-control-lg) - 6px);
+  padding: 0 14px;
   font-size: 13px;
 }
 .settings__about {
   margin: 0;
-  padding-top: 16px;
-  border-top: var(--rule) solid var(--border-strong);
-  font-size: 11px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-app) 55%, var(--bg-overlay));
+  color: var(--text-muted);
+  font-size: 12px;
   line-height: 1.7;
 }
 </style>

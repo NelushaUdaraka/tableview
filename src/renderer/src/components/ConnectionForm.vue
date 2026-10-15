@@ -14,6 +14,7 @@ import { parseAwsCredentials } from '@shared/aws/credentials'
 import { isLoopbackHost } from '@shared/hosts'
 import { AWS_REGIONS, describeRegion, isRegionLike } from '@shared/aws/regions'
 import { api } from '../lib/api'
+import AppIcon from './AppIcon.vue'
 
 const props = defineProps<{
   connection: SavedConnection | null
@@ -662,7 +663,7 @@ async function browseForKey(): Promise<void> {
         <!-- Pasted credentials, stored with this connection -->
         <div v-if="usesPastedCredentials" class="creds">
           <div v-if="storedCredentials" class="creds__current">
-            <span class="creds__mark creds__mark--ok">✓</span>
+            <AppIcon class="creds__mark creds__mark--ok" name="circle-check" :size="16" />
             <div class="creds__info">
               <div class="creds__key mono">{{ credentialSummary }}</div>
               <div class="creds__arn">{{ credentialSavedAt }}</div>
@@ -887,12 +888,12 @@ async function browseForKey(): Promise<void> {
               :key="row.key"
               class="preflight__row"
             >
-              <span
+              <AppIcon
                 class="preflight__mark"
                 :class="preflight[row.key].ok ? 'preflight__mark--ok' : 'preflight__mark--bad'"
-              >
-                {{ preflight[row.key].ok ? '✓' : '✕' }}
-              </span>
+                :name="preflight[row.key].ok ? 'circle-check' : 'circle-x'"
+                :size="14"
+              />
               <span class="preflight__label">{{ row.label }}</span>
               <span class="preflight__detail truncate">
                 {{ preflight[row.key].detail ?? preflight[row.key].error }}
@@ -1089,49 +1090,60 @@ async function browseForKey(): Promise<void> {
   height: 100%;
   min-height: 0;
 }
-/* Full-bleed micro-caps tabs, matching the results and sidebar panels. */
+/* Underlined tabs, set in from the dialog's edge like its title. */
 .form__tabs {
   display: flex;
   align-items: stretch;
-  height: var(--h-tabstrip);
-  border-bottom: var(--rule) solid var(--border-strong);
-  background: var(--bg-app);
+  gap: 4px;
+  height: 42px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-subtle);
   flex: 0 0 auto;
 }
 .form__tab {
   position: relative;
-  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
   border: none;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: 13px;
+  font-weight: 500;
+  transition: color var(--transition);
 }
-.form__tab + .form__tab {
-  border-left: 1px solid var(--border-subtle);
+.form__tab::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: transparent;
+  transition: background-color var(--transition);
 }
 .form__tab:hover {
   color: var(--text-primary);
 }
 .form__tab--active {
-  background: var(--bg-surface);
   color: var(--text-primary);
-  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.form__tab--active::after {
+  background: var(--accent);
 }
 .form__dot {
   display: inline-block;
   width: 6px;
   height: 6px;
-  margin-left: 8px;
+  border-radius: 50%;
   background: var(--accent);
 }
 .form__seg-opt {
-  height: 32px;
-  padding: 0 16px;
+  height: 28px;
+  padding: 0 14px;
   font-size: 13px;
 }
 .form__section {
@@ -1161,10 +1173,10 @@ async function browseForKey(): Promise<void> {
 .form__foot {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 14px 20px;
-  border-top: var(--rule) solid var(--border-strong);
-  background: var(--bg-app);
+  gap: 8px;
+  padding: 12px 16px 12px 20px;
+  border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-app) 55%, var(--bg-overlay));
   flex: 0 0 auto;
 }
 .form__foot .btn {
@@ -1172,7 +1184,7 @@ async function browseForKey(): Promise<void> {
 }
 .row {
   display: flex;
-  gap: 16px;
+  gap: 14px;
   /* Top-aligned, so a hint or an error under one field extends downwards
      instead of pushing its neighbour's control out of line. */
   align-items: flex-start;
@@ -1180,34 +1192,36 @@ async function browseForKey(): Promise<void> {
 .hint {
   margin: 0;
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   line-height: 1.55;
 }
 .hint code {
+  padding: 1px 4px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-secondary);
 }
 
-/* --- credentials and instances: ruled boxes on the input ground ----------- */
+/* --- credentials and instances: soft panels inside the form --------------- */
 .creds {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--border-strong);
-  background: var(--bg-app);
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-app) 60%, var(--bg-overlay));
 }
 .creds__current {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
-  padding: 9px 12px;
+  padding: 9px 10px 9px 12px;
   border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
-}
-.creds__mark {
-  font-weight: 700;
 }
 .creds__mark--ok {
   color: var(--success);
@@ -1225,9 +1239,8 @@ async function browseForKey(): Promise<void> {
   color: var(--text-secondary);
 }
 .creds__arn {
-  font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   margin-top: 2px;
 }
 .creds__box {
@@ -1241,13 +1254,14 @@ async function browseForKey(): Promise<void> {
 }
 
 .instances {
-  padding: 12px;
-  border: 1px solid var(--border-strong);
-  background: var(--bg-app);
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-app) 60%, var(--bg-overlay));
 }
 .instances__row {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
 }
 .instances__select {
@@ -1258,13 +1272,13 @@ async function browseForKey(): Promise<void> {
 }
 .instances__fetch {
   flex: 0 0 auto;
+  height: var(--h-field);
   white-space: nowrap;
 }
 .instances__count {
   margin-left: 8px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-weight: 400;
-  letter-spacing: 0;
 }
 .warn-text {
   color: var(--warning);
@@ -1278,21 +1292,18 @@ async function browseForKey(): Promise<void> {
 }
 .preflight__results {
   width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border-strong);
+  padding: 8px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
 }
 .preflight__row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
-  font-size: 11px;
-  line-height: 1.8;
+  min-height: 26px;
+  font-size: 12px;
   min-width: 0;
-}
-.preflight__mark {
-  flex: 0 0 auto;
-  font-weight: 700;
 }
 .preflight__mark--ok {
   color: var(--success);
@@ -1307,31 +1318,41 @@ async function browseForKey(): Promise<void> {
 .preflight__detail {
   flex: 1;
   min-width: 0;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-family: var(--font-mono);
+  font-size: 11px;
 }
 
-/* Square swatches — nothing in this system is round. */
+/* Round swatches with a ring around the chosen one. */
 .swatches {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   height: var(--h-field);
   align-items: center;
 }
 .swatch {
-  width: 22px;
-  height: 22px;
-  border: 2px solid transparent;
-  border-radius: 0;
-  cursor: pointer;
+  width: 20px;
+  height: 20px;
   padding: 0;
+  border: none;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  transition: box-shadow var(--transition), transform var(--transition);
 }
+.swatch:hover {
+  transform: scale(1.12);
+}
+/* No colour of its own: the window keeps the app's accent, so that is what it shows. */
 .swatch--none {
-  background: var(--bg-input);
-  border-color: var(--border-strong);
+  background: var(--accent-default);
 }
 .swatch--active {
-  outline: 2px solid var(--text-primary);
-  outline-offset: 1px;
+  box-shadow:
+    0 0 0 2px var(--bg-overlay),
+    0 0 0 4px var(--text-primary);
+}
+.swatch:focus-visible {
+  outline-offset: 4px;
 }
 </style>

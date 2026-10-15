@@ -10,6 +10,7 @@
 import { computed, ref, watch } from 'vue'
 import type { CellValue, ColumnMeta, QueryExecutionResult } from '@shared/types'
 import DataGrid from './DataGrid.vue'
+import AppIcon from './AppIcon.vue'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
 import RowDetailPanel, { type RowField } from './RowDetailPanel.vue'
 import SplitPane from './SplitPane.vue'
@@ -330,7 +331,8 @@ function durationLabel(ms: number): string {
           :aria-pressed="showRowPanel"
           @click="toggleRowPanel"
         >
-          ▤ Row details
+          <AppIcon name="panel-right" :size="14" />
+          Row details
         </button>
       </div>
     </div>
@@ -339,6 +341,7 @@ function durationLabel(ms: number): string {
       <div v-if="showMessages" class="messages">
         <div v-for="(error, index) in errors" :key="`e-${index}`" class="message message--error">
           <div class="message__title">
+            <AppIcon name="circle-x" :size="14" />
             Msg {{ error.number ?? '' }}<template v-if="error.state">, State {{ error.state }}</template>
             <template v-if="error.lineNumber">, Line {{ error.lineNumber }}</template>
           </div>
@@ -349,6 +352,7 @@ function durationLabel(ms: number): string {
           <div class="message__text selectable">{{ message.message }}</div>
         </div>
         <div v-if="!messages.length && !errors.length" class="empty-state">
+          <div class="empty-state__icon"><AppIcon name="info" :size="20" /></div>
           <div class="empty-state__title">No messages</div>
         </div>
       </div>
@@ -408,13 +412,15 @@ function durationLabel(ms: number): string {
       </div>
 
       <div v-else-if="result" class="empty-state">
+        <div class="empty-state__icon empty-state__icon--ok"><AppIcon name="check" :size="20" /></div>
         <div class="empty-state__title">Statement completed</div>
         <p v-if="rowsAffected.length">{{ totalAffected }} rows affected</p>
       </div>
 
       <div v-else class="empty-state">
+        <div class="empty-state__icon"><AppIcon name="play" :size="18" /></div>
         <div class="empty-state__title">No results yet</div>
-        <p>Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to run the query.</p>
+        <p>Press <kbd>Ctrl</kbd> <kbd>Enter</kbd> to run the query.</p>
       </div>
     </div>
 
@@ -441,8 +447,10 @@ function durationLabel(ms: number): string {
   display: flex;
   align-items: stretch;
   justify-content: space-between;
+  gap: 12px;
   height: var(--h-tabstrip);
-  border-bottom: var(--rule) solid var(--border-strong);
+  padding: 0 8px 0 6px;
+  border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-app);
   flex: 0 0 auto;
 }
@@ -451,94 +459,120 @@ function durationLabel(ms: number): string {
   height: 100%;
   overflow-x: auto;
 }
+/* Underlined tabs, each with its row count beside it. */
 .results__tab {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 16px;
+  gap: 7px;
+  padding: 0 10px;
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
+  transition: color var(--transition);
 }
-.results__tab + .results__tab {
-  border-left: 1px solid var(--border-subtle);
+.results__tab::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: transparent;
+  transition: background-color var(--transition);
 }
 .results__tab:hover {
   color: var(--text-primary);
 }
 .results__tab--active {
-  background: var(--bg-surface);
   color: var(--text-primary);
-  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.results__tab--active::after {
+  background: var(--accent);
 }
 .results__tab--error {
   color: var(--danger);
 }
+.results__tab--error.results__tab--active::after {
+  background: var(--danger);
+}
 .results__tab-count {
-  padding: 1px 6px;
-  border-radius: 0;
-  background: var(--bg-raised);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-secondary);
   font-size: 10px;
-  letter-spacing: 0;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-/* The run's numbers get ruled cells of their own, like the status bar. */
+.results__tab--error .results__tab-count {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+/* The run's numbers, then the row panel's switch. */
 .results__meta {
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  gap: 4px;
   white-space: nowrap;
 }
 .results__cell {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 0 12px;
-  border-left: 1px solid var(--border-strong);
-  font-family: var(--font-mono);
-  font-size: 11px;
+  padding: 0 8px;
+  font-size: 12px;
   color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 .results__cell--strong {
-  padding: 0 14px;
   color: var(--text-secondary);
 }
 .results__warn {
   color: var(--warning);
 }
-/* Sits in the run's strip of ruled cells rather than beside it, so the bar
-   stays one row of cells. */
 .results__toggle {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 0 12px;
-  border: none;
-  border-left: 1px solid var(--border-strong);
-  border-radius: 0;
+  gap: 6px;
+  height: 26px;
+  margin-left: 4px;
+  padding: 0 9px 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    background-color var(--transition),
+    border-color var(--transition),
+    color var(--transition);
 }
 .results__toggle:hover {
-  background: var(--bg-hover);
+  background: var(--bg-hover-strong);
   color: var(--text-primary);
 }
-.results__toggle--on {
+.results__toggle--on,
+.results__toggle--on:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-soft);
   color: var(--text-primary);
-  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.results__toggle--on .icon {
+  color: var(--accent-fg);
 }
 .results__body {
   flex: 1;
@@ -548,42 +582,46 @@ function durationLabel(ms: number): string {
 .messages {
   height: 100%;
   overflow: auto;
+  padding: 8px 0;
 }
 .message {
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-  box-shadow: inset 3px 0 0 var(--border-strong);
-  background: transparent;
+  margin: 0 12px 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
   font-family: var(--font-mono);
   font-size: 12px;
 }
 .message--error {
-  box-shadow: inset 3px 0 0 var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-surface));
 }
 .message__title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 5px;
   font-weight: 700;
   color: var(--danger);
-  margin-bottom: 4px;
 }
 .message__text {
   white-space: pre-wrap;
   word-break: break-word;
+  line-height: 1.55;
   color: var(--text-secondary);
+}
+.message--error .message__text {
+  padding-left: 21px;
+  color: var(--text-primary);
 }
 .message__meta {
   margin-top: 4px;
+  padding-left: 21px;
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
-kbd {
-  padding: 3px 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+.empty-state__icon--ok {
+  color: var(--success);
 }
 </style>

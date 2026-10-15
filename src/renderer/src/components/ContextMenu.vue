@@ -7,6 +7,7 @@
  * folded away behind the verb they share.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import AppIcon from './AppIcon.vue'
 
 export interface MenuEntry {
   label: string
@@ -90,7 +91,7 @@ const style = computed(() => ({ left: `${position.value.x}px`, top: `${position.
       >
         <button class="menu__item" :disabled="item.disabled">
           <span class="menu__label">{{ item.label }}</span>
-          <span class="menu__arrow" aria-hidden="true">›</span>
+          <AppIcon class="menu__arrow" name="chevron-right" :size="14" />
         </button>
         <div
           v-if="openSub === index"
@@ -107,7 +108,8 @@ const style = computed(() => ({ left: `${position.value.x}px`, top: `${position.
               @click="choose(child)"
             >
               <span class="menu__label">{{ child.label }}</span>
-              <span v-if="child.hint" class="menu__hint mono">{{ child.hint }}</span>
+              <AppIcon v-if="child.hint === '✓'" class="menu__check" name="check" :size="14" />
+              <span v-else-if="child.hint" class="menu__hint">{{ child.hint }}</span>
             </button>
           </template>
         </div>
@@ -121,7 +123,8 @@ const style = computed(() => ({ left: `${position.value.x}px`, top: `${position.
         @click="choose(item)"
       >
         <span class="menu__label">{{ item.label }}</span>
-        <span v-if="item.hint" class="menu__hint mono">{{ item.hint }}</span>
+        <AppIcon v-if="item.hint === '✓'" class="menu__check" name="check" :size="14" />
+        <span v-else-if="item.hint" class="menu__hint">{{ item.hint }}</span>
       </button>
     </template>
   </div>
@@ -130,13 +133,14 @@ const style = computed(() => ({ left: `${position.value.x}px`, top: `${position.
 <style scoped>
 .menu {
   position: fixed;
-  min-width: 230px;
-  padding: 4px 0;
-  border: 1px solid var(--border-strong);
-  border-radius: 0;
-  background: var(--bg-surface);
+  min-width: 220px;
+  padding: 4px;
+  border: 1px solid var(--border-overlay);
+  border-radius: var(--radius);
+  background: var(--bg-overlay);
   box-shadow: var(--shadow-menu);
   z-index: 300;
+  animation: fade-in var(--duration-fast) var(--ease);
 }
 /* A submenu hangs off its parent row rather than off the viewport. */
 .menu--sub {
@@ -157,9 +161,10 @@ const style = computed(() => ({ left: `${position.value.x}px`, top: `${position.
   align-items: center;
   gap: 16px;
   width: 100%;
-  padding: 7px 14px;
+  height: 28px;
+  padding: 0 10px;
   border: none;
-  border-radius: 0;
+  border-radius: 5px;
   background: transparent;
   color: var(--text-primary);
   text-align: left;
@@ -173,15 +178,17 @@ const style = computed(() => ({ left: `${position.value.x}px`, top: `${position.
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.menu__hint,
-.menu__arrow {
+.menu__hint {
   flex: 0 0 auto;
-  color: var(--text-dim);
-  font-size: 11px;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 .menu__arrow {
-  font-size: 14px;
-  line-height: 1;
+  margin-right: -4px;
+  color: var(--text-muted);
+}
+.menu__check {
+  color: var(--accent-fg);
 }
 .menu__item:hover:not(:disabled),
 .menu__row:hover > .menu__item:not(:disabled) {
@@ -194,9 +201,12 @@ const style = computed(() => ({ left: `${position.value.x}px`, top: `${position.
 .menu__item--danger {
   color: var(--danger);
 }
+.menu__item--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
 .menu__sep {
   height: 1px;
-  margin: 4px 0;
-  background: var(--border-strong);
+  margin: 4px 6px;
+  background: var(--border-subtle);
 }
 </style>

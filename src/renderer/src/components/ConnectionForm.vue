@@ -14,6 +14,7 @@ import { parseAwsCredentials } from '@shared/aws/credentials'
 import { isLoopbackHost } from '@shared/hosts'
 import { AWS_REGIONS, describeRegion, isRegionLike } from '@shared/aws/regions'
 import { api } from '../lib/api'
+import { useReadOnlyStore } from '../stores/readOnly'
 import AppIcon from './AppIcon.vue'
 import AwsCredentialsBox from './AwsCredentialsBox.vue'
 
@@ -120,6 +121,23 @@ watch(
   },
   { immediate: true }
 )
+
+const readOnlyPrompt = useReadOnlyStore()
+
+/**
+ * Unticking read-only on a connection saved that way asks first, the same
+ * question every read-only toggle asks; ticking it, or unticking a box ticked
+ * in this sitting, just happens.
+ */
+async function onReadOnlyChange(event: Event): Promise<void> {
+  const box = event.target as HTMLInputElement
+  if (box.checked || !props.connection?.readOnly) {
+    form.readOnly = box.checked
+    return
+  }
+  box.checked = true
+  if (await readOnlyPrompt.confirmWritable(props.connection)) form.readOnly = false
+}
 
 const isWindowsAuth = computed(() => form.authType === 'windows')
 
@@ -626,7 +644,7 @@ async function browseForKey(): Promise<void> {
 
       <div class="form__toggle">
         <label class="checkbox">
-          <input v-model="form.readOnly" type="checkbox" />
+          <input :checked="form.readOnly" type="checkbox" @change="onReadOnlyChange" />
           <span>Read-only</span>
         </label>
         <span class="field__hint form__toggle-hint">

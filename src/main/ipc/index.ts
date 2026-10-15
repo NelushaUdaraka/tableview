@@ -216,9 +216,13 @@ export function registerIpcHandlers(context: IpcContext): void {
   // -- saved connections ----------------------------------------------------
 
   handle(CHANNELS.connectionsList, () => appData.listConnections())
-  handle(CHANNELS.connectionsSave, (_call, input: Partial<ConnectionConfig> & { name: string }) =>
-    appData.saveConnection(input)
-  )
+  handle(CHANNELS.connectionsSave, (_call, input: Partial<ConnectionConfig> & { name: string }) => {
+    const saved = appData.saveConnection(input)
+    // Read-only holds the moment it is saved, wherever the connection is
+    // open, rather than from the next time it is opened.
+    if (input.readOnly !== undefined) registry.setReadOnly(saved.id, saved.readOnly === true)
+    return saved
+  })
   handle(CHANNELS.connectionsDelete, async (call, id: string) => {
     await registry.close(call.scope, id)
     return appData.deleteConnection(id)

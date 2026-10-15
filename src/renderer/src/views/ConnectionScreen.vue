@@ -9,6 +9,7 @@ import ConnectionForm from '../components/ConnectionForm.vue'
 import ContextMenu, { type MenuEntry } from '../components/ContextMenu.vue'
 import { useConnectionStore } from '../stores/connections'
 import { useCredentialsStore } from '../stores/credentials'
+import { useReadOnlyStore } from '../stores/readOnly'
 import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toasts'
 import { onMenuAction } from '../lib/menuBus'
@@ -19,6 +20,7 @@ import { api } from '../lib/api'
 
 const connections = useConnectionStore()
 const credentials = useCredentialsStore()
+const readOnly = useReadOnlyStore()
 const settings = useSettingsStore()
 const toasts = useToastStore()
 
@@ -321,6 +323,12 @@ function rowMenuItems(connection: SavedConnection): MenuEntry[] {
     { label: 'Connect', action: 'connect' },
     { label: 'Edit…', action: 'edit' },
     { label: 'Duplicate…', action: 'duplicate' },
+    // Switched here rather than in the form: turning it on is one click, and
+    // turning it off asks first, as every read-only toggle does.
+    {
+      label: connection.readOnly ? 'Turn off read-only…' : 'Turn on read-only',
+      action: 'read-only'
+    },
     // No groups yet means nothing to move between; the form makes the first.
     ...(targets.length > 0 ? [{ label: 'Move to', items: targets }] : []),
     { separator: true, label: '' },
@@ -342,6 +350,7 @@ async function onMenuSelect(action: string): Promise<void> {
   if (action === 'connect') await open(connection)
   else if (action === 'edit') startEdit(connection)
   else if (action === 'duplicate') await duplicate(connection)
+  else if (action === 'read-only') await readOnly.setReadOnly(connection, !connection.readOnly)
   else if (action === 'delete') await remove(connection)
   else if (action.startsWith('group:')) await moveToGroup(connection, action.slice(6))
 }

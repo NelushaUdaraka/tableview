@@ -32,6 +32,15 @@ export class ConnectionRegistry {
   /** Connections that dropped and are being reopened without being asked. */
   private readonly recovering = new Set<string>()
   private readonly statusListeners = new Set<StatusListener>()
+  /**
+   * The last read-only switch for each connection, numbered in order.
+   *
+   * `open` is handed a config read before it starts, and connecting can take
+   * seconds — an SSM tunnel, a slow login — so a switch saved meanwhile has no
+   * client to reach yet. The open looks here once it has one.
+   */
+  private readonly switches = new Map<string, { readOnly: boolean; order: number }>()
+  private switchCount = 0
 
   /** Registered once by the IPC layer; returns a function that unregisters. */
   onStatusChange(listener: StatusListener): () => void {
@@ -51,6 +60,7 @@ export class ConnectionRegistry {
 
   async open(scope: string, config: ConnectionConfig): Promise<ConnectionStatus> {
     const key = entryKey(scope, config.id)
+    const started = this.switchCount
     await this.close(scope, config.id)
 
     this.connecting.add(key)
@@ -62,6 +72,9 @@ export class ConnectionRegistry {
     try {
       client = this.create(config)
       const info = await client.connect()
+      // Switched while it was opening: `config` is from before the switch.
+      const switched = this.switches.get(config.id)
+      if (switched && switched.order > started) client.setReadOnly(switched.readOnly)
       this.clients.set(key, client)
       this.recovering.delete(key)
       // From here the client can report a drop nobody asked about.
@@ -74,7 +87,7 @@ export class ConnectionRegistry {
         currentDatabase: info.currentDatabase,
         currentUser: info.login,
         tunnelPort: client.tunnelPort,
-        readOnly: config.readOnly === true
+        readOnly: client.currentConfig.readOnly === true
       }
     } catch (error) {
       const serialized = serializeError(error)
@@ -169,13 +182,38 @@ export class ConnectionRegistry {
         readOnly: client.currentConfig.readOnly === true
       }
     }
-    // A connection being reopened after a drop is on its way back, not gone.
+    // A connection being reopened after a drop is on its way back, not gone —
+    // and is still whichever way read-only was left.
     if (this.connecting.has(key) || this.recovering.has(key)) {
-      return { connectionId, state: 'connecting' }
+      return client
+        ? { connectionId, state: 'connecting', readOnly: client.currentConfig.readOnly === true }
+        : { connectionId, state: 'connecting' }
     }
     const error = this.errors.get(key)
     if (error) return { connectionId, state: 'error', error }
     return { connectionId, state: 'disconnected' }
+  }
+
+  /**
+   * Turns read-only on or off wherever a connection is open.
+   *
+   * It is one setting on one saved connection, so every window that has it
+   * open switches with it, and each is told — the one that asked and any
+   * other — so no window shows a lock its connection is no longer keeping.
+   * A window whose connection was already that way hears nothing, and one
+   * still connecting takes the switch when it opens.
+   */
+  setReadOnly(connectionId: string, readOnly: boolean): void {
+    this.switches.set(connectionId, { readOnly, order: ++this.switchCount })
+    for (const [key, client] of this.clients) {
+      const at = key.indexOf(KEY_SEPARATOR)
+      if (key.slice(at + KEY_SEPARATOR.length) !== connectionId) continue
+      if ((client.currentConfig.readOnly === true) === readOnly) continue
+      client.setReadOnly(readOnly)
+      const scope = key.slice(0, at)
+      const status = this.status(scope, connectionId)
+      for (const listener of this.statusListeners) listener(scope, status)
+    }
   }
 
   async close(scope: string, connectionId: string): Promise<void> {

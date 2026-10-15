@@ -144,6 +144,19 @@ export const useConnectionStore = defineStore('connections', () => {
     await save({ id: connection.id, name: connection.name, group })
   }
 
+  /**
+   * Turns read-only on or off for a saved connection — and, through the main
+   * process, wherever it is open, from the next statement on.
+   *
+   * A partial save, like a move between groups, so nothing else about the
+   * connection is touched. The open connection's lock follows at once rather
+   * than waiting on the status the main process sends after the save.
+   */
+  async function setReadOnly(connection: SavedConnection, readOnly: boolean): Promise<void> {
+    await save({ id: connection.id, name: connection.name, readOnly })
+    if (activeId.value === connection.id) setStatus({ ...statusFor(connection.id), readOnly })
+  }
+
   /** Writes the list to a file. Null when the save dialog was dismissed. */
   function exportAll(): Promise<ConnectionExportResult | null> {
     return api.exportConnections()
@@ -217,6 +230,7 @@ export const useConnectionStore = defineStore('connections', () => {
     isCollapsed,
     toggleGroup,
     setGroup,
+    setReadOnly,
     exportAll,
     importFile,
     sortKey,

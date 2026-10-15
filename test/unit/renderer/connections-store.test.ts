@@ -18,10 +18,12 @@ const getSettings = vi.fn()
 const getAppInfo = vi.fn()
 const updateSettings = vi.fn()
 const connect = vi.fn()
+const saveConnection = vi.fn()
 
 vi.mock('../../../src/renderer/src/lib/api', () => ({
   api: {
     connect: (id: string, password?: string) => connect(id, password),
+    saveConnection: (input: unknown) => saveConnection(input),
     listConnections: () => listConnections(),
     duplicateConnection: (id: string) => duplicateConnection(id),
     getSettings: () => getSettings(),
@@ -224,6 +226,49 @@ describe('read-only', () => {
 
     finish({ connectionId: 'c1', state: 'error', error: { message: 'refused' } })
     await reconnecting
+    expect(store.readOnly).toBe(true)
+  })
+})
+
+/**
+ * Switching read-only from a quick toggle rather than the form.
+ *
+ * A partial save, like a move between groups, so nothing else about the
+ * connection is touched — and the open connection's lock follows at once
+ * rather than waiting on the status the main process sends after it.
+ */
+describe('switching read-only', () => {
+  beforeEach(() => {
+    listConnections.mockResolvedValue([{ ...connection('c1', 'Prod'), readOnly: true }])
+    saveConnection.mockImplementation(async (input: { readOnly: boolean }) => ({
+      ...connection('c1', 'Prod'),
+      readOnly: input.readOnly
+    }))
+  })
+
+  it('saves the setting alone', async () => {
+    const store = useConnectionStore()
+    await store.load()
+    await store.setReadOnly(store.saved[0], false)
+    expect(saveConnection).toHaveBeenCalledWith({ id: 'c1', name: 'Prod', readOnly: false })
+  })
+
+  it('unlocks the open connection straight away', async () => {
+    connect.mockResolvedValue({ connectionId: 'c1', state: 'connected', readOnly: true })
+    const store = useConnectionStore()
+    await store.connect('c1')
+
+    await store.setReadOnly(store.saved[0], false)
+    expect(store.readOnly).toBe(false)
+    expect(store.activeStatus?.state).toBe('connected')
+  })
+
+  it('leaves the open connection alone when another one is switched', async () => {
+    connect.mockResolvedValue({ connectionId: 'c1', state: 'connected', readOnly: true })
+    const store = useConnectionStore()
+    await store.connect('c1')
+
+    await store.setReadOnly({ ...connection('c2', 'Dev'), readOnly: true }, false)
     expect(store.readOnly).toBe(true)
   })
 })

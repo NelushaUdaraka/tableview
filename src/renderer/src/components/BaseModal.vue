@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from 'vue'
 import AppIcon from './AppIcon.vue'
+import { closeModal, isTopModal, openModal } from '../lib/modalStack'
 
 withDefaults(
   defineProps<{
@@ -17,15 +18,23 @@ withDefaults(
 
 const emit = defineEmits<{ (event: 'close'): void }>()
 
+/** This dialog's place in the stack, so Escape closes only the one on top. */
+let place: symbol | null = null
+
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') {
-    event.stopPropagation()
-    emit('close')
-  }
+  if (event.key !== 'Escape' || !place || !isTopModal(place)) return
+  event.stopPropagation()
+  emit('close')
 }
 
-onMounted(() => document.addEventListener('keydown', onKeydown, true))
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown, true))
+onMounted(() => {
+  place = openModal()
+  document.addEventListener('keydown', onKeydown, true)
+})
+onBeforeUnmount(() => {
+  if (place) closeModal(place)
+  document.removeEventListener('keydown', onKeydown, true)
+})
 </script>
 
 <template>

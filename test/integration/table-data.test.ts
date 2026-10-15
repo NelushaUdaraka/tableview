@@ -503,6 +503,30 @@ describe('a read-only connection', () => {
     expect(await rowsInNoPk()).toBe(before)
   })
 
+  it('can be switched while open, holding from the next statement', async () => {
+    const count = async (): Promise<number> => {
+      const [result] = await client.runScript('SELECT COUNT(*) FROM dbo.no_pk WHERE a = 960')
+      return Number(result.resultSets[0].rows[0][0])
+    }
+    const switched = await connectedClient({ readOnly: true })
+    try {
+      switched.setReadOnly(false)
+      const [inserted] = await switched.runScript(
+        "INSERT INTO dbo.no_pk (a, b) VALUES (960, N'switched')"
+      )
+      expect(inserted.error).toBeUndefined()
+      expect(await count()).toBe(1)
+
+      switched.setReadOnly(true)
+      const [refused] = await switched.runScript('DELETE FROM dbo.no_pk WHERE a = 960')
+      expect(refused.error?.code).toBe(READ_ONLY_CONNECTION)
+      expect(await count()).toBe(1)
+    } finally {
+      await client.runScript('DELETE FROM dbo.no_pk WHERE a = 960')
+      await switched.disconnect()
+    }
+  })
+
   it('refuses to truncate', async () => {
     const before = await rowsInNoPk()
     await expect(readOnly.truncateTable('dbo', 'no_pk')).rejects.toMatchObject({

@@ -178,6 +178,12 @@ export class SqlServerClient implements DbClient {
     this.stateListener = listener
   }
 
+  setReadOnly(readOnly: boolean): void {
+    // Every check reads the config as it is at the time, and so does the
+    // reconnect after a drop, which keeps whichever way it was left.
+    this.config = { ...this.config, readOnly }
+  }
+
   private announce(event: Parameters<ClientStateListener>[0]): void {
     try {
       this.stateListener?.(event)

@@ -103,6 +103,7 @@ export const ICONS = {
   ],
   'panel-right': [rect(3, 3, 18, 18, 2.5), 'M15 3v18'],
   lock: [rect(3, 11, 18, 11, 2), 'M7 11V7a5 5 0 0 1 10 0v4'],
+  'lock-open': [rect(3, 11, 18, 11, 2), 'M7 11V7a5 5 0 0 1 9.9-1'],
   clock: [circle(12, 12, 9.5), 'M12 7v5l3 2'],
   sun: [
     circle(12, 12, 4),

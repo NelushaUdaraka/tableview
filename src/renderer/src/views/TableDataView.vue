@@ -1403,14 +1403,18 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
           <span class="seg__count">{{ pendingCount }}</span>
         </button>
       </template>
-      <span
-        v-else-if="connections.readOnly"
-        class="badge data__readonly"
-        title="This connection is read-only, so its tables cannot be edited"
-      >
-        <AppIcon name="lock" :size="11" />
-        Read-only
-      </span>
+      <template v-else-if="connections.readOnly">
+        <!-- Edits staged before read-only went on cannot be applied now, but
+             they can still be let go of. -->
+        <button v-if="pendingCount > 0" class="btn btn--muted" @click="discard">Discard</button>
+        <span
+          class="badge data__readonly"
+          title="This connection is read-only, so its tables cannot be edited"
+        >
+          <AppIcon name="lock" :size="11" />
+          Read-only
+        </span>
+      </template>
       <span v-else class="badge">read only</span>
     </div>
 

@@ -224,7 +224,7 @@ await clickOn(menuOf('Local dev'), 'the ⋮ on Local dev')
 await waitFor(`!!document.querySelector('.menu')`, 'the ⋮ menu')
 const rowActions = await menuItemLabels()
 steps.push({ step: 'row menu', actions: rowActions, anchor: await menuAnchor('Local dev') })
-check('its ⋮ carries the rest', rowActions, ['Connect', 'Edit…', 'Duplicate…', 'Delete'])
+check('its ⋮ carries the rest', rowActions, ['Connect', 'Edit…', 'Duplicate…', 'Turn on read-only', 'Delete'])
 check('opened under the button that raised it', await menuAnchor('Local dev'), {
   below: true, reaches: true, onScreen: true
 })

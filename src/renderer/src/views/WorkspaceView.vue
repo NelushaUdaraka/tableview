@@ -25,6 +25,7 @@ import ShortcutsDialog from '../components/ShortcutsDialog.vue'
 import UnsavedRoutineDialog from '../components/UnsavedRoutineDialog.vue'
 import TabPaneView from './TabPaneView.vue'
 import { useConnectionStore } from '../stores/connections'
+import { useReadOnlyStore } from '../stores/readOnly'
 import { useSchemaStore } from '../stores/schema'
 import { useSettingsStore } from '../stores/settings'
 import { useTabStore } from '../stores/tabs'
@@ -45,6 +46,7 @@ const props = withDefaults(
 )
 
 const connections = useConnectionStore()
+const readOnly = useReadOnlyStore()
 const schema = useSchemaStore()
 const settings = useSettingsStore()
 const tabs = useTabStore()
@@ -360,6 +362,12 @@ function handleAction(action: string): void {
       break
     case 'connection:disconnect':
       void disconnect()
+      break
+    case 'connection:toggle-read-only':
+      // The status bar's padlock, from the menu: on at once, off once asked.
+      if (connections.active) {
+        void readOnly.setReadOnly(connections.active, !connections.readOnly)
+      }
       break
     case 'help:shortcuts':
       showShortcuts.value = true

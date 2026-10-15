@@ -64,7 +64,9 @@ TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind
   that would change the database: the grid offers no edits, *Truncate* and *Drop* are greyed, and a
   script with a statement that writes is turned down whole, before any of it is sent. The check is
   made in the main process, so no window can get round it, and the list, the status bar and the
-  toolbars all say which connection it applies to (see below)
+  toolbars all say which connection it applies to. It is switched from the padlock in the status
+  bar while connected, or from the list's ⋮ menu, without opening the connection's settings; it
+  changes at once, with no reconnect, and turning it off always asks first (see below)
 - **Kept alive, and put back when it drops** — an idle connection is poked once a minute (the
   *Keepalive* option; 0 turns it off) so an SSM session, an SSH forward or a firewall does not tear
   it down for want of traffic. A connection that goes anyway is reopened in the background with a
@@ -415,7 +417,7 @@ already be wearing it.
 
 **A read-only connection**
 
-Tick *Read-only* on a connection's General tab and it refuses to change anything:
+Turn *Read-only* on for a connection and it refuses to change anything:
 
 - the table grid offers no editing — no *Add row*, no cell editor, nothing to stage — and says why
 - *Truncate table…* and *Drop…* stay on the tree's menu, greyed, with "Read-only" beside them
@@ -431,6 +433,22 @@ Reads go on as before: `SELECT`, CTEs, variables, `SET` options, cursors, transa
 `WAITFOR`, `USE`. The connection list marks a read-only connection before it is opened, and once it
 is, the status bar and the query and table toolbars carry a lock.
 
+It is switched where it is used rather than in the connection's settings. While connected, the
+padlock in the status bar is the switch — open while the connection can write, closed and labelled
+*Read-only* while it cannot — and *File → Toggle Read-only* does the same from the menu. In the
+connection list, a connection's ⋮ menu turns it on or off without connecting, and the *Read-only*
+box on the General tab is still there. Whichever is used, it is one setting saved with the
+connection, and it changes at once in every window that has the connection open: the next statement
+is checked against it, with no reconnect, so nothing open in the window is lost. Edits staged in a
+table before it went on stay staged, with *Discard* to let them go, and a connection still opening
+when it is switched opens the way it was switched.
+
+Turning it on just happens. Turning it off always asks first — *Turn off read-only?* — naming the
+connection and the server and database it is about to write to. *Keep read-only* has the focus, so
+Enter or Escape leaves it on, and only *Turn off read-only* takes it off. Asked over the connection
+form, Escape answers the question and leaves the form open as it was; the form's own change still
+waits for *Save*.
+
 The script is read by the app's own T-SQL lexer, with comments, literals and `[quoted]` names
 blanked out, and turned down on any reserved word that changes something — `INSERT`, `UPDATE`,
 `DELETE`, `MERGE`, `TRUNCATE`, DDL, `GRANT`, `BACKUP`, `DBCC`, `KILL` — and on `SELECT … INTO`.
@@ -445,8 +463,8 @@ The check sits in the main process, beside the code that sends the SQL, so the g
 an edit is a courtesy rather than the protection: an edit, a truncate or a drop that reaches the
 main process for a read-only connection is refused there too. The window takes its lock from the
 main process's word on the open connection rather than from the saved list, so the two cannot
-disagree — a connection keeps the setting it was opened with, and a change to it applies the next
-time it opens.
+disagree: a switch changes the open connection in the main process first, and each window that has
+it open is told after.
 
 It is a safety net for the window you took for staging, not a permission. What a connection may do
 is decided by its login, and for a guarantee that means a login that can only read. *Read-only
@@ -532,8 +550,8 @@ Three layers, all runnable on Linux:
 
 | Command | What it covers |
 | --- | --- |
-| `npm test` | 891 unit tests — SQL building, T-SQL lexing, the read-only check, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh |
-| `npm run test:integration` | 71 tests against a **real SQL Server 2022** and a **real sshd** |
+| `npm test` | 910 unit tests — SQL building, T-SQL lexing, the read-only check, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh |
+| `npm run test:integration` | 72 tests against a **real SQL Server 2022** and a **real sshd** |
 | `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
 
 ### Bringing up the test environment
@@ -599,7 +617,13 @@ The suites:
   whole, by line, and that a read on its own still runs; opens a table and checks nothing there can
   be edited, and that *Truncate* and *Drop* are greyed in the tree's menu. Then it goes round the
   window: staged edits, truncate, drop and a raw filter with a `DELETE` in it, sent straight to the
-  main process, are each refused, and the rows are counted to show none of it happened
+  main process, are each refused, and the rows are counted to show none of it happened. Last it
+  switches it where it is used: the status bar's padlock asks before turning it off, with the focus
+  on *Keep read-only* and Escape keeping it; once told, a delete goes through with no reconnect, and
+  turned back on — without a question — the next one is refused. *File → Toggle Read-only* asks the
+  same; the list's ⋮ menu turns a connection on and, after the question, off without connecting it;
+  and in the form, unticking it asks over the form, Escape answers only the question, and *Cancel*
+  leaves the saved setting as it was
 - **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block
   with *Paste from clipboard* (after checking that something else on the clipboard never reaches
   the box), fetches the account's instances and picks the bastion from the list (including the
@@ -658,9 +682,11 @@ src/
     ├── lib/sortConnections.ts the orders the connection list can be read in
     ├── lib/connectionGroups.ts the headings the list is filed under
     ├── lib/icons.ts          the one icon set, drawn by components/AppIcon.vue
+    ├── lib/modalStack.ts     which open dialog Escape belongs to
     ├── styles/index.css      design tokens for both themes, and the shared controls
     ├── stores/               connections, schema, tabs (and panes), library,
-    │                         settings, toasts, busy (the window's progress bar)
+    │                         settings, toasts, busy (the window's progress bar),
+    │                         read-only (the question before one may write again)
     ├── components/           title bar, grid, row panel (and its JSON tree),
     │                         editor, sidebar (and its structure tree), dialogs
     └── views/                connection screen, workspace, pane, query, table

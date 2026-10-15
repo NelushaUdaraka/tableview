@@ -108,3 +108,28 @@ describe('a writable connection', () => {
     await expect(client(false).applyChanges(changeSet)).rejects.toThrow(/Not connected/)
   })
 })
+
+/**
+ * Read-only can be switched while the connection is open, and the switch
+ * holds from the next statement on — no reconnect, so nothing open is lost.
+ */
+describe('switching read-only on an open connection', () => {
+  it('refuses writes from the moment it is turned on', async () => {
+    const writable = client(false)
+    writable.setReadOnly(true)
+
+    const [result] = await writable.runScript('DELETE FROM dbo.orders')
+    expect(result.error?.code).toBe(READ_ONLY_CONNECTION)
+    await expect(writable.applyChanges(changeSet)).rejects.toMatchObject({
+      code: READ_ONLY_CONNECTION
+    })
+  })
+
+  it('sends writes on again once it is turned off', async () => {
+    const readOnly = client(true)
+    readOnly.setReadOnly(false)
+
+    await expect(readOnly.runScript('DELETE FROM dbo.orders')).rejects.toThrow(/Not connected/)
+    expect(readOnly.currentConfig.readOnly).toBe(false)
+  })
+})

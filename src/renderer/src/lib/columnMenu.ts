@@ -2,9 +2,10 @@
  * The menu a column header raises.
  *
  * Both grids offer it — the table browser, where sorting and filtering mean a
- * new query, and the query results, where sorting is a local reorder and there
- * is nothing to filter. The entries that make no sense in a given grid are left
- * out rather than shown disabled, so what is offered is what will work.
+ * new query and a column can be hidden, and the query results, where sorting
+ * is a local reorder and there is nothing to filter. The entries that make no
+ * sense in a given grid are left out rather than shown disabled, so what is
+ * offered is what will work.
  */
 import type { MenuEntry } from '../components/ContextMenu.vue'
 
@@ -20,6 +21,8 @@ export type ColumnMenuAction =
   | 'copy-name'
   | 'fit-column'
   | 'fit-all'
+  | 'hide-column'
+  | 'show-all-columns'
 
 export interface ColumnMenuState {
   column: string
@@ -34,6 +37,13 @@ export interface ColumnMenuState {
   filterable: boolean
   /** Whether a filter is set, so "clear" can say whether it would do anything. */
   filtered: boolean
+  /**
+   * Whether this grid can take columns out of view — the table browser can,
+   * and keeps the choice on its tab; a result set shows what was selected.
+   */
+  hideable?: boolean
+  /** Whether any column is hidden, so "show all" can say whether it would do anything. */
+  anyHidden?: boolean
 }
 
 /**
@@ -71,6 +81,14 @@ export function columnMenuItems(state: ColumnMenuState): MenuEntry[] {
     { label: 'Fit this column', action: 'fit-column' },
     { label: 'Fit all columns', action: 'fit-all' }
   )
+
+  if (state.hideable) {
+    items.push(
+      { separator: true, label: '' },
+      { label: 'Hide this column', action: 'hide-column' },
+      { label: 'Show all columns', action: 'show-all-columns', disabled: !state.anyHidden }
+    )
+  }
 
   return items
 }

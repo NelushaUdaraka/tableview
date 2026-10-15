@@ -31,6 +31,8 @@ import type {
 } from '@shared/types'
 import AppIcon from '../components/AppIcon.vue'
 import BaseModal from '../components/BaseModal.vue'
+import ChoiceMenu from '../components/ChoiceMenu.vue'
+import ColumnPicker from '../components/ColumnPicker.vue'
 import DataGrid, { type RowState } from '../components/DataGrid.vue'
 import FilterBuilder from '../components/FilterBuilder.vue'
 import ContextMenu, { type MenuEntry } from '../components/ContextMenu.vue'
@@ -40,6 +42,12 @@ import TableViewSwitch from '../components/TableViewSwitch.vue'
 import { exportRows } from '@shared/export'
 import { columnMenuItems } from '../lib/columnMenu'
 import {
+  hiddenColumnIndexes,
+  hideColumns,
+  pickColumns,
+  shownColumnIndexes
+} from '../lib/columnVisibility'
+import {
   AUTO_REFRESH_CHOICES,
   autoRefreshChoice,
   autoRefreshHold,
@@ -47,6 +55,7 @@ import {
   type AutoRefreshHold
 } from '../lib/autoRefresh'
 import { sameColumns, sameRows } from '../lib/tableCache'
+import { readsFiltered } from '../lib/tableFilters'
 import { reindexStagedEdits } from '../lib/stagedRows'
 import { useRowPanel } from '../lib/rowPanel'
 import { foreignKeyFilterValue, foreignKeyFilters, foreignKeyTargets } from '@shared/foreignKeys'
@@ -133,6 +142,15 @@ const filters = ref<TableFilter[]>(cached?.filters ?? [])
 const filterMode = ref<'builder' | 'raw'>(cached?.filterMode ?? 'builder')
 const rawWhere = ref(cached?.rawWhere ?? '')
 const showFilters = ref(cached?.showFilters ?? false)
+/**
+ * Whether the rows on screen were read through a filter.
+ *
+ * The builder's rows are only drafts until Apply, so they cannot say this on
+ * their own: a filter added and never applied clears without a round trip,
+ * while one taken out row by row still leaves the grid filtered until the
+ * table is read again.
+ */
+const readFiltered = ref(cached ? readsFiltered(cached) : false)
 
 /** Rows the grid has picked out; the focused row when nothing else is. */
 const selectedRows = ref<number[]>([])
@@ -401,6 +419,12 @@ async function load(resetOffset = false, background = false, auto = false): Prom
   else loading.value = true
   autoReading.value = auto
   if (!auto) busy.begin()
+  // Taken now: the filter bar can be edited while the read is out.
+  const filtered = readsFiltered({
+    filters: filters.value,
+    filterMode: filterMode.value,
+    rawWhere: rawWhere.value
+  })
   try {
     const response = await api.fetchTableData({
       connectionId: props.tab.connectionId,
@@ -419,6 +443,7 @@ async function load(resetOffset = false, background = false, auto = false): Prom
     // The page on screen stays the page, and Refresh still says otherwise.
     if (background && pendingCount.value > 0) return true
     accept(response)
+    readFiltered.value = filtered
     if (!background) discard()
     remember()
     lastReadAt.value = Date.now()
@@ -497,6 +522,15 @@ const autoRefresher = createAutoRefresher({
 })
 
 watch(autoRefresh, (ms) => autoRefresher.set(ms), { immediate: true })
+
+/** The intervals as the toolbar's menu lists them. */
+const AUTO_REFRESH_MENU = AUTO_REFRESH_CHOICES.map((choice) => ({
+  value: choice.ms,
+  label: choice.label
+}))
+
+const autoButton = ref<HTMLButtonElement | null>(null)
+const autoMenuOpen = ref(false)
 
 /** Picked in the toolbar. Turning it on reads straight away, so it starts out current. */
 function chooseAutoRefresh(ms: number): void {
@@ -586,6 +620,41 @@ watch(
   }
 )
 
+// --- the columns on show -------------------------------------------------------
+
+/**
+ * Columns taken out of the grid, by name. The tab keeps them, as it keeps its
+ * interval: they outlast a trip to another tab, a reload and the table's
+ * structure, and go with the tab into a window of its own.
+ */
+const hiddenColumns = computed(() => props.tab.hiddenColumns ?? [])
+/** The same columns as positions in the page, which is what the grid takes. */
+const hiddenIndexes = computed(() => hiddenColumnIndexes(columns.value, hiddenColumns.value))
+/**
+ * Positions of the columns on show, in order. Whatever reads the page as the
+ * grid shows it — the row panel, a copy, an export — goes through these.
+ */
+const shownIndexes = computed(() => shownColumnIndexes(columns.value, hiddenColumns.value))
+
+const columnsButton = ref<HTMLButtonElement | null>(null)
+const columnsOpen = ref(false)
+
+function setHiddenColumns(names: string[]): void {
+  tabs.update<TableTab>(props.tab.id, { hiddenColumns: names.length > 0 ? names : undefined })
+}
+
+/** The header menu's "Hide this column". */
+function hideColumn(columnIndex: number): void {
+  const column = columns.value[columnIndex]
+  if (column) setHiddenColumns(hideColumns(hiddenColumns.value, [column.name]))
+}
+
+const columnsTitle = computed(() =>
+  hiddenIndexes.value.length === 0
+    ? 'Choose which columns the grid shows'
+    : `${shownIndexes.value.length} of ${columns.value.length} columns shown — choose which`
+)
+
 // --- the selected row -------------------------------------------------------
 
 /** The row panel answers to this tab, not to the window. */
@@ -649,13 +718,19 @@ function mergedRow(rowIndex: number): CellValue[] | null {
   })
 }
 
+/**
+ * The selected row, a field per column on show: a column taken out of the grid
+ * is out of the panel beside it too. The panel numbers its fields by position,
+ * so `shownIndexes` is how its answers get back to a column.
+ */
 const rowFields = computed<RowField[]>(() => {
   const current = selection.value
   if (!current) return []
   const row = allRows.value[current.rowIndex]
   if (!row) return []
 
-  return columns.value.map((column, index) => {
+  return shownIndexes.value.map((index) => {
+    const column = columns.value[index]
     const key = `${current.rowIndex}:${index}`
     const edited = key in edits
     return {
@@ -695,6 +770,14 @@ function editSelectedRow(columnIndex: number, value: CellValue): void {
   if (!selection.value) return
   onEdit(selection.value.rowIndex, columnIndex, value)
 }
+
+/** The selected column as a position in the panel's list of fields. */
+const panelSelectedField = computed(() => {
+  const columnIndex = selection.value?.columnIndex
+  if (columnIndex === undefined) return null
+  const position = shownIndexes.value.indexOf(columnIndex)
+  return position < 0 ? null : position
+})
 
 /**
  * Opens the row a foreign key points at, in the referenced table's own tab.
@@ -889,8 +972,23 @@ function filterNullity(columnIndex: number, operator: 'is null' | 'is not null')
   })
 }
 
+/** Something written in the filter bar, or rows on screen that went through a filter. */
+const canClearFilters = computed(
+  () => readFiltered.value || filters.value.length > 0 || rawWhere.value !== ''
+)
+
+/**
+ * Takes every filter away — the builder's rows and the raw WHERE together —
+ * and reads the table again when the rows on screen went through one. Filters
+ * that were only drafted have nothing on screen to undo, so they go without a
+ * round trip, and without asking about staged edits a read would have cost.
+ */
 function clearFilters(): void {
-  if (filters.value.length === 0 && !rawWhere.value) return
+  if (!readFiltered.value) {
+    filters.value = []
+    rawWhere.value = ''
+    return
+  }
   void withPendingEdits(() => {
     filters.value = []
     rawWhere.value = ''
@@ -1094,11 +1192,7 @@ const rowMenuItems = computed<MenuEntry[]>(() => {
     { separator: true, label: '' },
     { label: 'Filter by this value', action: 'filter-eq', disabled: !column },
     { label: 'Exclude this value', action: 'filter-ne', disabled: !column },
-    {
-      label: 'Clear filters',
-      action: 'filter-clear',
-      disabled: filters.value.length === 0 && !rawWhere.value.trim()
-    },
+    { label: 'Clear filters', action: 'filter-clear', disabled: !canClearFilters.value },
 
     ...(key
       ? [
@@ -1149,7 +1243,7 @@ const rowMenuItems = computed<MenuEntry[]>(() => {
   ]
 })
 
-/** What right-clicking a column header offers: how it is ordered and filtered. */
+/** What right-clicking a column header offers: how it is ordered, filtered and shown. */
 const headerMenuItems = computed<MenuEntry[]>(() => {
   const column = menu.value ? columns.value[menu.value.col] : undefined
   if (!column) return []
@@ -1160,7 +1254,9 @@ const headerMenuItems = computed<MenuEntry[]>(() => {
     anySort: sorts.value.length > 0,
     // The table browser writes the query, so it can filter as well as sort.
     filterable: true,
-    filtered: filters.value.length > 0 || rawWhere.value.trim() !== ''
+    filtered: canClearFilters.value,
+    hideable: true,
+    anyHidden: hiddenIndexes.value.length > 0
   })
 })
 
@@ -1207,6 +1303,12 @@ async function onColumnMenuSelect(action: string, columnIndex: number): Promise<
       break
     case 'fit-all':
       grid.value?.autoFitAll()
+      break
+    case 'hide-column':
+      hideColumn(columnIndex)
+      break
+    case 'show-all-columns':
+      setHiddenColumns([])
       break
   }
 }
@@ -1266,7 +1368,7 @@ async function onMenuSelect(action: string): Promise<void> {
       void withPendingEdits(() => load())
       break
     case 'export':
-      emit('export', columns.value, allRows.value, `${props.tab.schema}.${props.tab.table}`)
+      exportPage()
       break
     default: {
       // copy-row-<format> and copy-all-<format> differ only in what they copy.
@@ -1279,23 +1381,35 @@ async function onMenuSelect(action: string): Promise<void> {
   }
 }
 
+/** Rows cut down to the columns on show — the page as the grid draws it. */
+function shownPage(rows: CellValue[][]): { columns: ColumnMeta[]; rows: CellValue[][] } {
+  return pickColumns(columns.value, rows, shownIndexes.value)
+}
+
+/** Hands the page to the export dialog, in the columns the grid is showing. */
+function exportPage(): void {
+  const page = shownPage(allRows.value)
+  emit('export', page.columns, page.rows, `${props.tab.schema}.${props.tab.table}`)
+}
+
 /**
  * Puts rows on the clipboard in one of the export formats.
  *
  * `rowIndexes` picks rows, with their staged edits applied — what is on screen
- * is what gets copied; null takes the whole page.
+ * is what gets copied, hidden columns left out; null takes the whole page.
  */
 async function copyAs(format: ExportFormat, rowIndexes: number[] | null): Promise<void> {
   const indexes = rowIndexes ?? allRows.value.map((_, index) => index)
-  const rows = indexes.map((index) => mergedRow(index) ?? [])
+  const page = shownPage(indexes.map((index) => mergedRow(index) ?? []))
 
-  const text = exportRows(columns.value, rows, {
+  const text = exportRows(page.columns, page.rows, {
     format,
     includeHeader: true,
     tableName: `${props.tab.schema}.${props.tab.table}`
   })
   await api.copyToClipboard(text)
-  toasts.info(`Copied ${rows.length} ${rows.length === 1 ? 'row' : 'rows'} as ${format}`)
+  const count = page.rows.length
+  toasts.info(`Copied ${count} ${count === 1 ? 'row' : 'rows'} as ${format}`)
 }
 
 defineExpose({
@@ -1304,15 +1418,14 @@ defineExpose({
   focusFilter: () => {
     showFilters.value = true
   },
-  exportRows: () =>
-    emit('export', columns.value, allRows.value, `${props.tab.schema}.${props.tab.table}`)
+  exportRows: exportPage
 })
 
 const structureColumns = computed<TableColumn[]>(() => structure.value?.columns ?? [])
 </script>
 
 <template>
-  <div class="data">
+  <div class="data" :class="{ 'data--staged': pendingCount > 0 }">
     <div class="data__toolbar">
       <TableViewSwitch :tab="tab" />
 
@@ -1330,18 +1443,31 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
 
       <div class="data__spacer"></div>
 
-      <button class="btn" :disabled="loading" @click="withPendingEdits(() => load())">
+      <!-- In a narrow pane the secondary buttons give up their words (see
+           .data__label), so each carries its name and a tooltip as well. -->
+      <button
+        class="btn data__tool"
+        :disabled="loading"
+        title="Refresh (F5)"
+        aria-label="Refresh"
+        @click="withPendingEdits(() => load())"
+      >
         <AppIcon name="refresh" :size="14" />
-        Refresh
+        <span class="data__label">Refresh</span>
       </button>
-      <!-- The native select does the choosing; the box around it carries the
-           look and says what is chosen, as the sidebar's database switcher
-           does. The square is the timer: lit while it is on, pulsing while
-           it reads, grey while something holds it. -->
-      <label
-        class="btn data__auto"
+      <!-- Says what is chosen and opens the list of the rest. The square is
+           the timer: lit while it is on, pulsing while it reads, grey while
+           something holds it. -->
+      <button
+        ref="autoButton"
+        class="btn data__tool data__auto"
         :class="{ 'btn--armed': autoRefresh > 0, 'data__auto--paused': !!autoPaused }"
-        :title="autoTitle"
+        :title="autoMenuOpen ? undefined : autoTitle"
+        :aria-label="`Refresh automatically: ${autoRefreshChoice(autoRefresh).label}`"
+        aria-haspopup="menu"
+        :aria-expanded="autoMenuOpen"
+        :data-interval="autoRefresh"
+        @click="autoMenuOpen = !autoMenuOpen"
       >
         <span
           v-if="autoRefresh > 0"
@@ -1349,45 +1475,75 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
           :class="{ 'data__auto-dot--reading': autoReading }"
         ></span>
         <AppIcon v-else name="clock" :size="14" />
-        <span>Auto</span>
+        <span class="data__label">Auto</span>
         <span class="data__auto-value">{{ autoRefreshChoice(autoRefresh).short }}</span>
         <AppIcon class="data__auto-caret" name="chevron-down" :size="12" />
-        <select
-          class="data__auto-select"
-          :value="autoRefresh"
-          aria-label="Refresh automatically"
-          @change="chooseAutoRefresh(Number(($event.target as HTMLSelectElement).value))"
-        >
-          <option v-for="choice in AUTO_REFRESH_CHOICES" :key="choice.ms" :value="choice.ms">
-            {{ choice.label }}
-          </option>
-        </select>
-      </label>
+      </button>
+      <ChoiceMenu
+        v-if="autoMenuOpen"
+        :anchor="autoButton"
+        label="Refresh automatically"
+        :choices="AUTO_REFRESH_MENU"
+        :value="autoRefresh"
+        @choose="chooseAutoRefresh"
+        @close="autoMenuOpen = false"
+      />
       <button
-        class="btn"
+        class="btn data__tool"
         :class="{ 'btn--armed': showFilters || filters.length > 0 || !!rawWhere }"
+        title="Filter the rows"
+        aria-label="Filter"
         @click="showFilters = !showFilters"
       >
         <AppIcon name="filter" :size="14" />
-        Filter
+        <span class="data__label">Filter</span>
         <span v-if="filters.length || rawWhere" class="data__dot"></span>
       </button>
+      <!-- Hiding a column asks the server nothing: the page is already read
+           whole, so the picker changes the grid the moment a box is ticked. -->
       <button
-        class="btn"
+        ref="columnsButton"
+        class="btn data__tool data__columns"
+        :class="{ 'btn--armed': hiddenIndexes.length > 0 }"
+        :disabled="columns.length === 0"
+        :title="columnsOpen ? undefined : columnsTitle"
+        :aria-label="columnsTitle"
+        aria-haspopup="dialog"
+        :aria-expanded="columnsOpen"
+        @click="columnsOpen = !columnsOpen"
+      >
+        <AppIcon name="columns" :size="14" />
+        <span class="data__label">Columns</span>
+        <span v-if="hiddenIndexes.length > 0" class="data__columns-count">
+          {{ shownIndexes.length }}/{{ columns.length }}
+        </span>
+      </button>
+      <ColumnPicker
+        v-if="columnsOpen"
+        :anchor="columnsButton"
+        :columns="columns"
+        :hidden="hiddenColumns"
+        :primary-key="primaryKey"
+        @update:hidden="setHiddenColumns"
+        @close="columnsOpen = false"
+      />
+      <button
+        class="btn data__tool"
         :class="{ 'btn--armed': showRowPanel }"
         :title="`${showRowPanel ? 'Hide' : 'Show'} the selected row beside the grid (Ctrl+I)`"
+        aria-label="Row details"
         :aria-pressed="showRowPanel"
         @click="toggleRowPanel"
       >
         <AppIcon name="panel-right" :size="14" />
-        Row details
+        <span class="data__label">Row details</span>
       </button>
 
       <template v-if="editable">
         <div class="divider-v"></div>
-        <button class="btn" @click="addRow">
+        <button class="btn data__tool" title="Add row" aria-label="Add row" @click="addRow">
           <AppIcon name="plus" :size="14" />
-          Add row
+          <span class="data__label">Add row</span>
         </button>
         <button v-if="pendingCount > 0" class="btn btn--muted" :disabled="applying" @click="discard">
           Discard
@@ -1424,10 +1580,12 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       :filters="filters"
       :mode="filterMode"
       :raw-where="rawWhere"
+      :can-clear="canClearFilters"
       @update:filters="filters = $event"
       @update:mode="filterMode = $event"
       @update:raw-where="rawWhere = $event"
       @apply="withPendingEdits(() => load(true))"
+      @clear="clearFilters"
     />
 
     <div v-if="warnNoPrimaryKey" class="data__warning">
@@ -1458,6 +1616,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
             :row-offset="offset"
             :primary-key="primaryKey"
             :foreign-keys="foreignKeyLabels"
+            :hidden-columns="hiddenIndexes"
             empty-message="No rows match"
             @edit="onEdit"
             @revert-cell="revertCell"
@@ -1478,7 +1637,14 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
             @header-context="
               menu = { kind: 'header', x: $event.x, y: $event.y, row: -1, col: $event.columnIndex }
             "
-          />
+          >
+            <template #no-columns>
+              <p>The rows are still here. Pick the columns to show under Columns.</p>
+              <button class="btn btn--primary" @click="setHiddenColumns([])">
+                Show all columns
+              </button>
+            </template>
+          </DataGrid>
         </template>
 
         <template #second>
@@ -1489,13 +1655,13 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
             :label="rowLabel"
             :editable="editable"
             :state="rowState"
-            :selected-index="selection?.columnIndex ?? null"
+            :selected-index="panelSelectedField"
             :has-previous="!!selection && selection.rowIndex > 0"
             :has-next="!!selection && selection.rowIndex < allRows.length - 1"
-            @edit="editSelectedRow"
-            @revert="selection && revertCell(selection.rowIndex, $event)"
-            @follow-key="selection && followKey(selection.rowIndex, $event)"
-            @select="selection && grid?.selectCell(selection.rowIndex, $event)"
+            @edit="(field, value) => editSelectedRow(shownIndexes[field], value)"
+            @revert="selection && revertCell(selection.rowIndex, shownIndexes[$event])"
+            @follow-key="selection && followKey(selection.rowIndex, shownIndexes[$event])"
+            @select="selection && grid?.selectCell(selection.rowIndex, shownIndexes[$event])"
             @move="moveSelection"
             @close="toggleRowPanel"
           />
@@ -1599,6 +1765,8 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  /* The bar answers to the pane's width, not the window's: a split halves it. */
+  container: data / inline-size;
 }
 /* One command bar: the view switch, what you are looking at, and what you can
    do to it. */
@@ -1650,16 +1818,37 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
 .data__toolbar .btn {
   flex: 0 0 auto;
 }
+/* A narrow pane — a split, a small window — keeps every control on the bar by
+   taking the words off the secondary buttons; their icons, tooltips and names
+   stay. */
+@container data (max-width: 960px) {
+  .data__label {
+    display: none;
+  }
+  .data__tool {
+    padding: 0 7px;
+  }
+}
+/* Staged edits bring Discard and Apply, so they need the room sooner: first
+   the row count goes — the footer's pager says it too — and then the words. */
+@container data (max-width: 1170px) {
+  .data--staged .data__rows {
+    display: none;
+  }
+}
+@container data (max-width: 1110px) {
+  .data--staged .data__label {
+    display: none;
+  }
+  .data--staged .data__tool {
+    padding: 0 7px;
+  }
+}
 .data__auto {
-  position: relative;
   color: var(--text-secondary);
 }
 .data__auto.btn--armed {
   color: var(--text-primary);
-}
-.data__auto:focus-within {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 .data__auto-value {
   color: var(--text-primary);
@@ -1667,18 +1856,6 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
 }
 .data__auto-caret {
   margin-right: -2px;
-}
-/* Transparent, but the real control: it takes every click on the box. */
-.data__auto-select {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  padding: 0;
-  border: none;
-  background: transparent;
-  opacity: 0;
-  cursor: pointer;
 }
 /* The timer, lit while it runs and pulsing while it reads. */
 .data__auto-dot {
@@ -1701,6 +1878,11 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
   to {
     opacity: 0.25;
   }
+}
+/* How many of the table's columns are on show, once any is not. */
+.data__columns-count {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 .data__dot {
   display: inline-block;

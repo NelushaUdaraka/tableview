@@ -218,11 +218,21 @@ rather than folding it away.
 - Virtualised grid — only visible rows are rendered, so large results scroll smoothly
 - Server-side paging, multi-column sorting (shift-click to add a key)
 - Filter builder (16 operators, AND/OR) and a raw `WHERE` mode; values are always **bound
-  parameters**, and `contains`/`starts with`/`ends with` escape LIKE wildcards
+  parameters**, and `contains`/`starts with`/`ends with` escape LIKE wildcards. **Clear filters**
+  in the filter bar takes every filter away at once — the builder's rows and the raw `WHERE` —
+  and reads the table again only if the rows on screen went through one; a filter that was only
+  drafted goes without a round trip
 - Column resize by drag, double-click a divider to fit
+- **Choose the columns on show** — *Columns* in the toolbar ticks off the table's columns, with a
+  search for wide tables and *Show all* / *Hide all* (which act on the matches while searching);
+  *Hide this column* on a header's menu takes one out. Nothing is read for it: the page is read
+  whole either way, so keys, edits and the row count are untouched and a column put back is there
+  at once. The row panel, the keyboard, copies and exports go by the columns on show. The choice
+  belongs to the tab, like its auto refresh — it outlasts a trip to another tab or a reload, and
+  goes with the tab into a window of its own — and the button says how many are on show
 - **Right-click a column header** for what can be done to that column: sort either way, add it to
-  the sort, clear the order, filter on it (including `IS NULL` / `IS NOT NULL` in one click), and
-  fit the widths — the spreadsheet's header menu, over a server-side query
+  the sort, clear the order, filter on it (including `IS NULL` / `IS NOT NULL` in one click), fit
+  the widths, and hide it — the spreadsheet's header menu, over a server-side query
 - **The rows stay while the next page loads.** Sorting or filtering leaves what is on screen where
   it is, dimmed and inert, until the replacements arrive; a thin bar under the title bar carries the
   wait for the whole window
@@ -234,8 +244,9 @@ rather than folding it away.
   in place. A table opened for the first time shows the wait from the first frame rather than
   flashing "No rows match" at it
 - **Auto refresh, when you ask for it** — beside *Refresh*, a table can be set to re-read itself
-  every 5, 10 or 30 seconds, every minute, or every 5 or 15 minutes. It is *Off* whenever a table
-  opens, and the choice belongs to the tab: a table left on a second screen to watch a queue drain
+  every 5, 10 or 30 seconds, every minute, or every 5 or 15 minutes, picked from a menu that hangs
+  from the button in the window's own colours, with the interval in force ticked. It is *Off*
+  whenever a table opens, and the choice belongs to the tab: a table left on a second screen to watch a queue drain
   keeps refreshing across a trip to another tab, into a split, or out into a window of its own,
   while every other table stays still. Each read is the same quiet re-read a reselected tab does —
   nothing dims, and only rows that actually changed are redrawn — and the next is timed from the
@@ -243,6 +254,10 @@ rather than folding it away.
   (they are keyed by row position, and new rows under them would move them onto other rows), while
   a cell is being typed into, and while the connection is down; the control greys and says why. A
   read that fails turns it off and says so, rather than raising the same error every few seconds
+- **The toolbar fits its pane.** A split, or a small window, takes the words off the secondary
+  buttons — *Refresh*, *Auto*, *Filter*, *Columns*, *Row details*, *Add row* keep their icons,
+  tooltips and names — and with edits staged the row count gives way first, so *Discard* and
+  *Apply* are never pushed off the end
 - **Row panel** beside the grid (`Ctrl+I`): the selected row as one field per line, with room for
   the values a 26px cell cannot show, editable in place and moving with the selection. The same
   panel sits beside query results, read-only, and "View row details" on any row's menu opens it
@@ -553,7 +568,7 @@ Three layers, all runnable on Linux:
 
 | Command | What it covers |
 | --- | --- |
-| `npm test` | 910 unit tests — SQL building, T-SQL lexing, the read-only check, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh |
+| `npm test` | 936 unit tests — SQL building, T-SQL lexing, the read-only check, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh, the columns a table shows |
 | `npm run test:integration` | 72 tests against a **real SQL Server 2022** and a **real sshd** |
 | `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
 
@@ -571,7 +586,7 @@ and flips `AllowTcpForwarding` on, which the `linuxserver/openssh-server` image 
 ### End-to-end
 
 ```bash
-scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | routines | auto-refresh | unsaved | read-only | ssm-form
+scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | table-tools | routines | auto-refresh | unsaved | read-only | ssm-form
 ```
 
 On a headless box it starts Xvfb itself. It needs Electron's usual Linux libraries:
@@ -596,6 +611,14 @@ The suites:
 - **table-ui** — opens the title bar's View menu, reads the selected row out of the row panel, edits
   a field there and applies it to the database, follows a foreign key into the referenced table and
   checks the filter and the row it lands on, opens the expanding cell editor, and hides the panel
+- **table-tools** — opens the columns picker and checks it hangs from its button with every column
+  ticked; hides a column and checks it goes at once without the table being read (a row written
+  from outside stays out); narrows the list with a search and hides what matches; hides a column
+  from the header menu, and checks the arrow keys step over it, the row panel leaves it out and a
+  copied row is the columns on show; takes the tab away and back, hides every column and puts them
+  back from the empty grid. Then *Clear filters*: off with nothing to clear, back to every row
+  after a builder filter and after a raw `WHERE`, and no read at all for a filter only drafted.
+  Last it narrows the window with an edit staged and checks the toolbar still fits
 - **routines** — creates a procedure, opens it from the tree, edits three places in it and checks
   each is marked as what it is (changed, added, removed); opens a change and reads the stored line
   in it, reverts that change alone and takes the revert back with `Ctrl+Z`, steps between changes
@@ -610,8 +633,9 @@ The suites:
   asks too; that the window's ✕ and File → Exit ask in
   their own words and Cancel keeps the window and the app; and that once every question is answered
   the window really does close and the app goes with it
-- **auto-refresh** — checks a table opens with it off and offers the fixed intervals, turns it on and
-  waits for a row written from outside to turn up unprompted, stages an edit and checks it holds
+- **auto-refresh** — checks a table opens with it off and offers the fixed intervals in a menu lined
+  up under its button, with *Off* ticked and focused; turns it on and waits for a row written from
+  outside to turn up unprompted, stages an edit and checks it holds
   (and says why) until the edit is discarded, takes the tab away and back, turns it off, and drops
   the table under it to see a failed read switch it off with a word about it
 - **read-only** — saves a writable and a read-only connection to the container and checks the list
@@ -680,6 +704,8 @@ src/
     ├── lib/jsonCell.ts       which cells hold a document, and what is inside one
     ├── lib/tableCache.ts     the page a table tab keeps, and what counts as it changing
     ├── lib/autoRefresh.ts    a table re-reading itself: the intervals, and what holds a read back
+    ├── lib/columnVisibility.ts which columns a table's grid shows, and the page cut down to them
+    ├── lib/tableFilters.ts   whether a table read goes through a filter, as the main process decides
     ├── lib/lineDiff.ts       what differs from a routine's stored definition, and putting one change back
     ├── lib/changeTracking.ts the editor's change marks, the peek under a change, and its revert
     ├── lib/runQueryTab.ts    runs a query tab, on screen or not, and says whether it saved a routine
@@ -692,7 +718,8 @@ src/
     │                         settings, toasts, busy (the window's progress bar),
     │                         read-only (the question before one may write again)
     ├── components/           title bar, grid, row panel (and its JSON tree),
-    │                         editor, sidebar (and its structure tree), dialogs
+    │                         editor, sidebar (and its structure tree), dialogs,
+    │                         the toolbar's drop-down panels (a choice menu, the column picker)
     └── views/                connection screen, workspace, pane, query, table
 ```
 

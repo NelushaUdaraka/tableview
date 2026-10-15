@@ -55,6 +55,11 @@ export interface DetachedTab {
    * is the one most likely to be dragged out onto a screen of its own.
    */
   autoRefresh?: number
+  /**
+   * Columns taken out of its grid, by name. A table narrowed to the few
+   * columns worth watching is the same table on another screen.
+   */
+  hiddenColumns?: string[]
 }
 
 /**

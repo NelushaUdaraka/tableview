@@ -123,6 +123,7 @@ Use the shared classes in `index.css` and the shared components rather than rest
 - **Switch:** `.switch` (on: `.switch--on`), drawn inside the button that flips it — `role="switch"`, `aria-checked`, and a visible label beside it — for a setting that holds the moment it is flipped, such as the status bar's *Read-only*. A field that waits for *Save* stays a `.checkbox`.
 - **Empty states:** `.empty-state` containing `.empty-state__icon`, `.empty-state__title`, a `<p>` and at most one primary button.
 - **Overlays:** `BaseModal` (kicker, title, subtitle, footer slot), `ContextMenu`, and the toasts store (`info`, `success`, `error`).
+- **Drop-downs from a toolbar button:** `PopoverPanel` hangs under the button that opened it (right edges flush by default), in the overlay ground, and closes on Escape or a click elsewhere, giving the focus back. `ChoiceMenu` is one choice out of a few in it (radio items, the current one ticked); `ColumnPicker` is a checklist in it. A native `<select>` hidden under a styled button draws its list in the hidden control's colours — give that control `--bg-input` and `--text-primary`, or use `ChoiceMenu`.
 - **Icons:** `lib/icons.ts`, drawn by `components/AppIcon.vue` (24px grid, Lucide-style strokes, decorative by default). Icon-only buttons need an `aria-label`. Never type glyphs such as ✕ ⋮ ▾ ⟳ ⌕; add an icon to `lib/icons.ts` instead.
 - **Brand:** `components/BrandMark.vue`, the app icon's amber honeycomb. It uses brand colours, not the accent.
 

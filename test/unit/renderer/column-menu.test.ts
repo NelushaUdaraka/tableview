@@ -57,8 +57,23 @@ describe('columnMenuItems', () => {
     expect(items).toContain('fit-all')
   })
 
+  it('offers hiding only where the grid can hide a column', () => {
+    expect(actions(columnMenuItems(base))).not.toContain('hide-column')
+    expect(actions(columnMenuItems(base))).not.toContain('show-all-columns')
+
+    const items = columnMenuItems({ ...base, hideable: true })
+    expect(actions(items)).toContain('hide-column')
+    // Nothing is hidden yet, so putting everything back would do nothing.
+    expect(items.find((item) => item.action === 'show-all-columns')?.disabled).toBe(true)
+    expect(
+      columnMenuItems({ ...base, hideable: true, anyHidden: true }).find(
+        (item) => item.action === 'show-all-columns'
+      )?.disabled
+    ).toBe(false)
+  })
+
   it('gives every entry something to do', () => {
-    for (const item of columnMenuItems({ ...base, anySort: true })) {
+    for (const item of columnMenuItems({ ...base, anySort: true, hideable: true })) {
       if (item.separator) continue
       expect(item.action, item.label).toBeTruthy()
       expect(item.label).toBeTruthy()

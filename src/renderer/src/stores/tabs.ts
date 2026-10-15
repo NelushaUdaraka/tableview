@@ -77,6 +77,13 @@ export interface TableTab {
    */
   autoRefresh?: number
   /**
+   * Columns taken out of the grid, by name; absent or empty shows them all,
+   * which is how every table opens. Kept on the tab for the same reason as the
+   * interval, and by name rather than position so a page read again — or a
+   * table altered under it — keeps the same columns out of view.
+   */
+  hiddenColumns?: string[]
+  /**
    * The page the browser last had on screen, so reselecting this tab shows it
    * again straight away and re-reads it behind the rows rather than in front
    * of them. Written `markRaw`, like a query tab's result: it holds a page of

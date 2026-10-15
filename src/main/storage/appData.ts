@@ -132,6 +132,9 @@ export class AppData {
       username: input.username ?? existing?.username,
       domain: input.domain ?? existing?.domain,
       savePassword: input.savePassword ?? existing?.savePassword ?? false,
+      // Omitted leaves it as it was: a safety setting must not come off
+      // because an edit was about something else.
+      readOnly: (input.readOnly ?? existing?.readOnly) === true,
       options: { ...DEFAULT_SQLSERVER_OPTIONS, ...existing?.options, ...input.options },
       ssh: { ...DEFAULT_SSH_CONFIG, ...existing?.ssh, ...input.ssh },
       ssm: { ...DEFAULT_SSM_CONFIG, ...existing?.ssm, ...input.ssm },

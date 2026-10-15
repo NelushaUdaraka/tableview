@@ -31,6 +31,7 @@
     "test:e2e:routines": "scripts/e2e.sh routines",
     "test:e2e:auto-refresh": "scripts/e2e.sh auto-refresh",
     "test:e2e:unsaved": "scripts/e2e.sh unsaved",
+    "test:e2e:read-only": "scripts/e2e.sh read-only",
     "testenv:up": "scripts/test-env.sh up",
     "testenv:down": "scripts/test-env.sh down",
     "testenv:status": "scripts/test-env.sh status",

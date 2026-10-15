@@ -73,7 +73,8 @@ export class ConnectionRegistry {
         serverEdition: info.edition,
         currentDatabase: info.currentDatabase,
         currentUser: info.login,
-        tunnelPort: client.tunnelPort
+        tunnelPort: client.tunnelPort,
+        readOnly: config.readOnly === true
       }
     } catch (error) {
       const serialized = serializeError(error)
@@ -164,7 +165,8 @@ export class ConnectionRegistry {
         serverEdition: client.info?.edition,
         currentDatabase: client.info?.currentDatabase,
         currentUser: client.info?.login,
-        tunnelPort: client.tunnelPort
+        tunnelPort: client.tunnelPort,
+        readOnly: client.currentConfig.readOnly === true
       }
     }
     // A connection being reopened after a drop is on its way back, not gone.

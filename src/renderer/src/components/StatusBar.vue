@@ -80,6 +80,17 @@ const version = computed(() => {
       <button v-if="canReconnect" class="status__retry" @click="emit('reconnect')">Reconnect</button>
     </div>
 
+    <!-- For the whole session, dropped or not: the connection is still the
+         read-only one while it is being put back. -->
+    <div
+      v-if="connections.inSession && connections.readOnly"
+      class="status__seg status__seg--readonly"
+      title="Read-only: edits, truncate and drop are off, and statements that would change the database are refused"
+    >
+      <AppIcon name="lock" :size="12" />
+      Read-only
+    </div>
+
     <template v-if="status?.state === 'connected'">
       <div class="status__seg status__seg--strong" title="Database">
         <AppIcon name="database" :size="12" />
@@ -170,6 +181,11 @@ const version = computed(() => {
 }
 .status__seg--tunnel {
   gap: 6px;
+}
+.status__seg--readonly {
+  gap: 5px;
+  color: var(--text-secondary);
+  font-weight: 500;
 }
 .status__transport {
   display: inline-flex;

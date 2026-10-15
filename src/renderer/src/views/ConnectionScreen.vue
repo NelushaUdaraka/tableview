@@ -554,7 +554,19 @@ function relativeTime(iso?: string): string {
             </span>
 
             <div class="row__cell row__cell--wide">
-              <div class="row__name truncate">{{ connection.name }}</div>
+              <div class="row__title">
+                <div class="row__name truncate">{{ connection.name }}</div>
+                <!-- Said before connecting, so nobody opens production expecting
+                     to fix a row in it, or opens it unprotected by mistake. -->
+                <span
+                  v-if="connection.readOnly"
+                  class="badge row__readonly"
+                  title="Read-only: edits and statements that would change the database are refused"
+                >
+                  <AppIcon name="lock" :size="11" />
+                  Read-only
+                </span>
+              </div>
               <div class="row__sub truncate">{{ connection.database || 'master' }}</div>
             </div>
 
@@ -1004,9 +1016,20 @@ function relativeTime(iso?: string): string {
 .row__cell--right {
   text-align: right;
 }
+.row__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .row__name {
+  min-width: 0;
   font-size: 14px;
   font-weight: 600;
+}
+.row__readonly {
+  flex: 0 0 auto;
+  gap: 4px;
 }
 .row__endpoint {
   font-size: 12px;

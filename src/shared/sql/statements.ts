@@ -320,6 +320,40 @@ export function stripComments(sql: string): string {
   return out
 }
 
+/**
+ * The script with only its code left to read.
+ *
+ * Comments become spaces, and literals and quoted names keep their delimiters
+ * around spaces, so a word found in what is left is a word of code — a
+ * `DELETE` in a comment, a string or a `[bracketed]` name is gone. Every
+ * character keeps its offset, and line breaks stay where they were, so a
+ * position here is the same position in the script.
+ */
+export function maskNonCode(sql: string): string {
+  const blank = (part: string): string => part.replace(/[^\r\n]/g, ' ')
+  let out = ''
+  for (const token of tokenize(sql)) {
+    const text = sql.slice(token.start, token.end)
+    if (token.kind === 'code') {
+      out += text
+      continue
+    }
+    if (token.kind === 'line-comment' || token.kind === 'block-comment') {
+      out += blank(text)
+      continue
+    }
+    // A literal or a quoted name: the delimiters stay, so what follows a
+    // keyword is still known to be one — `INTO [dbo].[t]` is not `INTO @t`.
+    const open = text[0]
+    const close = open === '[' ? ']' : open
+    out +=
+      text.length > 1 && text.endsWith(close)
+        ? `${open}${blank(text.slice(1, -1))}${close}`
+        : `${open}${blank(text.slice(1))}`
+  }
+  return out
+}
+
 /** The leading keyword of a statement, e.g. `SELECT`, uppercased. */
 export function statementKind(sql: string): string {
   const cleaned = stripComments(sql).trim()

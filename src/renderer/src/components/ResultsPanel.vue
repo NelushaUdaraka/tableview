@@ -8,7 +8,12 @@
  * statement's output has no rows to write back to.
  */
 import { computed, ref, watch } from 'vue'
-import type { CellValue, ColumnMeta, QueryExecutionResult } from '@shared/types'
+import {
+  READ_ONLY_CONNECTION,
+  type CellValue,
+  type ColumnMeta,
+  type QueryExecutionResult
+} from '@shared/types'
 import DataGrid from './DataGrid.vue'
 import AppIcon from './AppIcon.vue'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
@@ -340,7 +345,13 @@ function durationLabel(ms: number): string {
     <div class="results__body">
       <div v-if="showMessages" class="messages">
         <div v-for="(error, index) in errors" :key="`e-${index}`" class="message message--error">
-          <div class="message__title">
+          <!-- A script a read-only connection turned down has no server
+               message number: nothing of it reached the server. -->
+          <div v-if="error.code === READ_ONLY_CONNECTION" class="message__title">
+            <AppIcon name="lock" :size="14" />
+            Not run on a read-only connection<template v-if="error.lineNumber">, Line {{ error.lineNumber }}</template>
+          </div>
+          <div v-else class="message__title">
             <AppIcon name="circle-x" :size="14" />
             Msg {{ error.number ?? '' }}<template v-if="error.state">, State {{ error.state }}</template>
             <template v-if="error.lineNumber">, Line {{ error.lineNumber }}</template>

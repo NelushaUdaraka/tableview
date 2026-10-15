@@ -74,6 +74,7 @@ function blank(): Partial<ConnectionConfig> & { name: string } {
     password: '',
     domain: '',
     savePassword: true,
+    readOnly: false,
     options: { ...DEFAULT_SQLSERVER_OPTIONS },
     ssh: { ...DEFAULT_SSH_CONFIG },
     ssm: { ...DEFAULT_SSM_CONFIG }
@@ -111,6 +112,7 @@ watch(
       password: '',
       domain: connection.domain ?? '',
       savePassword: connection.savePassword,
+      readOnly: connection.readOnly === true,
       options: { ...DEFAULT_SQLSERVER_OPTIONS, ...connection.options },
       ssh: { ...DEFAULT_SSH_CONFIG, ...connection.ssh, password: '', passphrase: '' },
       ssm: { ...DEFAULT_SSM_CONFIG, ...connection.ssm }
@@ -621,6 +623,18 @@ async function browseForKey(): Promise<void> {
         <input v-model="form.savePassword" type="checkbox" />
         <span>Remember password (encrypted with the OS keystore when available)</span>
       </label>
+
+      <div class="form__toggle">
+        <label class="checkbox">
+          <input v-model="form.readOnly" type="checkbox" />
+          <span>Read-only</span>
+        </label>
+        <span class="field__hint form__toggle-hint">
+          Table edits, truncate and drop are switched off, and a statement that would change
+          anything is stopped before it is sent. A safety net for the window you took for
+          staging — the login itself can still write.
+        </span>
+      </div>
     </section>
 
     <!-- Tunnel ---------------------------------------------------------- -->
@@ -1048,10 +1062,16 @@ async function browseForKey(): Promise<void> {
         <div class="field" style="flex: 1"></div>
       </div>
 
-      <label class="checkbox">
-        <input v-model="form.options!.readOnlyIntent" type="checkbox" />
-        <span>Read-only intent (route to a readable secondary)</span>
-      </label>
+      <div class="form__toggle">
+        <label class="checkbox">
+          <input v-model="form.options!.readOnlyIntent" type="checkbox" />
+          <span>Read-only intent (route to a readable secondary)</span>
+        </label>
+        <span class="field__hint form__toggle-hint">
+          Where to connect, not what to allow: on its own it stops nothing. Read-only on the
+          General tab is what refuses writes.
+        </span>
+      </div>
     </section>
 
     <footer class="form__foot">
@@ -1174,6 +1194,15 @@ async function browseForKey(): Promise<void> {
 }
 .form__foot .btn {
   height: var(--h-control-lg);
+}
+/* A checkbox with a sentence under it, lined up with the checkbox's label. */
+.form__toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.form__toggle-hint {
+  padding-left: 26px;
 }
 .row {
   display: flex;

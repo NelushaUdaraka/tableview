@@ -42,6 +42,16 @@ export const useConnectionStore = defineStore('connections', () => {
   const inSession = computed(() => activeId.value !== null)
 
   /**
+   * Whether the open connection refuses writes.
+   *
+   * The main process's word on the open connection, which is what it enforces,
+   * rather than the saved list: the setting can be changed from another window
+   * while this one stays open with the old one, and a window showing a lock
+   * the connection is not keeping is worse than no lock at all.
+   */
+  const readOnly = computed(() => activeStatus.value?.readOnly === true)
+
+  /**
    * The order the list is read in, as the reader last left it.
    *
    * Kept in the settings rather than here so it survives a restart: a list
@@ -148,10 +158,10 @@ export const useConnectionStore = defineStore('connections', () => {
 
   async function connect(id: string, password?: string): Promise<ConnectionStatus> {
     connectingId.value = id
-    statuses.value = { ...statuses.value, [id]: { connectionId: id, state: 'connecting' } }
+    setStatus({ connectionId: id, state: 'connecting' })
     try {
       const status = await api.connect(id, password)
-      statuses.value = { ...statuses.value, [id]: status }
+      setStatus(status)
       if (status.state === 'connected') activeId.value = id
       await load()
       return status
@@ -161,7 +171,7 @@ export const useConnectionStore = defineStore('connections', () => {
         state: 'error',
         error: { message: error instanceof Error ? error.message : String(error) }
       }
-      statuses.value = { ...statuses.value, [id]: status }
+      setStatus(status)
       return status
     } finally {
       connectingId.value = null
@@ -176,12 +186,23 @@ export const useConnectionStore = defineStore('connections', () => {
 
   async function disconnect(id: string): Promise<void> {
     await api.disconnect(id)
-    statuses.value = { ...statuses.value, [id]: { connectionId: id, state: 'disconnected' } }
+    setStatus({ connectionId: id, state: 'disconnected' })
     if (activeId.value === id) activeId.value = null
   }
 
+  /**
+   * Records a status, keeping what the last one said about read-only when this
+   * one does not: a connection being put back, or one that failed to come
+   * back, is still the read-only connection it was — and the lock must not
+   * blink off while it is away.
+   */
   function setStatus(status: ConnectionStatus): void {
-    statuses.value = { ...statuses.value, [status.connectionId]: status }
+    const previous = statuses.value[status.connectionId]
+    const readOnly = status.readOnly ?? previous?.readOnly
+    statuses.value = {
+      ...statuses.value,
+      [status.connectionId]: readOnly === undefined ? status : { ...status, readOnly }
+    }
   }
 
   function statusFor(id: string): ConnectionStatus {
@@ -208,6 +229,7 @@ export const useConnectionStore = defineStore('connections', () => {
     activeStatus,
     isConnected,
     inSession,
+    readOnly,
     connectingId,
     load,
     save,

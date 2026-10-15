@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { SqlServerClient } from '../../src/main/db/sqlserver/client'
-import type { TableDataRequest } from '../../src/shared/types'
+import { READ_ONLY_CONNECTION, type TableDataRequest } from '../../src/shared/types'
 import { connectedClient, createTestDatabase, seedTestDatabase } from './helpers'
 
 let client: SqlServerClient
@@ -432,5 +432,82 @@ describe('editing table data', () => {
       v: '2024-07-04T10:20:30.000Z'
     })
     expect(row[indexOf(response.columns, 'c_bigint')]).toBe('9007199254740995')
+  })
+})
+
+/**
+ * Read-only against a real server: reads go through, and nothing that would
+ * change the data does — which is checked by counting the rows afterwards, on
+ * the writable connection, rather than by trusting the refusal.
+ */
+describe('a read-only connection', () => {
+  let readOnly: SqlServerClient
+
+  beforeAll(async () => {
+    readOnly = await connectedClient({ readOnly: true })
+  })
+
+  afterAll(async () => {
+    await readOnly?.disconnect()
+  })
+
+  async function rowsInNoPk(): Promise<number> {
+    const [result] = await client.runScript('SELECT COUNT(*) FROM dbo.no_pk')
+    return Number(result.resultSets[0].rows[0][0])
+  }
+
+  it('reads the way any connection does', async () => {
+    const [result] = await readOnly.runScript(
+      "-- DELETE nothing\nSELECT email FROM dbo.customers WHERE notes <> 'DROP' ORDER BY customer_id"
+    )
+    expect(result.error).toBeUndefined()
+    expect(result.resultSets[0].rows[0]).toEqual(['ada@example.com'])
+
+    const page = await readOnly.fetchTableData(
+      request({ filterMode: 'raw', rawWhere: 'credit_limit = 0' })
+    )
+    expect(page.rows).toHaveLength(1)
+  })
+
+  it('refuses a DELETE, leaving every row where it was', async () => {
+    const before = await rowsInNoPk()
+    const results = await readOnly.runScript('SELECT 1\nGO\nDELETE FROM dbo.no_pk')
+
+    expect(results).toHaveLength(1)
+    expect(results[0].error).toMatchObject({ code: READ_ONLY_CONNECTION, lineNumber: 3 })
+    expect(await rowsInNoPk()).toBe(before)
+  })
+
+  it('refuses staged edits, applying none of them', async () => {
+    const before = await rowsInNoPk()
+    await expect(
+      readOnly.applyChanges({
+        connectionId: 'test-connection',
+        schema: 'dbo',
+        table: 'no_pk',
+        inserts: [{ tempId: 't', values: { a: 950, b: 'read-only' } }],
+        updates: [],
+        deletes: []
+      })
+    ).rejects.toMatchObject({ code: READ_ONLY_CONNECTION })
+    expect(await rowsInNoPk()).toBe(before)
+  })
+
+  it('refuses a raw filter with a DELETE smuggled into it', async () => {
+    const before = await rowsInNoPk()
+    await expect(
+      readOnly.fetchTableData(
+        request({ table: 'no_pk', sorts: [], filterMode: 'raw', rawWhere: '1 = 1; DELETE FROM dbo.no_pk' })
+      )
+    ).rejects.toMatchObject({ code: READ_ONLY_CONNECTION })
+    expect(await rowsInNoPk()).toBe(before)
+  })
+
+  it('refuses to truncate', async () => {
+    const before = await rowsInNoPk()
+    await expect(readOnly.truncateTable('dbo', 'no_pk')).rejects.toMatchObject({
+      code: READ_ONLY_CONNECTION
+    })
+    expect(await rowsInNoPk()).toBe(before)
   })
 })

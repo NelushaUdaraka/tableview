@@ -10,16 +10,18 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_SETTINGS } from '../../../src/shared/types'
-import type { AppSettings, SavedConnection } from '../../../src/shared/types'
+import type { AppSettings, ConnectionStatus, SavedConnection } from '../../../src/shared/types'
 
 const listConnections = vi.fn()
 const duplicateConnection = vi.fn()
 const getSettings = vi.fn()
 const getAppInfo = vi.fn()
 const updateSettings = vi.fn()
+const connect = vi.fn()
 
 vi.mock('../../../src/renderer/src/lib/api', () => ({
   api: {
+    connect: (id: string, password?: string) => connect(id, password),
     listConnections: () => listConnections(),
     duplicateConnection: (id: string) => duplicateConnection(id),
     getSettings: () => getSettings(),
@@ -160,5 +162,68 @@ describe('the order the list reads in', () => {
     await expect(store.setSortKey('name')).rejects.toThrow('read-only')
     expect(store.sortKey).toBe('created')
     expect(store.sorted.map((entry) => entry.name)).toEqual(['bravo', 'charlie', 'alpha'])
+  })
+})
+
+/**
+ * Whether the open connection refuses writes.
+ *
+ * The window takes it from the main process's word on the open connection,
+ * which is what is enforced, rather than from the saved list, which another
+ * window can change underneath it. A status about the connection coming or
+ * going does not say; the open connection is still what it last said it was.
+ */
+describe('read-only', () => {
+  const opened = (readOnly: boolean): ConnectionStatus => ({
+    connectionId: 'c1',
+    state: 'connected',
+    readOnly
+  })
+
+  beforeEach(() => {
+    listConnections.mockResolvedValue([{ ...connection('c1', 'Prod'), readOnly: false }])
+  })
+
+  it('is what the main process says the open connection is', async () => {
+    connect.mockResolvedValue(opened(true))
+    const store = useConnectionStore()
+    await store.connect('c1')
+
+    // The saved list says otherwise; the open connection is what counts.
+    expect(store.active?.readOnly).toBe(false)
+    expect(store.readOnly).toBe(true)
+  })
+
+  it('is not, for a writable connection', async () => {
+    connect.mockResolvedValue(opened(false))
+    const store = useConnectionStore()
+    await store.connect('c1')
+    expect(store.readOnly).toBe(false)
+  })
+
+  it('stays read-only while a dropped connection is put back', async () => {
+    connect.mockResolvedValue(opened(true))
+    const store = useConnectionStore()
+    await store.connect('c1')
+
+    store.setStatus({ connectionId: 'c1', state: 'connecting', error: { message: 'socket hang up' } })
+    expect(store.readOnly).toBe(true)
+    store.setStatus({ connectionId: 'c1', state: 'disconnected', error: { message: 'gone' } })
+    expect(store.readOnly).toBe(true)
+  })
+
+  it('stays read-only through a reconnect, and after one that fails', async () => {
+    connect.mockResolvedValueOnce(opened(true))
+    const store = useConnectionStore()
+    await store.connect('c1')
+
+    let finish: (status: ConnectionStatus) => void = () => undefined
+    connect.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
+    const reconnecting = store.reconnect()
+    expect(store.readOnly).toBe(true)
+
+    finish({ connectionId: 'c1', state: 'error', error: { message: 'refused' } })
+    await reconnecting
+    expect(store.readOnly).toBe(true)
   })
 })

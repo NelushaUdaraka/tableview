@@ -205,3 +205,41 @@ describe('a connection that drops on its own', () => {
     expect(registry.status('win1', 'c1').state).toBe('disconnected')
   })
 })
+
+/**
+ * Whether the open connection refuses writes.
+ *
+ * Said by the registry, from the settings the connection was opened with,
+ * because those are the settings the client enforces: a window that read it
+ * from the saved list instead could show a lock that the open connection is
+ * not keeping, once the list was edited from another window.
+ */
+describe('a read-only connection', () => {
+  it('says it is read-only when it opens, and while it stays open', async () => {
+    const registry = new ConnectionRegistry()
+    const opened = await registry.open('win1', { ...config(), readOnly: true })
+
+    expect(opened.readOnly).toBe(true)
+    expect(registry.status('win1', 'c1').readOnly).toBe(true)
+  })
+
+  it('says so again when it comes back after a drop', async () => {
+    const registry = new ConnectionRegistry()
+    const seen: ConnectionStatus[] = []
+    registry.onStatusChange((_scope, status) => seen.push(status))
+    await registry.open('win1', { ...config(), readOnly: true })
+    const client = built[built.length - 1]
+
+    client.connected = false
+    client.report({ state: 'reconnecting', error: new Error('socket hang up') })
+    client.connected = true
+    client.report({ state: 'connected' })
+
+    expect(seen.at(-1)).toMatchObject({ state: 'connected', readOnly: true })
+  })
+
+  it('says a writable connection is not read-only', async () => {
+    const { registry } = await openOne()
+    expect(registry.status('win1', 'c1').readOnly).toBe(false)
+  })
+})

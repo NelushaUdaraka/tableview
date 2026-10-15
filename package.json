@@ -28,6 +28,7 @@
     "test:e2e:workspace": "scripts/e2e.sh workspace",
     "test:e2e:editing": "scripts/e2e.sh editing",
     "test:e2e:table-ui": "scripts/e2e.sh table-ui",
+    "test:e2e:table-tools": "scripts/e2e.sh table-tools",
     "test:e2e:routines": "scripts/e2e.sh routines",
     "test:e2e:auto-refresh": "scripts/e2e.sh auto-refresh",
     "test:e2e:unsaved": "scripts/e2e.sh unsaved",

@@ -572,7 +572,10 @@ defineExpose({ focusFilter, refresh })
   min-width: 0;
   font-size: 12px;
 }
-/* Transparent, but still the real control — it takes every click on the block. */
+/* Invisible, but still the real control — it takes every click on the block.
+   Its list is the platform's, drawn in this control's colours whatever its
+   opacity: left transparent, it came up white with the names in a grey that
+   all but vanished on it. These are the colours every other select has. */
 .sidebar__db-select {
   position: absolute;
   inset: 0;
@@ -580,7 +583,8 @@ defineExpose({ focusFilter, refresh })
   height: 100%;
   padding: 0;
   border: none;
-  background: transparent;
+  background: var(--bg-input);
+  color: var(--text-primary);
   opacity: 0;
   cursor: pointer;
 }

@@ -8,6 +8,12 @@ const props = defineProps<{
   filters: TableFilter[]
   mode: 'builder' | 'raw'
   rawWhere: string
+  /**
+   * Whether there is anything to clear: a filter written here, or rows on
+   * screen that were read through one. Only the parent knows the second — a
+   * filter taken out row by row has left the builder empty, but not the grid.
+   */
+  canClear: boolean
 }>()
 
 const emit = defineEmits<{
@@ -15,6 +21,7 @@ const emit = defineEmits<{
   (event: 'update:mode', value: 'builder' | 'raw'): void
   (event: 'update:rawWhere', value: string): void
   (event: 'apply'): void
+  (event: 'clear'): void
 }>()
 
 const OPERATORS: FilterOperator[] = [
@@ -101,6 +108,17 @@ function placeholderFor(operator: FilterOperator): string {
         </button>
       </div>
       <div class="filters__spacer"></div>
+      <!-- Both kinds of filter at once, so the rows come back whole whichever
+           mode was in force. -->
+      <button
+        class="btn btn--sm btn--muted filters__clear"
+        :disabled="!canClear"
+        title="Remove every filter and show all the rows"
+        @click="emit('clear')"
+      >
+        <AppIcon name="filter-x" :size="13" />
+        Clear filters
+      </button>
       <button v-if="mode === 'builder'" class="btn btn--sm" @click="add">
         <AppIcon name="plus" :size="13" />
         Add filter

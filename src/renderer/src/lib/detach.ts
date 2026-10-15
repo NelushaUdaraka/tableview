@@ -19,8 +19,10 @@ export function detachedTabFrom(tab: Tab): DetachedTab {
       table: tab.table,
       objectType: tab.objectType,
       view: tab.view,
-      // A table being watched keeps being watched wherever it is put.
-      ...(tab.autoRefresh ? { autoRefresh: tab.autoRefresh } : {})
+      // A table being watched keeps being watched wherever it is put, and
+      // keeps the columns it was being watched through.
+      ...(tab.autoRefresh ? { autoRefresh: tab.autoRefresh } : {}),
+      ...(tab.hiddenColumns?.length ? { hiddenColumns: [...tab.hiddenColumns] } : {})
     }
   }
   return {
@@ -52,7 +54,11 @@ export async function openTabFrom(tab: DetachedTab): Promise<void> {
       tab.objectType ?? 'table',
       tab.view ?? 'data'
     )
-    if (tab.autoRefresh) {
+    const carried: Partial<TableTab> = {
+      ...(tab.autoRefresh ? { autoRefresh: tab.autoRefresh } : {}),
+      ...(tab.hiddenColumns?.length ? { hiddenColumns: [...tab.hiddenColumns] } : {})
+    }
+    if (Object.keys(carried).length > 0) {
       const opened = tabs.tabs.find(
         (entry): entry is TableTab =>
           entry.kind === 'table' &&
@@ -60,7 +66,7 @@ export async function openTabFrom(tab: DetachedTab): Promise<void> {
           entry.schema === tab.schema &&
           entry.table === tab.table
       )
-      if (opened) tabs.update<TableTab>(opened.id, { autoRefresh: tab.autoRefresh })
+      if (opened) tabs.update<TableTab>(opened.id, carried)
     }
     return
   }

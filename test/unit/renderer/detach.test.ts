@@ -110,6 +110,26 @@ describe('detachedTabFrom, for a table being watched', () => {
   })
 })
 
+describe('detachedTabFrom, for a table with columns out of view', () => {
+  it('carries the columns it hides', () => {
+    expect(detachedTabFrom({ ...tableTab, hiddenColumns: ['notes', 'email'] })).toMatchObject({
+      kind: 'table',
+      hiddenColumns: ['notes', 'email']
+    })
+  })
+
+  it('carries a copy, not the tab’s own list', () => {
+    const hiddenColumns = ['notes']
+    const payload = detachedTabFrom({ ...tableTab, hiddenColumns })
+    expect(payload.hiddenColumns).not.toBe(hiddenColumns)
+  })
+
+  it('says nothing about it for a table showing every column', () => {
+    expect(detachedTabFrom(tableTab)).not.toHaveProperty('hiddenColumns')
+    expect(detachedTabFrom({ ...tableTab, hiddenColumns: [] })).not.toHaveProperty('hiddenColumns')
+  })
+})
+
 /**
  * The other half: a description opened in the window it lands in — or in the
  * one it came from, when no window took it.
@@ -132,6 +152,18 @@ describe('openTabFrom', () => {
     // Nothing of the old window's comes with it.
     expect(opened.pendingEdits).toBe(0)
     expect(opened.filters).toBeUndefined()
+  })
+
+  it('reopens a table with the same columns out of view', async () => {
+    await openTabFrom(detachedTabFrom({ ...tableTab, hiddenColumns: ['notes'] }))
+    const opened = useTabStore().tabs[0] as TableTab
+    expect(opened.hiddenColumns).toEqual(['notes'])
+    expect(opened.autoRefresh).toBeUndefined()
+  })
+
+  it('reopens a table showing every column when it hid none', async () => {
+    await openTabFrom(detachedTabFrom(tableTab))
+    expect((useTabStore().tabs[0] as TableTab).hiddenColumns).toBeUndefined()
   })
 
   it('reopens a routine with its edits, its changes marked against what is stored', async () => {

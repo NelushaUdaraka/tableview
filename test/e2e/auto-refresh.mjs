@@ -129,19 +129,25 @@ const auto = () =>
     const box = document.querySelector('.data__auto')
     return box && {
       shows: box.querySelector('.data__auto-value').textContent.trim(),
-      value: box.querySelector('select').value,
+      value: box.dataset.interval,
       armed: box.classList.contains('btn--armed'),
       paused: box.classList.contains('data__auto--paused'),
       title: box.title
     }
   })()`)
-const choose = (ms) =>
-  ev(`(() => {
-    const select = document.querySelector('.data__auto-select')
-    select.value = '${ms}'
-    select.dispatchEvent(new Event('change', { bubbles: true }))
-    return true
-  })()`)
+// The control opens a menu of its own, drawn in the window rather than by the
+// platform; picking from it is a click on the interval's entry.
+const openMenu = async () => {
+  if (!(await ev(`!!document.querySelector('.popover')`))) {
+    await ev(`document.querySelector('.data__auto').click()`)
+  }
+  await waitFor(`!!document.querySelector('.popover [role=menuitemradio]')`, 'the interval menu')
+}
+const choose = async (ms) => {
+  await openMenu()
+  await ev(`document.querySelector('.popover [role=menuitemradio][data-value="${ms}"]').click()`)
+  await waitFor(`!document.querySelector('.popover')`, 'the interval menu closing')
+}
 const openTable = async (name) => {
   await ev(`[...document.querySelectorAll('.sidebar .item__name')].find(e => e.textContent.trim() === '${name}').closest('.item').click()`)
   await waitFor(`document.querySelector('.tab--active .tab__title')?.textContent.trim() === '${name}'`, `the ${name} tab`)
@@ -154,11 +160,36 @@ await openTable('e2e_ticks')
 await waitFor(`document.querySelector('.data__rows')?.textContent.includes('3 rows')`, 'three rows')
 steps.push({ step: 'opened', auto: await auto() })
 check(steps.at(-1).auto.value === '0' && !steps.at(-1).auto.armed, 'a table opened with auto refresh on')
+await openMenu()
+const menu = await ev(`(() => {
+  const button = document.querySelector('.data__auto').getBoundingClientRect()
+  const panel = document.querySelector('.popover').getBoundingClientRect()
+  return {
+    items: [...document.querySelectorAll('.popover [role=menuitemradio]')].map((item) => item.textContent.trim()),
+    checked: [...document.querySelectorAll('.popover [aria-checked=true]')].map((item) => item.textContent.trim()),
+    focused: document.activeElement?.textContent.trim(),
+    // The list hangs from the button: flush with its right edge, just below it.
+    rightEdgeOff: Math.abs(button.right - panel.right),
+    gap: panel.top - button.bottom,
+    background: getComputedStyle(document.querySelector('.popover')).backgroundColor,
+    surface: getComputedStyle(document.querySelector('.data__toolbar')).backgroundColor
+  }
+})()`)
+steps.push({ step: 'menu', menu })
 check(
-  JSON.stringify(await ev(`[...document.querySelectorAll('.data__auto-select option')].map(o => o.textContent.trim())`)) ===
+  JSON.stringify(menu.items) ===
     JSON.stringify(['Off', 'Every 5 seconds', 'Every 10 seconds', 'Every 30 seconds', 'Every minute', 'Every 5 minutes', 'Every 15 minutes']),
   'the intervals on offer are not the predefined ones'
 )
+check(JSON.stringify(menu.checked) === JSON.stringify(['Off']), 'the menu does not tick the interval in force')
+check(menu.focused === 'Off', 'the focus does not start on the interval in force')
+check(menu.rightEdgeOff < 1 && menu.gap >= 0 && menu.gap <= 8, 'the menu is not lined up under its button')
+// The platform's list came up white on the dark theme; this one is drawn in
+// the window's own overlay colour.
+check(menu.background !== 'rgb(255, 255, 255)' && menu.background !== menu.surface, 'the menu is not drawn as an overlay')
+await shot('00-menu')
+await ev(`document.querySelector('.data__auto').click()`)
+await waitFor(`!document.querySelector('.popover')`, 'the menu closing from its button')
 
 // --- 2. on: rows written elsewhere arrive without a click ---------------------
 await choose(5000)
@@ -193,7 +224,7 @@ check(!(await auto()).paused, 'still paused after the edits went')
 await openTable('customers')
 check((await auto()).value === '0', 'auto refresh leaked into another table')
 await openTable('e2e_ticks')
-await waitFor(`document.querySelector('.data__auto-select')?.value === '5000'`, 'the interval kept by the tab')
+await waitFor(`document.querySelector('.data__auto')?.dataset.interval === '5000'`, 'the interval kept by the tab')
 await insert('six')
 await waitFor(`document.querySelector('.data__rows')?.textContent.includes('6 rows')`, 'refreshing again after coming back', 9000)
 
@@ -208,7 +239,7 @@ check(steps.at(-1).rows === '6 rows', 'it kept refreshing after being turned off
 await choose(5000)
 await waitFor(`document.querySelector('.data__rows')?.textContent.includes('7 rows')`, 'the read on turning it back on', 5000)
 await runSql('DROP TABLE dbo.e2e_ticks')
-await waitFor(`document.querySelector('.data__auto-select')?.value === '0'`, 'auto refresh stopping itself', 12000)
+await waitFor(`document.querySelector('.data__auto')?.dataset.interval === '0'`, 'auto refresh stopping itself', 12000)
 const toast = await ev(`[...document.querySelectorAll('.toast__message')].map(t => t.textContent.trim())`)
 steps.push({ step: 'failure', toast, auto: await auto() })
 check(toast.some((text) => text.startsWith('Auto refresh stopped')), 'no word about auto refresh stopping')

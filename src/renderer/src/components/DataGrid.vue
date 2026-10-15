@@ -42,6 +42,13 @@ const props = withDefaults(
      * parent to open the referenced row.
      */
     foreignKeys?: Record<number, string>
+    /**
+     * Columns not to draw, as indexes into `columns`. They are still in every
+     * row, and every index the grid emits still counts them: it only leaves
+     * them out of the header and the cells, steps over them with the keyboard
+     * and the copy, and keeps their widths for when they come back.
+     */
+    hiddenColumns?: number[]
     emptyMessage?: string
   }>(),
   {
@@ -53,6 +60,7 @@ const props = withDefaults(
     rowOffset: 0,
     primaryKey: () => [],
     foreignKeys: () => ({}),
+    hiddenColumns: () => [],
     emptyMessage: 'No rows'
   }
 )
@@ -221,14 +229,64 @@ watch(
   }
 )
 
-const gridTemplate = computed(
-  () => `48px ${widths.value.map((width) => `${width}px`).join(' ')}`
+// --- the columns drawn -------------------------------------------------------
+
+/** Indexes into `columns` of the ones drawn, in order. */
+const shownColumns = computed(() => {
+  const all = props.columns.map((_, index) => index)
+  if (props.hiddenColumns.length === 0) return all
+  const hidden = new Set(props.hiddenColumns)
+  return all.filter((index) => !hidden.has(index))
+})
+
+/** Each drawn column with its index, which is what the header and cells loop over. */
+const shownHeaders = computed(() =>
+  shownColumns.value.map((index) => ({ index, column: props.columns[index] }))
 )
 
-/** Row-number gutter plus every column, which is how wide a row really is. */
-const totalWidth = computed(
-  () => 48 + widths.value.reduce((sum, width) => sum + width, 0)
+/** The drawn column `steps` along from `col`, stopping at either end. */
+function stepColumn(col: number, steps: number): number {
+  const shown = shownColumns.value
+  const at = shown.indexOf(col)
+  if (at < 0) return nearestShown(col) ?? col
+  return shown[Math.max(0, Math.min(shown.length - 1, at + steps))]
+}
+
+/** A drawn column to stand in for one that is not: the next along, or else the last. */
+function nearestShown(col: number): number | null {
+  const shown = shownColumns.value
+  if (shown.length === 0) return null
+  return shown.find((index) => index >= col) ?? shown[shown.length - 1]
+}
+
+const gridTemplate = computed(
+  () =>
+    `48px ${shownColumns.value.map((index) => `${widths.value[index] ?? MIN_WIDTH}px`).join(' ')}`
 )
+
+/** Row-number gutter plus every drawn column, which is how wide a row really is. */
+const totalWidth = computed(
+  () => 48 + shownColumns.value.reduce((sum, index) => sum + (widths.value[index] ?? MIN_WIDTH), 0)
+)
+
+/**
+ * A column hidden from under the selection hands it to its neighbour, so the
+ * focused cell — and the row panel's field with it — is always one that can
+ * be seen.
+ */
+watch(shownColumns, (shown) => {
+  if (editing.value && !shown.includes(editing.value.col)) editing.value = null
+  const current = selected.value
+  if (!current || shown.includes(current.col)) return
+  const next = nearestShown(current.col)
+  if (next === null) {
+    selected.value = null
+    emit('selection', null)
+    return
+  }
+  selected.value = { row: current.row, col: next }
+  emit('selection', { rowIndex: current.row, columnIndex: next })
+})
 
 /**
  * Puts the viewport back to a scroll position it had before.
@@ -318,9 +376,9 @@ function autoFit(index: number): void {
   widths.value = next
 }
 
-/** Fits every column at once, from the rows currently rendered. */
+/** Fits every drawn column at once, from the rows currently rendered. */
 function autoFitAll(): void {
-  props.columns.forEach((_, index) => autoFit(index))
+  shownColumns.value.forEach((index) => autoFit(index))
 }
 
 // --- selection & editing ---------------------------------------------------
@@ -538,7 +596,7 @@ function commitEdit(move: 'none' | 'down' | 'right' = 'none'): void {
   }
 
   if (move === 'down' && row < props.rows.length - 1) moveTo(row + 1, col)
-  else if (move === 'right' && col < props.columns.length - 1) moveTo(row, col + 1)
+  else if (move === 'right' && stepColumn(col, 1) !== col) moveTo(row, stepColumn(col, 1))
   else selectCell(row, col)
 
   // Return focus to the grid so arrow keys keep working after an edit.
@@ -565,7 +623,9 @@ function onCellKeydown(event: KeyboardEvent): void {
   if (!selected.value) return
   const { row, col } = selected.value
   const lastRow = props.rows.length - 1
-  const lastCol = props.columns.length - 1
+  // Left and right step over hidden columns, so these are the drawn ends.
+  const firstCol = shownColumns.value[0] ?? col
+  const lastCol = shownColumns.value[shownColumns.value.length - 1] ?? col
 
   switch (event.key) {
     case 'ArrowDown':
@@ -578,13 +638,13 @@ function onCellKeydown(event: KeyboardEvent): void {
       break
     case 'ArrowLeft':
       event.preventDefault()
-      moveTo(row, Math.max(0, col - 1))
+      moveTo(row, stepColumn(col, -1))
       break
     case 'ArrowRight':
     case 'Tab':
       event.preventDefault()
-      if (col === lastCol && row < lastRow) moveTo(row + 1, 0)
-      else moveTo(row, Math.min(lastCol, col + 1))
+      if (col === lastCol && row < lastRow) moveTo(row + 1, firstCol)
+      else moveTo(row, stepColumn(col, 1))
       break
     case 'PageDown':
       event.preventDefault()
@@ -596,7 +656,7 @@ function onCellKeydown(event: KeyboardEvent): void {
       break
     case 'Home':
       event.preventDefault()
-      moveTo(event.ctrlKey ? 0 : row, 0)
+      moveTo(event.ctrlKey ? 0 : row, firstCol)
       break
     case 'End':
       event.preventDefault()
@@ -666,9 +726,9 @@ function scrollRowIntoView(row: number): void {
   }
 }
 
-/** One row as the grid shows it, tab separated. */
+/** One row as the grid shows it, tab separated — the drawn columns only. */
 function rowAsText(row: number): string {
-  return props.columns.map((_, index) => displayValue(row, index) ?? '').join('\t')
+  return shownColumns.value.map((index) => displayValue(row, index) ?? '').join('\t')
 }
 
 async function copySelection(wholeRow: boolean): Promise<void> {
@@ -722,7 +782,11 @@ function onCellContextMenu(row: number, col: number, event: MouseEvent): void {
 }
 
 defineExpose({
-  selectCell: (row: number, col: number) => selectCell(row, col),
+  // A hidden column cannot hold the focus; its drawn neighbour takes it.
+  selectCell: (row: number, col: number) => {
+    const shown = nearestShown(col)
+    if (shown !== null) selectCell(row, shown)
+  },
   beginEdit,
   copySelection,
   selectRows: (rows: number[]) => {
@@ -748,7 +812,7 @@ defineExpose({
       <div class="grid__header-track" :style="{ gridTemplateColumns: gridTemplate }">
         <div class="grid__corner"></div>
         <div
-          v-for="(column, index) in columns"
+          v-for="{ index, column } in shownHeaders"
           :key="`${column.name}-${index}`"
           class="grid__th"
           :title="`${column.name} — ${column.dataType}${column.nullable ? '' : ' NOT NULL'}`"
@@ -790,6 +854,14 @@ defineExpose({
         <span>Loading…</span>
       </div>
 
+      <!-- Rows with nothing of them drawn would be numbered stripes; this says
+           why instead, and the parent says how to put columns back. -->
+      <div v-else-if="columns.length > 0 && shownColumns.length === 0" class="empty-state">
+        <div class="empty-state__icon"><AppIcon name="columns" :size="20" /></div>
+        <div class="empty-state__title">Every column is hidden</div>
+        <slot name="no-columns"></slot>
+      </div>
+
       <div v-else-if="rows.length === 0" class="empty-state">
         <div class="empty-state__icon"><AppIcon name="table" :size="20" /></div>
         <div class="empty-state__title">{{ emptyMessage }}</div>
@@ -815,13 +887,13 @@ defineExpose({
         >
           <div
             class="grid__rownum"
-            @mousedown="onCellMouseDown(row.index, 0, $event)"
-            @contextmenu="onCellContextMenu(row.index, 0, $event)"
+            @mousedown="onCellMouseDown(row.index, shownColumns[0], $event)"
+            @contextmenu="onCellContextMenu(row.index, shownColumns[0], $event)"
           >
             {{ rowOffset + row.index + 1 }}
           </div>
           <div
-            v-for="(column, colIndex) in columns"
+            v-for="{ index: colIndex, column } in shownHeaders"
             :key="colIndex"
             class="grid__cell"
             :class="[

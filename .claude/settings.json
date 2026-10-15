@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "CLAUDE_PLUGIN_ROOT=\"${CLAUDE_PROJECT_DIR}/.claude\" \"${CLAUDE_PROJECT_DIR}/.claude/hooks/run-hook.cmd\" session-start",
+            "timeout": 30,
+            "statusMessage": "Loading Superpowers"
+          }
+        ]
+      }
+    ]
+  }
+}

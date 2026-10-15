@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   asCreateOrAlter,
+  maskNonCode,
   returnsRows,
   splitBatches,
   splitStatements,
@@ -163,6 +164,38 @@ describe('stripComments', () => {
 
   it('keeps comment-like text inside a literal', () => {
     expect(stripComments("SELECT '-- not a comment'")).toContain('-- not a comment')
+  })
+})
+
+describe('maskNonCode', () => {
+  it('leaves code exactly as it is', () => {
+    expect(maskNonCode('SELECT a, b FROM dbo.t WHERE a = 1;')).toBe(
+      'SELECT a, b FROM dbo.t WHERE a = 1;'
+    )
+  })
+
+  it('blanks comments, keeping their place', () => {
+    expect(maskNonCode('SELECT 1 -- DROP\nFROM t')).toBe('SELECT 1        \nFROM t')
+    expect(maskNonCode('SELECT /* DELETE */ 1')).toBe('SELECT              1')
+  })
+
+  it('blanks a nested block comment whole', () => {
+    expect(maskNonCode('/* a /* DROP */ b */SELECT 1')).toBe(`${' '.repeat(20)}SELECT 1`)
+  })
+
+  it('keeps the line breaks a comment or a literal spans', () => {
+    expect(maskNonCode('/*a\nb*/x')).toBe('   \n   x')
+    expect(maskNonCode("'a\nb'")).toBe("' \n '")
+  })
+
+  it('empties literals and quoted names but keeps their delimiters', () => {
+    expect(maskNonCode("PRINT 'DELETE it'")).toBe("PRINT '         '")
+    expect(maskNonCode("'it''s'")).toBe("'     '")
+    expect(maskNonCode('SELECT [update] FROM "insert"')).toBe('SELECT [      ] FROM "      "')
+  })
+
+  it('empties a literal left open to the end', () => {
+    expect(maskNonCode("SELECT 'DROP")).toBe("SELECT '    ")
   })
 })
 

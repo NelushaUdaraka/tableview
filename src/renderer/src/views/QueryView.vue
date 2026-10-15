@@ -10,6 +10,7 @@ import SplitPane from '../components/SplitPane.vue'
 import NameDialog from '../components/NameDialog.vue'
 import type { QueryTab } from '../stores/tabs'
 import { useTabStore } from '../stores/tabs'
+import { useConnectionStore } from '../stores/connections'
 import { useSchemaStore } from '../stores/schema'
 import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toasts'
@@ -24,6 +25,7 @@ const emit = defineEmits<{
 }>()
 
 const tabs = useTabStore()
+const connections = useConnectionStore()
 const schema = useSchemaStore()
 const settings = useSettingsStore()
 const toasts = useToastStore()
@@ -243,6 +245,17 @@ defineExpose({
             </button>
             <div class="query__spacer"></div>
 
+            <!-- Said before Run rather than after it: a script that writes is
+                 turned down whole, before any of it is sent. -->
+            <span
+              v-if="connections.readOnly"
+              class="badge query__readonly"
+              title="This connection is read-only: a script with a statement that would change the database is not run"
+            >
+              <AppIcon name="lock" :size="11" />
+              Read-only
+            </span>
+
             <!-- A routine's tab says how far it has moved from what is stored,
                  and steps through the changes the gutter marks. -->
             <template v-if="tab.routine">
@@ -361,6 +374,10 @@ defineExpose({
 }
 .query__toolbar .btn {
   flex: 0 0 auto;
+}
+.query__readonly {
+  flex: 0 0 auto;
+  gap: 4px;
 }
 /* The shortcut, set inside the Run button as a faint key cap. */
 .query__key {

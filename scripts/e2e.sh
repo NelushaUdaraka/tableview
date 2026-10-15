@@ -3,7 +3,7 @@
 # Runs the end-to-end suites against a built app. On a headless machine it
 # starts an Xvfb display first.
 #
-# Usage: scripts/e2e.sh [smoke|connections|workspace|editing|table-ui|routines|auto-refresh|unsaved|ssm-form|all]
+# Usage: scripts/e2e.sh [smoke|connections|workspace|editing|table-ui|routines|auto-refresh|unsaved|read-only|ssm-form|all]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -68,6 +68,7 @@ case "$SUITE" in
   routines)    run routines ;;
   auto-refresh) run auto-refresh ;;
   unsaved)     run unsaved ;;
-  all)         run smoke; run connections; run workspace; run editing; run table-ui; run routines; run auto-refresh; run unsaved; run ssm-form ;;
-  *) echo "usage: $0 {smoke|connections|workspace|editing|table-ui|routines|auto-refresh|unsaved|ssm-form|all}" >&2; exit 1 ;;
+  read-only)   run read-only ;;
+  all)         run smoke; run connections; run workspace; run editing; run table-ui; run routines; run auto-refresh; run unsaved; run read-only; run ssm-form ;;
+  *) echo "usage: $0 {smoke|connections|workspace|editing|table-ui|routines|auto-refresh|unsaved|read-only|ssm-form|all}" >&2; exit 1 ;;
 esac

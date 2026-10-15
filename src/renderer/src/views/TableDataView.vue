@@ -146,7 +146,11 @@ const applying = ref(false)
 const isView = computed(() => props.tab.objectType === 'view')
 const primaryKey = computed(() => structure.value?.primaryKey ?? [])
 const hasPrimaryKey = computed(() => primaryKey.value.length > 0)
-const editable = computed(() => !isView.value)
+/**
+ * A read-only connection could not apply an edit anyway — the main process
+ * refuses it — so nothing is offered that would only fail at Apply.
+ */
+const editable = computed(() => !isView.value && !connections.readOnly)
 /**
  * Whether to warn that edits will match on every column.
  *
@@ -756,7 +760,7 @@ function onSort(column: string, additive: boolean): void {
 
 function onEdit(rowIndex: number, columnIndex: number, value: CellValue): void {
   if (!editable.value) {
-    toasts.info('Views cannot be edited')
+    toasts.info(isView.value ? 'Views cannot be edited' : 'This connection is read-only')
     return
   }
   edits[`${rowIndex}:${columnIndex}`] = value
@@ -1399,6 +1403,18 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
           <span class="seg__count">{{ pendingCount }}</span>
         </button>
       </template>
+      <template v-else-if="connections.readOnly">
+        <!-- Edits staged before read-only went on cannot be applied now, but
+             they can still be let go of. -->
+        <button v-if="pendingCount > 0" class="btn btn--muted" @click="discard">Discard</button>
+        <span
+          class="badge data__readonly"
+          title="This connection is read-only, so its tables cannot be edited"
+        >
+          <AppIcon name="lock" :size="11" />
+          Read-only
+        </span>
+      </template>
       <span v-else class="badge">read only</span>
     </div>
 
@@ -1692,6 +1708,9 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
   height: 6px;
   border-radius: 50%;
   background: var(--accent);
+}
+.data__readonly {
+  gap: 4px;
 }
 .data__warning {
   display: flex;

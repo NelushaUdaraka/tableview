@@ -149,6 +149,14 @@ export interface ConnectionConfig {
   /** Windows/NTLM domain. */
   domain?: string
   savePassword: boolean
+  /**
+   * Refuses anything that would change the database: staged table edits,
+   * truncate and drop, and any statement that is not plainly a read. Checked
+   * in the main process before anything is sent, so no window can get round
+   * it — but it is a safety net against the wrong window, not a permission:
+   * what the login may do is still up to the server. Absent means writable.
+   */
+  readOnly?: boolean
   options: SqlServerOptions
   ssh: SshConfig
   ssm: SsmConfig
@@ -221,6 +229,9 @@ export interface QueryResultSet {
  * of matching on wording, which changes.
  */
 export const SSM_CREDENTIALS_EXPIRED = 'SSM_CREDENTIALS_EXPIRED'
+
+/** Marks something a read-only connection refused to send, so it can be said as such. */
+export const READ_ONLY_CONNECTION = 'READ_ONLY_CONNECTION'
 
 export interface SerializedError {
   message: string
@@ -504,6 +515,13 @@ export interface ConnectionStatus {
   currentUser?: string
   /** Local port the SSH tunnel is listening on, when tunnelling. */
   tunnelPort?: number
+  /**
+   * Whether the open connection refuses writes, as it was opened — which is
+   * what the main process enforces, even if the saved setting has changed
+   * since. Only an open connection says; a status about one coming or going
+   * leaves it out.
+   */
+  readOnly?: boolean
 }
 
 // ---------------------------------------------------------------------------

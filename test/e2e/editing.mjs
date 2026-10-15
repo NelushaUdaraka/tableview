@@ -96,8 +96,8 @@ await ev(`
 await ev('location.reload()')
 await delay(1500)
 await send('Runtime.enable')
-await waitFor(`!!document.querySelector('.card')`, 'connection card')
-await ev(`[...document.querySelectorAll('.card__buttons .btn')].find(b=>b.textContent.includes('Connect')).click()`)
+await waitFor(`!!document.querySelector('.row')`, 'connection row')
+await ev(`[...document.querySelectorAll('.row__buttons .btn')].find(b=>b.textContent.includes('Connect')).click()`)
 await waitFor(`!!document.querySelector('.workspace')`, 'workspace', 45000)
 await waitFor(`document.querySelectorAll('.sidebar .item').length > 0`, 'sidebar')
 

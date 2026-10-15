@@ -85,22 +85,31 @@ function isActive(schemaName: string, name: string): boolean {
   return activeObject.value === `${schemaName}.${name}`
 }
 
-const objectMenuItems: MenuEntry[] = [
-  { label: 'Open data', action: 'data' },
-  { label: 'Open structure', action: 'structure' },
-  { separator: true, label: '' },
-  { label: 'SELECT statement', action: 'select' },
-  { label: 'INSERT statement', action: 'insert' },
-  { label: 'UPDATE statement', action: 'update' },
-  { label: 'DELETE statement', action: 'delete' },
-  { label: 'CREATE TABLE script', action: 'ddl' },
-  { separator: true, label: '' },
-  { label: 'Copy qualified name', action: 'copy-name' },
-  { label: 'Pin / unpin', action: 'pin' },
-  { separator: true, label: '' },
-  { label: 'Truncate table…', action: 'truncate', danger: true },
-  { label: 'Drop…', action: 'drop', danger: true }
-]
+/**
+ * A read-only connection keeps Truncate and Drop on the menu, greyed and
+ * saying why, rather than leaving someone to wonder where they went. Writing
+ * the statements is still offered: that only opens them in an editor.
+ */
+const objectMenuItems = computed<MenuEntry[]>(() => {
+  const locked = connections.readOnly
+  const hint = locked ? 'Read-only' : undefined
+  return [
+    { label: 'Open data', action: 'data' },
+    { label: 'Open structure', action: 'structure' },
+    { separator: true, label: '' },
+    { label: 'SELECT statement', action: 'select' },
+    { label: 'INSERT statement', action: 'insert' },
+    { label: 'UPDATE statement', action: 'update' },
+    { label: 'DELETE statement', action: 'delete' },
+    { label: 'CREATE TABLE script', action: 'ddl' },
+    { separator: true, label: '' },
+    { label: 'Copy qualified name', action: 'copy-name' },
+    { label: 'Pin / unpin', action: 'pin' },
+    { separator: true, label: '' },
+    { label: 'Truncate table…', action: 'truncate', danger: !locked, disabled: locked, hint },
+    { label: 'Drop…', action: 'drop', danger: !locked, disabled: locked, hint }
+  ]
+})
 
 const routineMenuItems: MenuEntry[] = [
   { label: 'Show definition', action: 'definition' },

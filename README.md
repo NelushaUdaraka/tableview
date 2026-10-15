@@ -32,10 +32,11 @@ TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind
   password, SSH passphrase or AWS credential block is ever written to that file**: an export lands
   in a downloads folder, goes out as an attachment and ends up in a backup, and none of those are
   places for the key to production. What travels is the shape of each connection — including its
-  group, its colour and the day it was made — plus a note of which secrets it had, so the toast can
-  say how many will need a password entering rather than leaving it to be discovered at connect
-  time. A name already saved is left alone rather than imported beside itself, so re-importing the
-  same file to pick up one new connection does not leave you with two of everything.
+  group, its colour, whether it is read-only and the day it was made — plus a note of which secrets
+  it had, so the toast can say how many will need a password entering rather than leaving it to be
+  discovered at connect time. A name already saved is left alone rather than imported beside
+  itself, so re-importing the same file to pick up one new connection does not leave you with two
+  of everything.
 - SQL Server logins, Windows/NTLM (with domain), and Azure AD password auth
 - TLS options: `encrypt`, `trustServerCertificate`, named instances, `ApplicationIntent=ReadOnly`,
   connect/request timeouts, pool sizing, application name
@@ -59,6 +60,14 @@ TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind
   as it was. A copy is saved the moment it is made, so *Cancel* stops editing it rather than
   un-making it.
 - Test-connection button that reports the server edition and version
+- **Read-only, for the one that is production** — a connection marked read-only refuses anything
+  that would change the database: the grid offers no edits, *Truncate* and *Drop* are greyed, and a
+  script with a statement that writes is turned down whole, before any of it is sent. The check is
+  made in the main process, so no window can get round it, and the list, the status bar and the
+  toolbars all say which connection it applies to. It is switched from the *Read-only* switch in
+  the status bar while connected, or from the padlock beside each connection in the list, without
+  opening the connection's settings; it changes at once, with no reconnect, and turning it off
+  always asks first (see below)
 - **Kept alive, and put back when it drops** — an idle connection is poked once a minute (the
   *Keepalive* option; 0 turns it off) so an SSM session, an SSH forward or a firewall does not tear
   it down for want of traffic. A connection that goes anyway is reopened in the background with a
@@ -127,9 +136,15 @@ confirms which identity you are about to connect as.
 
 - **Paste them into the app** (the default). Copy the block straight out of the AWS access portal
   and paste it in — bash `export`, PowerShell `$Env:`, cmd `set`, or a credentials-file stanza are
-  all accepted, quotes and stray semicolons included. The block is **saved with that connection**,
-  encrypted by the same vault that protects database passwords, so connections in different AWS
-  accounts each carry their own. Re-paste when they expire.
+  all accepted, quotes and stray semicolons included. **Paste from clipboard** beside the box does
+  it in one click, in the connection form and in the dialog that asks for fresh credentials when
+  they run out. The clipboard is read in the main process and only a credentials block is handed to
+  the window: with anything else copied — a password, a paragraph — the box stays empty and says
+  why. However the block got there, the line under the box shows what it holds as soon as it is in
+  (`ASIA************MPLE · eu-west-2 · temporary`), or what is wrong with it, rather than leaving
+  that to Save. The block is **saved with that connection**, encrypted by the same vault that
+  protects database passwords, so connections in different AWS accounts each carry their own.
+  Re-paste when they expire.
 - **Let the AWS CLI resolve them** — the normal chain: `--profile`, environment variables, SSO
   cache, `credential_process`, assume-role, instance profile. Use this if you keep profiles in
   `~/.aws/`.
@@ -401,6 +416,64 @@ app's own indigo, exactly as the stylesheet defines it. Red is a swatch rather t
 is the colour people reach for to mark production, which is exactly why every window should not
 already be wearing it.
 
+**A read-only connection**
+
+Turn *Read-only* on for a connection and it refuses to change anything:
+
+- the table grid offers no editing — no *Add row*, no cell editor, nothing to stage — and says why
+- *Truncate table…* and *Drop…* stay on the tree's menu, greyed, with "Read-only" beside them
+- a script with a statement that writes is not run at all, not even the reads before it, and the
+  results say which statement it was and on which line:
+
+```
+Not run on a read-only connection, Line 2
+DELETE changes data — this connection is read-only, so nothing was run.
+```
+
+Reads go on as before: `SELECT`, CTEs, variables, `SET` options, cursors, transactions, `PRINT`,
+`WAITFOR`, `USE`. The connection list marks a read-only connection before it is opened, and once it
+is, the status bar and the query and table toolbars carry a lock.
+
+It is switched where it is used rather than in the connection's settings. While connected, the
+status bar carries a *Read-only* switch beside the connection's name, labelled whichever way it is
+so it can be found before it is needed: on, its padlock is closed and the switch filled; off, the
+padlock is open and the switch empty. *File → Toggle Read-only* does the same from the menu. In the
+connection list, the padlock beside each connection's *Connect* button turns it on or off without
+connecting, as does the row's ⋮ menu, and the *Read-only* box on the General tab is still there.
+Whichever is used, it is one setting saved with the connection, and it changes at once in every
+window that has the connection open: the next statement is checked against it, with no reconnect,
+so nothing open in the window is lost. Edits staged in a table before it went on stay staged, with
+*Discard* to let them go, and a connection still opening when it is switched opens the way it was
+switched.
+
+Turning it on just happens. Turning it off always asks first — *Turn off read-only?* — naming the
+connection and the server and database it is about to write to. *Keep read-only* has the focus, so
+Enter or Escape leaves it on, and only *Turn off read-only* takes it off. Asked over the connection
+form, Escape answers the question and leaves the form open as it was; the form's own change still
+waits for *Save*.
+
+The script is read by the app's own T-SQL lexer, with comments, literals and `[quoted]` names
+blanked out, and turned down on any reserved word that changes something — `INSERT`, `UPDATE`,
+`DELETE`, `MERGE`, `TRUNCATE`, DDL, `GRANT`, `BACKUP`, `DBCC`, `KILL` — and on `SELECT … INTO`.
+Reserved words cannot be bare names in T-SQL, so a `DELETE` found in the code is a `DELETE`
+statement, while a column called `[delete]` or a string that mentions one goes through. What it
+cannot see into it does not guess at: `EXEC`, dynamic SQL, `OPENQUERY`/`OPENROWSET`, and a
+procedure called by name at the head of a batch — which SQL Server runs without an `EXEC` — are
+refused outright, whatever they would have done. A raw `WHERE` in the filter bar is checked the
+same way, since a `;` ends the `SELECT` there as readily as anywhere.
+
+The check sits in the main process, beside the code that sends the SQL, so the grid not offering
+an edit is a courtesy rather than the protection: an edit, a truncate or a drop that reaches the
+main process for a read-only connection is refused there too. The window takes its lock from the
+main process's word on the open connection rather than from the saved list, so the two cannot
+disagree: a switch changes the open connection in the main process first, and each window that has
+it open is told after.
+
+It is a safety net for the window you took for staging, not a permission. What a connection may do
+is decided by its login, and for a guarantee that means a login that can only read. *Read-only
+intent* on the Advanced tab is a different thing again: it asks an availability group to route the
+connection to a readable secondary, and stops nothing on its own.
+
 **Everything else**
 - Export result sets or whole tables to CSV, TSV, JSON, JSON Lines, SQL `INSERT`s or Markdown —
   with a live preview — to a file or the clipboard
@@ -480,8 +553,8 @@ Three layers, all runnable on Linux:
 
 | Command | What it covers |
 | --- | --- |
-| `npm test` | 805 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh |
-| `npm run test:integration` | 66 tests against a **real SQL Server 2022** and a **real sshd** |
+| `npm test` | 910 unit tests — SQL building, T-SQL lexing, the read-only check, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh |
+| `npm run test:integration` | 72 tests against a **real SQL Server 2022** and a **real sshd** |
 | `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
 
 ### Bringing up the test environment
@@ -498,7 +571,7 @@ and flips `AllowTcpForwarding` on, which the `linuxserver/openssh-server` image 
 ### End-to-end
 
 ```bash
-scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | routines | auto-refresh | unsaved | ssm-form
+scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | routines | auto-refresh | unsaved | read-only | ssm-form
 ```
 
 On a headless box it starts Xvfb itself. It needs Electron's usual Linux libraries:
@@ -541,12 +614,29 @@ The suites:
   waits for a row written from outside to turn up unprompted, stages an edit and checks it holds
   (and says why) until the edit is discarded, takes the tab away and back, turns it off, and drops
   the table under it to see a failed read switch it off with a word about it
-- **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block,
-  fetches the account's instances and picks the bastion from the list (including the empty answer a
-  wrong region gives), switches the connection to finding that bastion by its Name tag and back, runs the prerequisite check in both its failing and passing states, saves,
-  reopens the connection to confirm the stored summary appears while the secret never reaches the
-  renderer, and opens a second window. `scripts/e2e.sh` writes stand-ins for `aws` and
-  `session-manager-plugin` into `.tmp/bin`, so it needs no AWS account.
+- **read-only** — saves a writable and a read-only connection to the container and checks the list
+  marks only the read-only one and its form keeps the setting; connects it and checks the status bar
+  and the query toolbar say so; runs a script that reads and then deletes and checks it is refused
+  whole, by line, and that a read on its own still runs; opens a table and checks nothing there can
+  be edited, and that *Truncate* and *Drop* are greyed in the tree's menu. Then it goes round the
+  window: staged edits, truncate, drop and a raw filter with a `DELETE` in it, sent straight to the
+  main process, are each refused, and the rows are counted to show none of it happened. Last it
+  switches it where it is used: the status bar's *Read-only* switch asks before turning it off, with
+  the focus on *Keep read-only* and Escape keeping it; once told, a delete goes through with no
+  reconnect, the switch still there and still labelled, and turned back on — without a question —
+  the next one is refused. *File → Toggle Read-only* asks the same; the padlock on a row of the
+  list, and the row's ⋮ menu, turn a connection on and, after the question, off without connecting
+  it; and in the form, unticking it asks over the form, Escape answers only the question, and
+  *Cancel* leaves the saved setting as it was
+- **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block
+  with *Paste from clipboard* (after checking that something else on the clipboard never reaches
+  the box), fetches the account's instances and picks the bastion from the list (including the
+  empty answer a wrong region gives), switches the connection to finding that bastion by its Name
+  tag and back, runs the prerequisite check in both its failing and passing states, saves, reopens
+  the connection to confirm the stored summary appears while the secret never reaches the renderer,
+  pastes a fresh block into the dialog a run-out one raises, and opens a second window.
+  `scripts/e2e.sh` writes stand-ins for `aws` and `session-manager-plugin` into `.tmp/bin`, so it
+  needs no AWS account.
 
 Screenshots land in `.tmp/`.
 
@@ -578,7 +668,8 @@ src/
 │   ├── accent.ts             a connection's colour, and the shades derived from it
 │   ├── copyName.ts           what a duplicated connection is called
 │   ├── connectionTransfer.ts the connection export file, and what it leaves out
-│   ├── sql/                  identifier escaping, T-SQL lexer, query builders
+│   ├── sql/                  identifier escaping, T-SQL lexer, query builders, and
+│   │                         readOnly.ts — what a read-only connection refuses to send
 │   ├── serialize.ts          driver values ⇄ IPC-safe cell values
 │   ├── export.ts             CSV/JSON/SQL/Markdown
 │   └── ipcSerialize.ts       strips Vue proxies before they hit contextBridge
@@ -595,9 +686,11 @@ src/
     ├── lib/sortConnections.ts the orders the connection list can be read in
     ├── lib/connectionGroups.ts the headings the list is filed under
     ├── lib/icons.ts          the one icon set, drawn by components/AppIcon.vue
+    ├── lib/modalStack.ts     which open dialog Escape belongs to
     ├── styles/index.css      design tokens for both themes, and the shared controls
     ├── stores/               connections, schema, tabs (and panes), library,
-    │                         settings, toasts, busy (the window's progress bar)
+    │                         settings, toasts, busy (the window's progress bar),
+    │                         read-only (the question before one may write again)
     ├── components/           title bar, grid, row panel (and its JSON tree),
     │                         editor, sidebar (and its structure tree), dialogs
     └── views/                connection screen, workspace, pane, query, table
@@ -662,6 +755,72 @@ what Vue reactive state is. `lib/api.ts` handles this once for every call site.
 
 ---
 
+## Working on the UI
+
+The design tokens and shared controls live in `src/renderer/src/styles/index.css`.
+`design-system/beekeeper-clone/MASTER.md` writes the same system down — palette, type, spacing,
+components, motion, and what not to do — and is the first thing to read before changing how
+something looks.
+
+---
+
+## Claude Code setup
+
+`.claude/` holds project skills and one hook. Claude Code picks them up in any session on this
+repository, local or in the cloud, with nothing to install.
+
+**UI UX Pro Max** ([nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill),
+MIT) lives in `.claude/skills/ui-ux-pro-max/`. Ask for it by name, or let a UI task trigger it. It
+searches a local database of styles, palettes, font pairings and UX guidelines with
+`python3 .claude/skills/ui-ux-pro-max/scripts/search.py` — Python 3 and the standard library, no
+network. Its instructions have Claude read `MASTER.md` before building a screen and leave it
+unchanged without your say-so, so new work follows the shipped system rather than a freshly
+generated one.
+
+It was installed from `ui-ux-pro-max-cli` 2.15.0. To move to a newer release:
+
+```bash
+npx ui-ux-pro-max-cli@latest init --ai claude --force
+# The installer also adds six companion skills (banners, brand, logos, slides,
+# design tokens, shadcn/Tailwind) that this project has no use for.
+rm -rf .claude/skills/{banner-design,brand,design,design-system,slides,ui-styling}
+```
+
+**Superpowers** ([obra/superpowers](https://github.com/obra/superpowers), MIT) is Jesse Vincent's
+library of working-method skills: brainstorming a design before building it, writing and executing
+plans, test-driven development, systematic debugging, verifying before calling something done,
+requesting and receiving code review, worktrees, subagent-driven development and finishing a branch.
+Its fifteen skills sit beside UI UX Pro Max in `.claude/skills/` (`brainstorming` through
+`writing-skills`), copied unmodified from the v7.0.0 release.
+
+What makes it more than a shelf of skills is its session-start hook, and that is wired up too:
+`.claude/settings.json` runs Superpowers' own script (`.claude/hooks/`, also unmodified) at the
+start of a session, after `/clear` and after compaction. It loads the `using-superpowers` skill into
+the conversation, which has Claude check for a skill that applies before it acts — brainstorming
+before building, systematic debugging before fixing — the way the plugin does. The command sets
+`CLAUDE_PLUGIN_ROOT` only because that is what makes the script answer in Claude Code's format;
+Claude Code sets it for plugins but not for project hooks. Instructions in `CLAUDE.md`, or given
+directly, still take precedence over the skills.
+
+- **To keep the skills but drop the always-on behaviour**, delete the `SessionStart` entry from
+  `.claude/settings.json`. The skills stay available when asked for by name.
+- **The skills refer to each other as `superpowers:<name>`**, the plugin's namespace. As project
+  skills they are named without it: `brainstorming`, not `superpowers:brainstorming`.
+- **Don't also install the Superpowers plugin** (`/plugin install superpowers@claude-plugins-official`)
+  for this repository, or every skill and the hook will be loaded twice.
+
+To move to a newer release, copy its skills and hook script over these, and delete any skill the
+release dropped:
+
+```bash
+TAG=v7.0.0   # the release to move to
+git clone --depth 1 --branch "$TAG" https://github.com/obra/superpowers /tmp/superpowers
+cp -R /tmp/superpowers/skills/. .claude/skills/
+cp /tmp/superpowers/hooks/run-hook.cmd /tmp/superpowers/hooks/session-start .claude/hooks/
+```
+
+---
+
 ## Known limitations
 
 Deliberately out of scope for phase 1, in rough priority order for phase 2:
@@ -694,6 +853,10 @@ Deliberately out of scope for phase 1, in rough priority order for phase 2:
   reports the failure when they do.
 - **A named bastion needs `ec2:DescribeInstances`.** Names are matched by EC2, so an identity that
   can start a session but cannot describe instances has to point the connection at an ID instead.
+- **Read-only mode reads the script, not the server.** SQL Server has no session switch that refuses
+  writes, so the check is the app's own reading of the T-SQL, and it errs towards refusing: `EXEC`
+  is turned down even for `sp_help`, and a `#temp` table counts as a write like any other. A login
+  that can only read is the guarantee; the setting is the safety net.
 - **The renderer bundle is ~1.7 MB** (CodeMirror and the SQL formatter dominate). Fine for a desktop
   app; worth code-splitting if startup time ever matters.
 - **Query results are capped** at `maxResultRows` (50 000 by default). Rows past the cap are counted

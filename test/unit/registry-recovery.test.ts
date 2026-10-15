@@ -20,6 +20,9 @@ import {
 /** Every fake client built during a test, newest last. */
 const built: FakeClient[] = []
 
+/** While set, a fake client's connect waits on it — a tunnel still coming up. */
+let connectGate: Promise<void> | null = null
+
 class FakeClient {
   listener: ClientStateListener | null = null
   connected = false
@@ -35,8 +38,12 @@ class FakeClient {
     versionString: 'Microsoft SQL Server 2022'
   }
 
-  constructor(public readonly currentConfig: ConnectionConfig) {
+  constructor(public currentConfig: ConnectionConfig) {
     built.push(this)
+  }
+
+  setReadOnly(readOnly: boolean): void {
+    this.currentConfig = { ...this.currentConfig, readOnly }
   }
 
   get isConnected(): boolean {
@@ -44,6 +51,7 @@ class FakeClient {
   }
 
   async connect(): Promise<FakeClient['info']> {
+    if (connectGate) await connectGate
     this.connected = true
     return this.info
   }
@@ -103,6 +111,7 @@ async function openOne(): Promise<{
 
 beforeEach(() => {
   built.length = 0
+  connectGate = null
 })
 
 describe('a connection that drops on its own', () => {
@@ -203,5 +212,122 @@ describe('a connection that drops on its own', () => {
 
     await registry.closeScope('win1')
     expect(registry.status('win1', 'c1').state).toBe('disconnected')
+  })
+})
+
+/**
+ * Whether the open connection refuses writes.
+ *
+ * Said by the registry, from the settings the connection was opened with,
+ * because those are the settings the client enforces: a window that read it
+ * from the saved list instead could show a lock that the open connection is
+ * not keeping, once the list was edited from another window.
+ */
+describe('a read-only connection', () => {
+  it('says it is read-only when it opens, and while it stays open', async () => {
+    const registry = new ConnectionRegistry()
+    const opened = await registry.open('win1', { ...config(), readOnly: true })
+
+    expect(opened.readOnly).toBe(true)
+    expect(registry.status('win1', 'c1').readOnly).toBe(true)
+  })
+
+  it('says so again when it comes back after a drop', async () => {
+    const registry = new ConnectionRegistry()
+    const seen: ConnectionStatus[] = []
+    registry.onStatusChange((_scope, status) => seen.push(status))
+    await registry.open('win1', { ...config(), readOnly: true })
+    const client = built[built.length - 1]
+
+    client.connected = false
+    client.report({ state: 'reconnecting', error: new Error('socket hang up') })
+    client.connected = true
+    client.report({ state: 'connected' })
+
+    expect(seen.at(-1)).toMatchObject({ state: 'connected', readOnly: true })
+  })
+
+  it('says a writable connection is not read-only', async () => {
+    const { registry } = await openOne()
+    expect(registry.status('win1', 'c1').readOnly).toBe(false)
+  })
+})
+
+/**
+ * Read-only switched while connections are open.
+ *
+ * It is one setting on one saved connection, so every window that has that
+ * connection open switches with it, and each is told — the window that did it
+ * and any other one — so no lock stays on screen that is no longer kept.
+ */
+describe('switching read-only on an open connection', () => {
+  function listen(registry: InstanceType<typeof ConnectionRegistry>) {
+    const seen: { scope: string; status: ConnectionStatus }[] = []
+    registry.onStatusChange((scope, status) => seen.push({ scope, status }))
+    return seen
+  }
+
+  it('switches every window that has the connection open, and tells each one', async () => {
+    const registry = new ConnectionRegistry()
+    const seen = listen(registry)
+    await registry.open('win1', config())
+    await registry.open('win2', config())
+    await registry.open('win2', { ...config(), id: 'c2' })
+
+    registry.setReadOnly('c1', true)
+
+    expect(seen.map(({ scope, status }) => [scope, status.connectionId, status.readOnly])).toEqual([
+      ['win1', 'c1', true],
+      ['win2', 'c1', true]
+    ])
+    expect(registry.status('win1', 'c1').readOnly).toBe(true)
+    expect(registry.status('win2', 'c2').readOnly).toBe(false)
+  })
+
+  it('says nothing to a window whose connection is already that way', async () => {
+    const registry = new ConnectionRegistry()
+    const seen = listen(registry)
+    await registry.open('win1', { ...config(), readOnly: true })
+
+    registry.setReadOnly('c1', true)
+    expect(seen).toHaveLength(0)
+  })
+
+  it('keeps saying read-only while a dropped connection is put back', async () => {
+    const { registry, client } = await openOne()
+    client.connected = false
+    client.report({ state: 'reconnecting', error: new Error('socket hang up') })
+
+    registry.setReadOnly('c1', true)
+    expect(registry.status('win1', 'c1')).toMatchObject({ state: 'connecting', readOnly: true })
+  })
+
+  it('leaves alone a connection nobody has open', () => {
+    const registry = new ConnectionRegistry()
+    const seen = listen(registry)
+    expect(() => registry.setReadOnly('c1', true)).not.toThrow()
+    expect(seen).toHaveLength(0)
+  })
+
+  it('reaches a connection still opening, which opens the way it was switched', async () => {
+    const registry = new ConnectionRegistry()
+    let release = (): void => undefined
+    connectGate = new Promise((resolve) => (release = resolve))
+    // Handed the config as it was before the switch, as a slow tunnel would be.
+    const opening = registry.open('win1', config())
+
+    registry.setReadOnly('c1', true)
+    release()
+
+    expect(await opening).toMatchObject({ state: 'connected', readOnly: true })
+    expect(registry.find('win1', 'c1')?.currentConfig.readOnly).toBe(true)
+  })
+
+  it('opens the way it is told when the switch came before it started', async () => {
+    const registry = new ConnectionRegistry()
+    registry.setReadOnly('c1', true)
+
+    // Read afresh for this open, so the config is the later word.
+    expect(await registry.open('win1', config())).toMatchObject({ readOnly: false })
   })
 })

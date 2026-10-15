@@ -30,6 +30,7 @@ import {
   TableStructure,
   TableTrigger,
   DEFAULT_SQLSERVER_OPTIONS,
+  READ_ONLY_CONNECTION,
   SSM_CREDENTIALS_EXPIRED
 } from '../../../shared/types'
 import { serializeRow, deserializeCell } from '../../../shared/serialize'
@@ -44,6 +45,7 @@ import {
   renderColumnType
 } from '../../../shared/sql/builder'
 import { splitBatches } from '../../../shared/sql/statements'
+import { findWrite, findWriteInScript, type WriteStatement } from '../../../shared/sql/readOnly'
 import { SshTunnel } from '../../tunnel/ssh'
 import { SsmTunnel } from '../../tunnel/ssm'
 import { credentialsToEnv, expiresAt, isExpired } from '../../../shared/aws/credentials'
@@ -83,6 +85,24 @@ function codedError(message: string, code: string): Error {
 function isTransportFailure(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error)
   return /socket hang up|connection lost|econnreset|epipe|read econnreset/i.test(message)
+}
+
+/**
+ * What a read-only connection answers with instead of running a script that
+ * writes: the whole script, refused, as a failed statement — so it reads in
+ * the results like any other error, with the line it is about.
+ */
+function readOnlyRefusal(sql: string, write: WriteStatement): StatementResult {
+  const message = `${write.description} — this connection is read-only, so nothing was run.`
+  return {
+    sql,
+    resultSets: [],
+    rowsAffected: [],
+    // Listed with the messages too, the way a failed statement's errors are.
+    messages: [{ kind: 'error', message, lineNumber: write.line }],
+    durationMs: 0,
+    error: { message, code: READ_ONLY_CONNECTION, lineNumber: write.line }
+  }
 }
 
 export function serializeError(error: unknown): SerializedError {
@@ -156,6 +176,12 @@ export class SqlServerClient implements DbClient {
 
   onStateChange(listener: ClientStateListener | null): void {
     this.stateListener = listener
+  }
+
+  setReadOnly(readOnly: boolean): void {
+    // Every check reads the config as it is at the time, and so does the
+    // reconnect after a drop, which keeps whichever way it was left.
+    this.config = { ...this.config, readOnly }
   }
 
   private announce(event: Parameters<ClientStateListener>[0]): void {
@@ -483,6 +509,19 @@ export class SqlServerClient implements DbClient {
     }
   }
 
+  /**
+   * Stops a change on a read-only connection before anything is sent.
+   *
+   * Checked here rather than left to the window, which only hides the
+   * controls: anything that reaches the main process still has to get past
+   * this.
+   */
+  private refuseIfReadOnly(what: string): void {
+    if (this.config.readOnly) {
+      throw codedError(`This connection is read-only, so ${what}.`, READ_ONLY_CONNECTION)
+    }
+  }
+
   private requirePool(): sql.ConnectionPool {
     if (!this.pool?.connected) {
       // A connection that is being reopened will be back on its own, so say
@@ -632,6 +671,14 @@ export class SqlServerClient implements DbClient {
       : splitBatches(text)
 
     if (statements.length === 0) return []
+
+    // The whole script is checked before any of it runs: a script refused
+    // halfway through has done the first half, which is harder to reason
+    // about than a script that has done nothing.
+    if (this.config.readOnly) {
+      const write = options.asSingleBatch ? findWrite(text) : findWriteInScript(text)
+      if (write) return [readOnlyRefusal(text, write)]
+    }
 
     const results: StatementResult[] = []
     for (const statement of statements) {
@@ -836,6 +883,18 @@ export class SqlServerClient implements DbClient {
       limit: request.limit
     })
 
+    // A raw WHERE is the user's own SQL inside ours, and a `;` ends the
+    // SELECT as readily there as anywhere.
+    if (useRaw && this.config.readOnly) {
+      const write = findWrite(select.sql)
+      if (write) {
+        throw codedError(
+          `${write.description} — this connection is read-only, so the filter was not run.`,
+          READ_ONLY_CONNECTION
+        )
+      }
+    }
+
     const statement = await this.executeOne(select.sql, select.params, {
       maxRows: request.limit,
       asSingleBatch: false
@@ -876,6 +935,7 @@ export class SqlServerClient implements DbClient {
 
   /** Applies staged grid edits inside a single transaction. */
   async applyChanges(changeSet: TableChangeSet): Promise<AppliedChanges> {
+    this.refuseIfReadOnly('staged edits cannot be applied')
     const pool = this.requirePool()
     const statements: string[] = []
     let inserted = 0
@@ -948,10 +1008,12 @@ export class SqlServerClient implements DbClient {
   }
 
   async truncateTable(schema: string, table: string): Promise<void> {
+    this.refuseIfReadOnly('no table can be truncated')
     await this.executeOne(`TRUNCATE TABLE ${qualify(schema, table)}`, [], {})
   }
 
   async dropObject(schema: string, name: string, type: 'table' | 'view'): Promise<void> {
+    this.refuseIfReadOnly('nothing can be dropped')
     const keyword = type === 'view' ? 'VIEW' : 'TABLE'
     const result = await this.executeOne(`DROP ${keyword} ${qualify(schema, name)}`, [], {})
     if (result.error) throw Object.assign(new Error(result.error.message), result.error)

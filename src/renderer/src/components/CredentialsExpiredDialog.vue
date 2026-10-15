@@ -8,8 +8,9 @@
  * paste, saves it against the connection, and retries the thing that failed.
  */
 import { computed, nextTick, ref, watch } from 'vue'
+import AwsCredentialsBox from './AwsCredentialsBox.vue'
 import BaseModal from './BaseModal.vue'
-import { parseAwsCredentials, isExpired } from '@shared/aws/credentials'
+import { checkCredentialBlock } from '@shared/aws/credentials'
 import { useConnectionStore } from '../stores/connections'
 import { useCredentialsStore } from '../stores/credentials'
 import { useToastStore } from '../stores/toasts'
@@ -20,7 +21,7 @@ const toasts = useToastStore()
 
 const text = ref('')
 const saving = ref(false)
-const box = ref<HTMLTextAreaElement | null>(null)
+const box = ref<InstanceType<typeof AwsCredentialsBox> | null>(null)
 
 const prompt = computed(() => credentials.prompt)
 
@@ -34,29 +35,12 @@ const profileHint = computed(() => {
   return profile ? `aws sso login --profile ${profile}` : 'aws sso login'
 })
 
-const parsed = computed(() => (text.value.trim() ? parseAwsCredentials(text.value) : null))
-
-/** What is wrong with what has been pasted so far, if anything. */
-const pasteError = computed(() => {
-  const result = parsed.value
-  if (!result) return ''
-  if (!result.credentials) return result.error ?? 'That block could not be read'
-  // Pasting the block that just expired is an easy mistake to make.
-  if (isExpired(result.credentials)) return 'That block has already expired — copy a fresh one'
-  return ''
-})
-
-const pasteSummary = computed(() => {
-  const found = parsed.value?.credentials
-  if (!found) return ''
-  const parts = [found.accessKeyId.slice(0, 4) + '…' + found.accessKeyId.slice(-4)]
-  if (found.region) parts.push(found.region)
-  if (found.expiration) parts.push(`expires ${new Date(found.expiration).toLocaleTimeString()}`)
-  return parts.join(' · ')
-})
+// Pasting the block that just expired is an easy mistake to make, and the
+// check turns it down along with one that cannot be read.
+const check = computed(() => checkCredentialBlock(text.value))
 
 const canSave = computed(
-  () => usesPastedCredentials.value && Boolean(parsed.value?.credentials) && !pasteError.value
+  () => usesPastedCredentials.value && Boolean(check.value.credentials) && !check.value.error
 )
 
 // A dialog that opens with the caret already in the box is one paste from done.
@@ -106,24 +90,14 @@ async function retryOnly(): Promise<void> {
   >
     <p class="expired__why">{{ prompt.message }}</p>
 
-    <label v-if="usesPastedCredentials" class="field">
-      <span class="field__label">Paste a fresh block from the AWS access portal</span>
-      <textarea
-        ref="box"
-        v-model="text"
-        class="textarea expired__box"
-        rows="5"
-        spellcheck="false"
-        autocomplete="off"
-        placeholder="export AWS_ACCESS_KEY_ID=&quot;ASIA…&quot;&#10;export AWS_SECRET_ACCESS_KEY=&quot;…&quot;&#10;export AWS_SESSION_TOKEN=&quot;…&quot;"
-      ></textarea>
-      <span v-if="pasteError" class="field__hint error-text">{{ pasteError }}</span>
-      <span v-else-if="pasteSummary" class="field__hint mono">{{ pasteSummary }}</span>
-      <span v-else class="field__hint">
-        Any of the portal's formats works — bash, PowerShell, cmd, or a credentials-file stanza.
-        It replaces the block saved with this connection.
-      </span>
-    </label>
+    <AwsCredentialsBox
+      v-if="usesPastedCredentials"
+      ref="box"
+      v-model="text"
+      label="Paste a fresh block from the AWS access portal"
+      hint="Any of the portal's formats works — bash, PowerShell, cmd, or a credentials-file stanza. It replaces the block saved with this connection."
+      :rows="5"
+    />
 
     <div v-else class="expired__cli">
       <p>
@@ -156,13 +130,6 @@ async function retryOnly(): Promise<void> {
   font-size: 13px;
   line-height: 1.6;
   color: var(--text-secondary);
-}
-.expired__box {
-  min-height: 96px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.5;
-  resize: vertical;
 }
 .expired__cli p {
   margin: 0 0 10px;

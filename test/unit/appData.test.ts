@@ -130,6 +130,27 @@ describe('connections', () => {
     expect(nonsense.color).toBeUndefined()
   })
 
+  /**
+   * Read-only is a safety setting, so an edit that does not mention it — a
+   * move to another group, a fresh block of AWS credentials — leaves it where
+   * it is, the same contract as the colour.
+   */
+  it('keeps a connection read-only until an edit says otherwise', () => {
+    const saved = appData.saveConnection({ name: 'Prod', readOnly: true })
+    expect(saved.readOnly).toBe(true)
+
+    const moved = appData.saveConnection({ id: saved.id, name: 'Prod', group: 'Live' })
+    expect(moved.readOnly).toBe(true)
+    expect(appData.getConnectionWithSecrets(saved.id)?.readOnly).toBe(true)
+
+    const unlocked = appData.saveConnection({ id: saved.id, name: 'Prod', readOnly: false })
+    expect(unlocked.readOnly).toBe(false)
+  })
+
+  it('makes a new connection writable unless it is asked not to', () => {
+    expect(appData.saveConnection({ name: 'Dev' }).readOnly).toBe(false)
+  })
+
   it('never returns a password to the renderer', () => {
     appData.saveConnection({ name: 'Prod', username: 'sa', password: 'hunter2', savePassword: true })
     const listed = appData.listConnections()[0]
@@ -473,6 +494,11 @@ describe('connections', () => {
     expect(appData.getConnectionWithSecrets(saved.id)!.ssh.host).toBe('bastion')
     expect(appData.getConnectionWithSecrets(copy.id)!.ssh.host).toBe('other-bastion')
     expect(appData.getConnectionWithSecrets(copy.id)!.options.poolMax).toBe(7)
+  })
+
+  it('keeps a duplicated connection read-only', () => {
+    const saved = appData.saveConnection({ name: 'Prod', readOnly: true })
+    expect(appData.duplicateConnection(saved.id)!.readOnly).toBe(true)
   })
 
   it('returns null when duplicating something that is not there', () => {

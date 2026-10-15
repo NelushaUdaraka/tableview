@@ -28,3 +28,8 @@ Thumbs.db
 *.log
 npm-debug.log*
 coverage/
+
+# python bytecode, written when Claude Code runs the UI UX Pro Max skill's
+# search scripts under .claude/skills/
+__pycache__/
+*.pyc

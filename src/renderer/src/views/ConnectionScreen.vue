@@ -9,6 +9,7 @@ import ConnectionForm from '../components/ConnectionForm.vue'
 import ContextMenu, { type MenuEntry } from '../components/ContextMenu.vue'
 import { useConnectionStore } from '../stores/connections'
 import { useCredentialsStore } from '../stores/credentials'
+import { useReadOnlyStore } from '../stores/readOnly'
 import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toasts'
 import { onMenuAction } from '../lib/menuBus'
@@ -19,6 +20,7 @@ import { api } from '../lib/api'
 
 const connections = useConnectionStore()
 const credentials = useCredentialsStore()
+const readOnly = useReadOnlyStore()
 const settings = useSettingsStore()
 const toasts = useToastStore()
 
@@ -321,6 +323,12 @@ function rowMenuItems(connection: SavedConnection): MenuEntry[] {
     { label: 'Connect', action: 'connect' },
     { label: 'Edit…', action: 'edit' },
     { label: 'Duplicate…', action: 'duplicate' },
+    // Switched here rather than in the form: turning it on is one click, and
+    // turning it off asks first, as every read-only toggle does.
+    {
+      label: connection.readOnly ? 'Turn off read-only…' : 'Turn on read-only',
+      action: 'read-only'
+    },
     // No groups yet means nothing to move between; the form makes the first.
     ...(targets.length > 0 ? [{ label: 'Move to', items: targets }] : []),
     { separator: true, label: '' },
@@ -342,6 +350,7 @@ async function onMenuSelect(action: string): Promise<void> {
   if (action === 'connect') await open(connection)
   else if (action === 'edit') startEdit(connection)
   else if (action === 'duplicate') await duplicate(connection)
+  else if (action === 'read-only') await readOnly.setReadOnly(connection, !connection.readOnly)
   else if (action === 'delete') await remove(connection)
   else if (action.startsWith('group:')) await moveToGroup(connection, action.slice(6))
 }
@@ -554,7 +563,19 @@ function relativeTime(iso?: string): string {
             </span>
 
             <div class="row__cell row__cell--wide">
-              <div class="row__name truncate">{{ connection.name }}</div>
+              <div class="row__title">
+                <div class="row__name truncate">{{ connection.name }}</div>
+                <!-- Said before connecting, so nobody opens production expecting
+                     to fix a row in it, or opens it unprotected by mistake. -->
+                <span
+                  v-if="connection.readOnly"
+                  class="badge row__readonly"
+                  title="Read-only: edits and statements that would change the database are refused"
+                >
+                  <AppIcon name="lock" :size="11" />
+                  Read-only
+                </span>
+              </div>
               <div class="row__sub truncate">{{ connection.database || 'master' }}</div>
             </div>
 
@@ -581,6 +602,24 @@ function relativeTime(iso?: string): string {
             </div>
 
             <div class="row__buttons">
+              <!-- Read-only, switched without opening the form or connecting:
+                   on at once, off once asked. On every row, so it is there to
+                   be found; the badge by the name says which way it is. -->
+              <button
+                class="btn btn--sm btn--muted btn--icon row__lock"
+                :class="{ 'btn--armed': connection.readOnly }"
+                :title="
+                  connection.readOnly
+                    ? 'Read-only — click to turn it off'
+                    : 'Make this connection read-only'
+                "
+                :aria-label="`Read-only for ${connection.name}`"
+                :aria-pressed="connection.readOnly === true"
+                @click.stop="readOnly.setReadOnly(connection, !connection.readOnly)"
+                @dblclick.stop
+              >
+                <AppIcon :name="connection.readOnly ? 'lock' : 'lock-open'" :size="15" />
+              </button>
               <button
                 class="btn btn--sm row__connect"
                 :disabled="connections.connectingId === connection.id"
@@ -698,7 +737,7 @@ function relativeTime(iso?: string): string {
 <style scoped>
 /* The seven tracks the header and every row share. */
 .screen {
-  --conn-cols: 64px minmax(0, 1.5fr) minmax(0, 2fr) 92px 92px 140px 136px;
+  --conn-cols: 64px minmax(0, 1.5fr) minmax(0, 2fr) 92px 92px 140px 170px;
   /* Content keeps to a readable measure, centred, however wide the window. */
   --screen-gutter: max(32px, calc((100% - 1120px) / 2));
   display: flex;
@@ -1004,9 +1043,20 @@ function relativeTime(iso?: string): string {
 .row__cell--right {
   text-align: right;
 }
+.row__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .row__name {
+  min-width: 0;
   font-size: 14px;
   font-weight: 600;
+}
+.row__readonly {
+  flex: 0 0 auto;
+  gap: 4px;
 }
 .row__endpoint {
   font-size: 12px;
@@ -1048,7 +1098,8 @@ function relativeTime(iso?: string): string {
 .row:hover .row__connect:not(:disabled):hover {
   background: var(--accent-hover);
 }
-.row__menu {
+.row__menu,
+.row__lock {
   width: 28px;
 }
 .row__menu[aria-expanded='true'] {

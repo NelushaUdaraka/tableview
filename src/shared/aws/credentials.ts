@@ -159,3 +159,69 @@ export function isExpired(credentials: AwsCredentials, now = new Date()): boolea
   const expiry = expiresAt(credentials)
   return expiry ? expiry.getTime() <= now.getTime() : false
 }
+
+/**
+ * The credential block on the clipboard, or why there is not one.
+ *
+ * The main process reads the clipboard and only this crosses to the window:
+ * a paste button that handed over whatever was copied would put someone's
+ * password on screen in a box labelled "AWS credentials" the first time they
+ * clicked it with the wrong thing copied.
+ */
+export function credentialsFromClipboard(text: string): string {
+  const block = text.trim()
+  if (!block) {
+    throw new Error('The clipboard is empty. Copy the block from the AWS access portal first.')
+  }
+  const parsed = parseAwsCredentials(block)
+  if (parsed.credentials) return block
+  // A block missing one line is worth naming; anything else is just not one.
+  if (parsed.found.length > 0 && parsed.error) throw new Error(parsed.error)
+  throw new Error(
+    'The clipboard does not hold AWS credentials. Copy the block with AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from the access portal, then paste again.'
+  )
+}
+
+export interface CredentialBlockCheck {
+  credentials: AwsCredentials | null
+  /** What is wrong with it, phrased for the box it was pasted into. */
+  error?: string
+}
+
+/**
+ * What can be said about a block as it is pasted: nothing yet, what is wrong
+ * with it, or the credentials it holds.
+ *
+ * A block that has already run out is the easy mistake — the tab copied from
+ * an hour ago — so it is turned down here rather than at connect time.
+ */
+export function checkCredentialBlock(text: string, now = new Date()): CredentialBlockCheck {
+  if (!text.trim()) return { credentials: null }
+  const parsed = parseAwsCredentials(text)
+  if (!parsed.credentials) {
+    return { credentials: null, error: parsed.error ?? 'That block could not be read' }
+  }
+  if (isExpired(parsed.credentials, now)) {
+    return {
+      credentials: parsed.credentials,
+      error: 'That block has already expired — copy a fresh one'
+    }
+  }
+  return { credentials: parsed.credentials }
+}
+
+/**
+ * `ASIA************MPLE · eu-west-2 · temporary` — a pasted block described
+ * the way it will be once saved, with nothing secret in it.
+ */
+export function describeCredentials(
+  credentials: AwsCredentials,
+  formatTime: (date: Date) => string = (date) => date.toLocaleTimeString()
+): string {
+  const parts = [maskAccessKeyId(credentials.accessKeyId)]
+  if (credentials.region) parts.push(credentials.region)
+  const expiry = expiresAt(credentials)
+  if (expiry) parts.push(`expires ${formatTime(expiry)}`)
+  else if (isTemporary(credentials)) parts.push('temporary')
+  return parts.join(' · ')
+}

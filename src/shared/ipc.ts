@@ -195,6 +195,7 @@ export const CHANNELS = {
 
   exportToFile: 'export:toFile',
   exportToClipboard: 'export:toClipboard',
+  clipboardAwsCredentials: 'clipboard:awsCredentials',
 
   dialogOpenFile: 'dialog:openFile',
   dialogSaveFile: 'dialog:saveFile',
@@ -331,6 +332,11 @@ export interface RendererApi {
 
   exportToFile(request: ExportRequest): Promise<string | null>
   copyToClipboard(text: string): Promise<void>
+  /**
+   * The AWS credential block on the clipboard. Fails, saying why, when what is
+   * there is not one — so nothing else that was copied reaches the window.
+   */
+  readAwsCredentialsFromClipboard(): Promise<string>
 
   openFile(filters?: { name: string; extensions: string[] }[]): Promise<string | null>
   readTextFile(filePath: string): Promise<string>

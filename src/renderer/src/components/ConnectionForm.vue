@@ -15,6 +15,7 @@ import { isLoopbackHost } from '@shared/hosts'
 import { AWS_REGIONS, describeRegion, isRegionLike } from '@shared/aws/regions'
 import { api } from '../lib/api'
 import AppIcon from './AppIcon.vue'
+import AwsCredentialsBox from './AwsCredentialsBox.vue'
 
 const props = defineProps<{
   connection: SavedConnection | null
@@ -673,23 +674,15 @@ async function browseForKey(): Promise<void> {
             </button>
           </div>
 
-          <label class="field">
-            <span class="field__label">
-              {{ storedCredentials ? 'Replace with a new block' : 'Paste the block from the AWS access portal' }}
-            </span>
-            <textarea
-              v-model="credentialText"
-              class="textarea creds__box"
-              rows="4"
-              spellcheck="false"
-              autocomplete="off"
-              placeholder="export AWS_ACCESS_KEY_ID=&quot;ASIA…&quot;&#10;export AWS_SECRET_ACCESS_KEY=&quot;…&quot;&#10;export AWS_SESSION_TOKEN=&quot;…&quot;"
-            ></textarea>
-            <span class="field__hint">
-              Any of the portal's formats works — bash, PowerShell, cmd, or a credentials-file
-              stanza. Saved with this connection and encrypted; re-paste when they expire.
-            </span>
-          </label>
+          <AwsCredentialsBox
+            v-model="credentialText"
+            :label="
+              storedCredentials
+                ? 'Replace with a new block'
+                : 'Paste the block from the AWS access portal'
+            "
+            hint="Any of the portal's formats works — bash, PowerShell, cmd, or a credentials-file stanza. Saved with this connection and encrypted; re-paste when they expire."
+          />
         </div>
 
         <div class="row">
@@ -1242,10 +1235,6 @@ async function browseForKey(): Promise<void> {
   font-size: 11px;
   color: var(--text-muted);
   margin-top: 2px;
-}
-.creds__box {
-  font-size: 11px;
-  line-height: 1.5;
 }
 .creds__actions {
   display: flex;

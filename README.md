@@ -127,9 +127,15 @@ confirms which identity you are about to connect as.
 
 - **Paste them into the app** (the default). Copy the block straight out of the AWS access portal
   and paste it in — bash `export`, PowerShell `$Env:`, cmd `set`, or a credentials-file stanza are
-  all accepted, quotes and stray semicolons included. The block is **saved with that connection**,
-  encrypted by the same vault that protects database passwords, so connections in different AWS
-  accounts each carry their own. Re-paste when they expire.
+  all accepted, quotes and stray semicolons included. **Paste from clipboard** beside the box does
+  it in one click, in the connection form and in the dialog that asks for fresh credentials when
+  they run out. The clipboard is read in the main process and only a credentials block is handed to
+  the window: with anything else copied — a password, a paragraph — the box stays empty and says
+  why. However the block got there, the line under the box shows what it holds as soon as it is in
+  (`ASIA************MPLE · eu-west-2 · temporary`), or what is wrong with it, rather than leaving
+  that to Save. The block is **saved with that connection**, encrypted by the same vault that
+  protects database passwords, so connections in different AWS accounts each carry their own.
+  Re-paste when they expire.
 - **Let the AWS CLI resolve them** — the normal chain: `--profile`, environment variables, SSO
   cache, `credential_process`, assume-role, instance profile. Use this if you keep profiles in
   `~/.aws/`.
@@ -480,7 +486,7 @@ Three layers, all runnable on Linux:
 
 | Command | What it covers |
 | --- | --- |
-| `npm test` | 805 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh |
+| `npm test` | 816 unit tests — SQL building, T-SQL lexing, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh |
 | `npm run test:integration` | 66 tests against a **real SQL Server 2022** and a **real sshd** |
 | `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
 
@@ -541,12 +547,15 @@ The suites:
   waits for a row written from outside to turn up unprompted, stages an edit and checks it holds
   (and says why) until the edit is discarded, takes the tab away and back, turns it off, and drops
   the table under it to see a failed read switch it off with a word about it
-- **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block,
-  fetches the account's instances and picks the bastion from the list (including the empty answer a
-  wrong region gives), switches the connection to finding that bastion by its Name tag and back, runs the prerequisite check in both its failing and passing states, saves,
-  reopens the connection to confirm the stored summary appears while the secret never reaches the
-  renderer, and opens a second window. `scripts/e2e.sh` writes stand-ins for `aws` and
-  `session-manager-plugin` into `.tmp/bin`, so it needs no AWS account.
+- **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block
+  with *Paste from clipboard* (after checking that something else on the clipboard never reaches
+  the box), fetches the account's instances and picks the bastion from the list (including the
+  empty answer a wrong region gives), switches the connection to finding that bastion by its Name
+  tag and back, runs the prerequisite check in both its failing and passing states, saves, reopens
+  the connection to confirm the stored summary appears while the secret never reaches the renderer,
+  pastes a fresh block into the dialog a run-out one raises, and opens a second window.
+  `scripts/e2e.sh` writes stand-ins for `aws` and `session-manager-plugin` into `.tmp/bin`, so it
+  needs no AWS account.
 
 Screenshots land in `.tmp/`.
 

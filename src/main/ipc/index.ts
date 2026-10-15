@@ -41,7 +41,11 @@ import {
 import { exportFileName, type ImportSummary } from '../../shared/connectionTransfer'
 import { MenuRole } from '../../shared/menu'
 import { EXPORT_EXTENSIONS, exportRows } from '../../shared/export'
-import { credentialsToEnv, parseAwsCredentials } from '../../shared/aws/credentials'
+import {
+  credentialsFromClipboard,
+  credentialsToEnv,
+  parseAwsCredentials
+} from '../../shared/aws/credentials'
 import { ConnectionRegistry } from '../db/registry'
 import { serializeError } from '../db/sqlserver/client'
 import { AppData } from '../storage/appData'
@@ -450,6 +454,12 @@ export function registerIpcHandlers(context: IpcContext): void {
   handle(CHANNELS.exportToClipboard, (_call, text: string) => {
     clipboard.writeText(text)
   })
+
+  // Read here rather than in the window, and only a credential block is
+  // handed over: whatever else is on the clipboard stays there.
+  handle(CHANNELS.clipboardAwsCredentials, async () =>
+    credentialsFromClipboard(await clipboard.readText())
+  )
 
   handle(
     CHANNELS.dialogOpenFile,

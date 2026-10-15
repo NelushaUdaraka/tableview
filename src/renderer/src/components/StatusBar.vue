@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useConnectionStore } from '../stores/connections'
+import { useReadOnlyStore } from '../stores/readOnly'
 import { useSchemaStore } from '../stores/schema'
 import { useTabStore } from '../stores/tabs'
 
@@ -13,6 +14,7 @@ const emit = defineEmits<{
 }>()
 
 const connections = useConnectionStore()
+const readOnly = useReadOnlyStore()
 const schema = useSchemaStore()
 const tabs = useTabStore()
 
@@ -41,6 +43,15 @@ const canReconnect = computed(
     connections.inSession &&
     (status.value?.state === 'disconnected' || status.value?.state === 'error')
 )
+
+/**
+ * Flips the open connection's read-only. Turning it on happens at once;
+ * turning it off asks first, the same question every toggle asks.
+ */
+function toggleReadOnly(): void {
+  const connection = connections.active
+  if (connection) void readOnly.setReadOnly(connection, !connections.readOnly)
+}
 
 /** Where the cursor sits in the active query tab, pushed here by QueryView. */
 const statementLine = computed(() =>
@@ -79,6 +90,28 @@ const version = computed(() => {
       </span>
       <button v-if="canReconnect" class="status__retry" @click="emit('reconnect')">Reconnect</button>
     </div>
+
+    <!-- The switch sits with the connection it belongs to, for the whole
+         session, dropped or not: the connection is still the read-only one
+         while it is being put back. It is labelled either way, so it can be
+         found before it is needed rather than only once it is on. -->
+    <button
+      v-if="connections.inSession && connections.active"
+      class="status__seg status__lock"
+      :class="{ 'status__lock--on': connections.readOnly }"
+      role="switch"
+      :aria-checked="connections.readOnly"
+      :title="
+        connections.readOnly
+          ? 'Read-only: edits, truncate and drop are off, and statements that would change the database are refused. Click to turn it off.'
+          : 'This connection can write. Click to make it read-only.'
+      "
+      @click="toggleReadOnly"
+    >
+      <AppIcon :name="connections.readOnly ? 'lock' : 'lock-open'" :size="12" />
+      Read-only
+      <span class="switch" :class="{ 'switch--on': connections.readOnly }" aria-hidden="true"></span>
+    </button>
 
     <template v-if="status?.state === 'connected'">
       <div class="status__seg status__seg--strong" title="Database">
@@ -170,6 +203,32 @@ const version = computed(() => {
 }
 .status__seg--tunnel {
   gap: 6px;
+}
+/* The read-only switch: its name and padlock quiet while the connection can
+   write, brought forward with the closed padlock while it cannot. */
+.status__lock {
+  gap: 6px;
+  height: 22px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--transition),
+    color var(--transition);
+}
+.status__lock:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+.status__lock--on {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.status__lock--on .icon {
+  color: var(--accent-fg);
 }
 .status__transport {
   display: inline-flex;

@@ -254,6 +254,24 @@ describe('turning one back into a connection', () => {
     })
   })
 
+  // The safety setting is the one a copy on another machine most needs.
+  it('stays read-only on the machine it moves to', () => {
+    const file = JSON.stringify(buildExport([loaded({ readOnly: true })]))
+    expect(toSaveInput(parseExportFile(file).connections[0]).readOnly).toBe(true)
+  })
+
+  it('arrives writable from a file written before read-only existed', () => {
+    const exported: Record<string, unknown> = { ...toExportedConnection(loaded()) }
+    delete exported.readOnly
+    const file = JSON.stringify({
+      kind: CONNECTION_EXPORT_KIND,
+      version: 1,
+      exportedAt: '2024-06-01T09:00:00.000Z',
+      connections: [exported]
+    })
+    expect(toSaveInput(parseExportFile(file).connections[0]).readOnly).toBe(false)
+  })
+
   it('brings no password with it, however the flag reads', () => {
     const input = toSaveInput(toExportedConnection(loaded()))
     expect(input.password).toBeUndefined()

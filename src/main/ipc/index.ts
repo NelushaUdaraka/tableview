@@ -41,7 +41,11 @@ import {
 import { exportFileName, type ImportSummary } from '../../shared/connectionTransfer'
 import { MenuRole } from '../../shared/menu'
 import { EXPORT_EXTENSIONS, exportRows } from '../../shared/export'
-import { credentialsToEnv, parseAwsCredentials } from '../../shared/aws/credentials'
+import {
+  credentialsFromClipboard,
+  credentialsToEnv,
+  parseAwsCredentials
+} from '../../shared/aws/credentials'
 import { ConnectionRegistry } from '../db/registry'
 import { serializeError } from '../db/sqlserver/client'
 import { AppData } from '../storage/appData'
@@ -212,9 +216,13 @@ export function registerIpcHandlers(context: IpcContext): void {
   // -- saved connections ----------------------------------------------------
 
   handle(CHANNELS.connectionsList, () => appData.listConnections())
-  handle(CHANNELS.connectionsSave, (_call, input: Partial<ConnectionConfig> & { name: string }) =>
-    appData.saveConnection(input)
-  )
+  handle(CHANNELS.connectionsSave, (_call, input: Partial<ConnectionConfig> & { name: string }) => {
+    const saved = appData.saveConnection(input)
+    // Read-only holds the moment it is saved, wherever the connection is
+    // open, rather than from the next time it is opened.
+    if (input.readOnly !== undefined) registry.setReadOnly(saved.id, saved.readOnly === true)
+    return saved
+  })
   handle(CHANNELS.connectionsDelete, async (call, id: string) => {
     await registry.close(call.scope, id)
     return appData.deleteConnection(id)
@@ -450,6 +458,12 @@ export function registerIpcHandlers(context: IpcContext): void {
   handle(CHANNELS.exportToClipboard, (_call, text: string) => {
     clipboard.writeText(text)
   })
+
+  // Read here rather than in the window, and only a credential block is
+  // handed over: whatever else is on the clipboard stays there.
+  handle(CHANNELS.clipboardAwsCredentials, async () =>
+    credentialsFromClipboard(await clipboard.readText())
+  )
 
   handle(
     CHANNELS.dialogOpenFile,

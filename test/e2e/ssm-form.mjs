@@ -156,23 +156,44 @@ steps.push({
   blocked: await ev(`document.querySelector('.form__group .error-text')?.textContent?.trim() ?? null`)
 })
 
-await ev(`
-  (() => {
-    const box = document.querySelector('.creds__box')
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
-    setter.call(box, [
-      'export AWS_ACCESS_KEY_ID="ASIAIOSFODNN7EXAMPLE"',
-      'export AWS_SECRET_ACCESS_KEY="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"',
-      'export AWS_SESSION_TOKEN="IQoJb3JpZ2luX2VjEJr//////////wEaCXVzLWVhc3QtMSJH"',
-      'export AWS_DEFAULT_REGION="eu-west-2"'
-    ].join('\\n'))
-    box.dispatchEvent(new Event('input', { bubbles: true }))
-    return box.value.length
-  })()
-`)
-await delay(300)
+// The paste button reads the clipboard in the main process, which hands over
+// a credentials block and nothing else: whatever else was copied stays put.
+const pasteButton = `[...document.querySelectorAll('.credbox__paste')].find(b => b.textContent.includes('Paste from clipboard'))`
+await ev(`window.api.copyToClipboard('hunter2 is not a credentials block')`)
+await ev(`${pasteButton}.click()`)
+await waitFor(
+  `document.querySelector('.credbox__status')?.textContent.includes('does not hold AWS credentials')`,
+  'the clipboard turned down'
+)
 steps.push({
-  step: 'credentials typed',
+  step: 'paste with the wrong thing copied',
+  status: await ev(`document.querySelector('.credbox__status')?.textContent?.replace(/\\s+/g,' ').trim()`),
+  boxStillEmpty: await ev(`document.querySelector('.credbox__box').value === ''`),
+  invalid: await ev(`document.querySelector('.credbox__box').getAttribute('aria-invalid')`)
+})
+if (!(await ev(`document.querySelector('.credbox__box').value === ''`))) {
+  bail('non-credential clipboard text reached the box')
+}
+await shot('02a-clipboard-turned-down')
+
+await ev(`window.api.copyToClipboard(${JSON.stringify([
+  'export AWS_ACCESS_KEY_ID="ASIAIOSFODNN7EXAMPLE"',
+  'export AWS_SECRET_ACCESS_KEY="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"',
+  'export AWS_SESSION_TOKEN="IQoJb3JpZ2luX2VjEJr//////////wEaCXVzLWVhc3QtMSJH"',
+  'export AWS_DEFAULT_REGION="eu-west-2"'
+].join('\n'))})`)
+await ev(`${pasteButton}.click()`)
+await waitFor(
+  `document.querySelector('.credbox__box').value.includes('AWS_SESSION_TOKEN')`,
+  'the pasted block in the box'
+)
+await waitFor(
+  `document.querySelector('.credbox__status--found')?.textContent.includes('ASIA************MPLE')`,
+  'what the pasted block holds'
+)
+steps.push({
+  step: 'credentials pasted from the clipboard',
+  status: await ev(`document.querySelector('.credbox__status')?.textContent?.replace(/\\s+/g,' ').trim()`),
   blockCleared: await ev(`document.querySelector('.form__group .error-text')?.textContent?.trim() ?? null`)
 })
 await shot('02-credentials-pasted')
@@ -355,12 +376,63 @@ steps.push({
   step: 'reopened',
   summary: await ev(`document.querySelector('.creds__key')?.textContent?.trim()`),
   savedAt: await ev(`document.querySelector('.creds__arn')?.textContent?.trim()`),
-  boxEmpty: await ev(`document.querySelector('.creds__box').value === ''`),
+  boxEmpty: await ev(`document.querySelector('.credbox__box').value === ''`),
   secretInDom: await ev(`document.body.innerHTML.includes('wJalrXUtnFEMI')`)
 })
 await shot('07-reopened')
 await ev(`document.querySelector('.modal__close').click()`)
 await delay(400)
+
+// Credentials that have run out are pasted again far more often than they are
+// first set up, so the dialog that asks for fresh ones has the button too. A
+// saved block whose expiry has passed raises it before any AWS call is made.
+await ev(`
+  (async () => {
+    await window.api.saveConnection({
+      name: 'Expired portal block',
+      host: 'db.internal',
+      username: 'sa',
+      password: 'x',
+      savePassword: true,
+      ssm: {
+        enabled: true,
+        credentialSource: 'pasted',
+        instanceId: 'i-0ba5711000fee1dad',
+        credentialsText: [
+          'AWS_ACCESS_KEY_ID=ASIAIOSFODNN7EXAMPLE',
+          'AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+          'AWS_CREDENTIAL_EXPIRATION=2020-01-01T00:00:00Z'
+        ].join('\\n')
+      }
+    })
+  })()
+`)
+await ev('location.reload()')
+await delay(1200)
+await send('Runtime.enable')
+await waitFor(`[...document.querySelectorAll('.row__name')].some(n => n.textContent.trim() === 'Expired portal block')`, 'the expired connection')
+await ev(`[...document.querySelectorAll('.row')].find(r => r.querySelector('.row__name').textContent.trim() === 'Expired portal block').querySelector('.row__connect').click()`)
+await waitFor(`document.querySelector('.modal__title')?.textContent.includes('expired')`, 'the expired-credentials dialog')
+await ev(`window.api.copyToClipboard(${JSON.stringify([
+  'export AWS_ACCESS_KEY_ID="ASIAIOSFODNN7EXAMPLE"',
+  'export AWS_SECRET_ACCESS_KEY="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"',
+  'export AWS_SESSION_TOKEN="IQoJb3JpZ2luX2VjEJr//////////wEaCXVzLWVhc3QtMSJH"',
+  'export AWS_CREDENTIAL_EXPIRATION="2099-01-01T00:00:00Z"'
+].join('\n'))})`)
+const boxFocused = await ev(`document.activeElement === document.querySelector('.modal .credbox__box')`)
+await ev(`document.querySelector('.modal .credbox__paste').click()`)
+await waitFor(`document.querySelector('.modal .credbox__status--found')`, 'the fresh block, read')
+steps.push({
+  step: 'expired credentials, pasted from the clipboard',
+  title: await ev(`document.querySelector('.modal__title')?.textContent?.trim()`),
+  boxFocusedOnOpen: boxFocused,
+  status: await ev(`document.querySelector('.modal .credbox__status')?.textContent?.replace(/\\s+/g,' ').trim()`),
+  saveEnabled: await ev(`![...document.querySelectorAll('.modal .btn')].find(b => b.textContent.includes('Save and retry')).disabled`)
+})
+await shot('08-expired-pasted')
+// Saving would start a session, which this suite has no SSM for.
+await ev(`[...document.querySelectorAll('.modal .btn')].find(b => b.textContent.trim() === 'Cancel').click()`)
+await delay(300)
 
 // A second window must open, and be independent of the first.
 const before = (await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json()).filter(
@@ -377,6 +449,8 @@ await shot('06-saved')
 const rendererErrors = logs.join('').split('\n')
   .filter((l) => /ERROR|Uncaught/i.test(l))
   .filter((l) => !/GPU|gpu_|dbus|libva|Vulkan|EGL|gbm|sandbox|DevTools|Fontconfig|MESA|swiftshader|CertVerif/i.test(l))
+  // The paste with the wrong thing copied deliberately provokes this one.
+  .filter((l) => !l.includes('clipboard:awsCredentials failed'))
 
 console.log(JSON.stringify({ steps, rendererErrors }, null, 2))
 socket.close(); child.kill('SIGKILL'); process.exit(0)

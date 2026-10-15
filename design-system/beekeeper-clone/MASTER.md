@@ -120,6 +120,7 @@ Use the shared classes in `index.css` and the shared components rather than rest
 - **Segmented controls:** `.seg` / `.seg__opt` / `.seg__opt--on` (a lifted thumb, never an accent fill), with `.seg__count` for counts.
 - **Badges:** `.badge`, `.badge--accent`, `.badge--pk` (gold), `.badge--fk` (accent).
 - **Checkbox:** `.checkbox` wrapping a native input.
+- **Switch:** `.switch` (on: `.switch--on`), drawn inside the button that flips it — `role="switch"`, `aria-checked`, and a visible label beside it — for a setting that holds the moment it is flipped, such as the status bar's *Read-only*. A field that waits for *Save* stays a `.checkbox`.
 - **Empty states:** `.empty-state` containing `.empty-state__icon`, `.empty-state__title`, a `<p>` and at most one primary button.
 - **Overlays:** `BaseModal` (kicker, title, subtitle, footer slot), `ContextMenu`, and the toasts store (`info`, `success`, `error`).
 - **Icons:** `lib/icons.ts`, drawn by `components/AppIcon.vue` (24px grid, Lucide-style strokes, decorative by default). Icon-only buttons need an `aria-label`. Never type glyphs such as ✕ ⋮ ▾ ⟳ ⌕; add an icon to `lib/icons.ts` instead.

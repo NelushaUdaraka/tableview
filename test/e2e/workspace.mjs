@@ -144,16 +144,16 @@ record('save connection', { savedId })
 await evaluate('location.reload()')
 await delay(1500)
 await send('Runtime.enable')
-await waitFor(`!!document.querySelector('.card')`, 'saved connection card')
+await waitFor(`!!document.querySelector('.row')`, 'saved connection row')
 record('connection listed', {
-  name: await evaluate(`document.querySelector('.card__title').textContent.trim()`),
-  subtitle: await evaluate(`document.querySelector('.card__sub').textContent.trim()`)
+  name: await evaluate(`document.querySelector('.row__name').textContent.trim()`),
+  subtitle: await evaluate(`document.querySelector('.row__sub').textContent.trim()`)
 })
 const shotConnections = await shot('01-connections')
 
 // --- 2. click Connect ------------------------------------------------------
 await evaluate(`
-  [...document.querySelectorAll('.card__buttons .btn')]
+  [...document.querySelectorAll('.row__buttons .btn')]
     .find(b => b.textContent.includes('Connect')).click()
 `)
 await waitFor(`!!document.querySelector('.workspace')`, 'workspace after connecting', 45000)
@@ -199,7 +199,7 @@ const shotTable = await shot('03-table-data')
 
 // --- 5. structure tab -------------------------------------------------------
 await evaluate(`
-  [...document.querySelectorAll('.table-view__tab')].find(b => b.textContent.includes('Structure')).click()
+  [...document.querySelectorAll('.data__toolbar .seg__opt')].find(b => b.textContent.trim() === 'Structure').click()
 `)
 await waitFor(`document.querySelectorAll('.panel').length > 2`, 'structure panels', 30000)
 record('structure', {
@@ -269,7 +269,7 @@ await evaluate(
 )
 await waitFor(`!!document.querySelector('.screen__actions')`, 'connection screen after disconnect')
 await evaluate(
-  `document.querySelector('.screen__actions .btn--ghost').click()`
+  `document.querySelector('.screen__actions [aria-label="Toggle theme"]').click()`
 )
 await waitFor(`document.documentElement.getAttribute('data-theme') === 'light'`, 'light theme')
 await delay(500)
@@ -281,7 +281,7 @@ const shotLight = await shot('07-light-theme')
 
 // Reconnect and confirm the editor follows the theme too.
 await evaluate(`
-  [...document.querySelectorAll('.card__buttons .btn')].find(b => b.textContent.includes('Connect')).click()
+  [...document.querySelectorAll('.row__buttons .btn')].find(b => b.textContent.includes('Connect')).click()
 `)
 await waitFor(`!!document.querySelector('.cm-editor')`, 'editor after reconnect', 45000)
 await delay(800)

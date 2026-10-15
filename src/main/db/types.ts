@@ -73,6 +73,11 @@ export interface DbClient {
   disconnect(): Promise<void>
   /** Registered by the registry so an unprompted drop reaches the window. */
   onStateChange(listener: ClientStateListener | null): void
+  /**
+   * Turns read-only on or off for the open connection. It holds from the next
+   * statement on, with no reconnect — nothing open in the window is lost.
+   */
+  setReadOnly(readOnly: boolean): void
 
   runScript(text: string, options?: ExecuteOptions): Promise<StatementResult[]>
   cancel(executionId: string): boolean

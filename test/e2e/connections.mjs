@@ -216,15 +216,15 @@ const menuAnchor = (name) => ev(`
   })()
 `).then(JSON.parse)
 
-check('the row shows Connect and nothing else', await ev(`
+check('the row shows its read-only padlock, Connect and nothing else', await ev(`
   JSON.stringify([...${row('Local dev')}.querySelectorAll('.row__buttons .btn')].map((b) => b.textContent.trim() || b.getAttribute('aria-label')))
-`).then(JSON.parse), ['Connect', 'More for Local dev'])
+`).then(JSON.parse), ['Read-only for Local dev', 'Connect', 'More for Local dev'])
 
 await clickOn(menuOf('Local dev'), 'the ⋮ on Local dev')
 await waitFor(`!!document.querySelector('.menu')`, 'the ⋮ menu')
 const rowActions = await menuItemLabels()
 steps.push({ step: 'row menu', actions: rowActions, anchor: await menuAnchor('Local dev') })
-check('its ⋮ carries the rest', rowActions, ['Connect', 'Edit…', 'Duplicate…', 'Delete'])
+check('its ⋮ carries the rest', rowActions, ['Connect', 'Edit…', 'Duplicate…', 'Turn on read-only', 'Delete'])
 check('opened under the button that raised it', await menuAnchor('Local dev'), {
   below: true, reaches: true, onScreen: true
 })

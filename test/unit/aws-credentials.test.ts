@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  checkCredentialBlock,
+  credentialsFromClipboard,
   credentialsToEnv,
+  describeCredentials,
   expiresAt,
   isExpired,
   isTemporary,
@@ -190,6 +193,82 @@ describe('credential metadata', () => {
   it('treats an unknown expiry as not expired', () => {
     expect(isExpired({ accessKeyId: KEY, secretAccessKey: SECRET })).toBe(false)
     expect(expiresAt({ accessKeyId: KEY, secretAccessKey: SECRET })).toBeNull()
+  })
+})
+
+describe('the block on the clipboard', () => {
+  it('hands over a credentials block, without the space around it', () => {
+    const copied = `\n  export AWS_ACCESS_KEY_ID="${KEY}"\nexport AWS_SECRET_ACCESS_KEY="${SECRET}"\n\n`
+    expect(credentialsFromClipboard(copied)).toBe(
+      `export AWS_ACCESS_KEY_ID="${KEY}"\nexport AWS_SECRET_ACCESS_KEY="${SECRET}"`
+    )
+  })
+
+  it('says the clipboard is empty rather than pasting nothing', () => {
+    expect(() => credentialsFromClipboard('  \n ')).toThrow(/clipboard is empty/i)
+  })
+
+  // Whatever else is on it — a password, a paragraph — stays where it is.
+  it('turns down text that holds no AWS keys', () => {
+    expect(() => credentialsFromClipboard('hunter2')).toThrow(/does not hold AWS credentials/i)
+  })
+
+  it('says what a half-copied block is missing', () => {
+    expect(() => credentialsFromClipboard(`AWS_ACCESS_KEY_ID=${KEY}`)).toThrow(
+      /AWS_SECRET_ACCESS_KEY is missing/
+    )
+  })
+})
+
+describe('checking a pasted block', () => {
+  const block = (extra = ''): string =>
+    `AWS_ACCESS_KEY_ID=${KEY}\nAWS_SECRET_ACCESS_KEY=${SECRET}${extra}`
+
+  it('has nothing to say about an empty box', () => {
+    expect(checkCredentialBlock('  ')).toEqual({ credentials: null })
+  })
+
+  it('reads a block it can use', () => {
+    const check = checkCredentialBlock(block())
+    expect(check.error).toBeUndefined()
+    expect(check.credentials?.accessKeyId).toBe(KEY)
+  })
+
+  it('says what is wrong with one it cannot', () => {
+    expect(checkCredentialBlock('not credentials').error).toMatch(/No AWS keys found/)
+  })
+
+  it('turns down a block that has already run out', () => {
+    const expiring = block('\nAWS_CREDENTIAL_EXPIRATION=2026-01-01T00:00:00Z')
+    expect(checkCredentialBlock(expiring, new Date('2026-06-01T00:00:00Z')).error).toMatch(
+      /already expired/
+    )
+    expect(checkCredentialBlock(expiring, new Date('2025-06-01T00:00:00Z')).error).toBeUndefined()
+  })
+})
+
+describe('describing a pasted block', () => {
+  const iso = (date: Date): string => date.toISOString()
+
+  it('masks the key and says the credentials are temporary', () => {
+    expect(
+      describeCredentials({ accessKeyId: KEY, secretAccessKey: SECRET, region: 'eu-west-2' }, iso)
+    ).toBe('ASIA************MPLE · eu-west-2 · temporary')
+  })
+
+  it('says when they run out, when the block says', () => {
+    expect(
+      describeCredentials(
+        { accessKeyId: KEY, secretAccessKey: SECRET, expiration: '2026-06-01T12:00:00Z' },
+        iso
+      )
+    ).toBe('ASIA************MPLE · expires 2026-06-01T12:00:00.000Z')
+  })
+
+  it('says nothing of expiry for a long-lived key', () => {
+    expect(describeCredentials({ accessKeyId: 'AKIAIOSFODNN7EXAMPLE', secretAccessKey: SECRET }, iso)).toBe(
+      'AKIA************MPLE'
+    )
   })
 })
 

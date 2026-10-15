@@ -14,7 +14,9 @@ import { parseAwsCredentials } from '@shared/aws/credentials'
 import { isLoopbackHost } from '@shared/hosts'
 import { AWS_REGIONS, describeRegion, isRegionLike } from '@shared/aws/regions'
 import { api } from '../lib/api'
+import { useReadOnlyStore } from '../stores/readOnly'
 import AppIcon from './AppIcon.vue'
+import AwsCredentialsBox from './AwsCredentialsBox.vue'
 
 const props = defineProps<{
   connection: SavedConnection | null
@@ -73,6 +75,7 @@ function blank(): Partial<ConnectionConfig> & { name: string } {
     password: '',
     domain: '',
     savePassword: true,
+    readOnly: false,
     options: { ...DEFAULT_SQLSERVER_OPTIONS },
     ssh: { ...DEFAULT_SSH_CONFIG },
     ssm: { ...DEFAULT_SSM_CONFIG }
@@ -110,6 +113,7 @@ watch(
       password: '',
       domain: connection.domain ?? '',
       savePassword: connection.savePassword,
+      readOnly: connection.readOnly === true,
       options: { ...DEFAULT_SQLSERVER_OPTIONS, ...connection.options },
       ssh: { ...DEFAULT_SSH_CONFIG, ...connection.ssh, password: '', passphrase: '' },
       ssm: { ...DEFAULT_SSM_CONFIG, ...connection.ssm }
@@ -117,6 +121,23 @@ watch(
   },
   { immediate: true }
 )
+
+const readOnlyPrompt = useReadOnlyStore()
+
+/**
+ * Unticking read-only on a connection saved that way asks first, the same
+ * question every read-only toggle asks; ticking it, or unticking a box ticked
+ * in this sitting, just happens.
+ */
+async function onReadOnlyChange(event: Event): Promise<void> {
+  const box = event.target as HTMLInputElement
+  if (box.checked || !props.connection?.readOnly) {
+    form.readOnly = box.checked
+    return
+  }
+  box.checked = true
+  if (await readOnlyPrompt.confirmWritable(props.connection)) form.readOnly = false
+}
 
 const isWindowsAuth = computed(() => form.authType === 'windows')
 
@@ -620,6 +641,18 @@ async function browseForKey(): Promise<void> {
         <input v-model="form.savePassword" type="checkbox" />
         <span>Remember password (encrypted with the OS keystore when available)</span>
       </label>
+
+      <div class="form__toggle">
+        <label class="checkbox">
+          <input :checked="form.readOnly" type="checkbox" @change="onReadOnlyChange" />
+          <span>Read-only</span>
+        </label>
+        <span class="field__hint form__toggle-hint">
+          Table edits, truncate and drop are switched off, and a statement that would change
+          anything is stopped before it is sent. A safety net for the window you took for
+          staging — the login itself can still write.
+        </span>
+      </div>
     </section>
 
     <!-- Tunnel ---------------------------------------------------------- -->
@@ -673,23 +706,15 @@ async function browseForKey(): Promise<void> {
             </button>
           </div>
 
-          <label class="field">
-            <span class="field__label">
-              {{ storedCredentials ? 'Replace with a new block' : 'Paste the block from the AWS access portal' }}
-            </span>
-            <textarea
-              v-model="credentialText"
-              class="textarea creds__box"
-              rows="4"
-              spellcheck="false"
-              autocomplete="off"
-              placeholder="export AWS_ACCESS_KEY_ID=&quot;ASIA…&quot;&#10;export AWS_SECRET_ACCESS_KEY=&quot;…&quot;&#10;export AWS_SESSION_TOKEN=&quot;…&quot;"
-            ></textarea>
-            <span class="field__hint">
-              Any of the portal's formats works — bash, PowerShell, cmd, or a credentials-file
-              stanza. Saved with this connection and encrypted; re-paste when they expire.
-            </span>
-          </label>
+          <AwsCredentialsBox
+            v-model="credentialText"
+            :label="
+              storedCredentials
+                ? 'Replace with a new block'
+                : 'Paste the block from the AWS access portal'
+            "
+            hint="Any of the portal's formats works — bash, PowerShell, cmd, or a credentials-file stanza. Saved with this connection and encrypted; re-paste when they expire."
+          />
         </div>
 
         <div class="row">
@@ -1055,10 +1080,16 @@ async function browseForKey(): Promise<void> {
         <div class="field" style="flex: 1"></div>
       </div>
 
-      <label class="checkbox">
-        <input v-model="form.options!.readOnlyIntent" type="checkbox" />
-        <span>Read-only intent (route to a readable secondary)</span>
-      </label>
+      <div class="form__toggle">
+        <label class="checkbox">
+          <input v-model="form.options!.readOnlyIntent" type="checkbox" />
+          <span>Read-only intent (route to a readable secondary)</span>
+        </label>
+        <span class="field__hint form__toggle-hint">
+          Where to connect, not what to allow: on its own it stops nothing. Read-only on the
+          General tab is what refuses writes.
+        </span>
+      </div>
     </section>
 
     <footer class="form__foot">
@@ -1182,6 +1213,15 @@ async function browseForKey(): Promise<void> {
 .form__foot .btn {
   height: var(--h-control-lg);
 }
+/* A checkbox with a sentence under it, lined up with the checkbox's label. */
+.form__toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.form__toggle-hint {
+  padding-left: 26px;
+}
 .row {
   display: flex;
   gap: 14px;
@@ -1242,10 +1282,6 @@ async function browseForKey(): Promise<void> {
   font-size: 11px;
   color: var(--text-muted);
   margin-top: 2px;
-}
-.creds__box {
-  font-size: 11px;
-  line-height: 1.5;
 }
 .creds__actions {
   display: flex;

@@ -263,13 +263,23 @@ function onDragEnd(event: DragEvent, tabId: string): void {
   flex: 0 0 auto;
 }
 /* As wide as its tabs, so `+` sits right after the last one; once they no
-   longer fit, the tabs scroll and `+` stays in view at the end. */
+   longer fit, the tabs scroll and `+` stays in view at the end.
+   The divider that closes off the last tab is painted on this ground rather
+   than on the tab: it stays at the strip's visible end while the tabs scroll,
+   so a tab cut off there does not run into `+`, and a tab with a ground of its
+   own — hovered, or the one in front, which draws its own sides — covers it,
+   just as the dividers between tabs give way beside those. */
 .tabbar__scroll {
   display: flex;
   flex: 0 1 auto;
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
+  background-image: linear-gradient(var(--border-subtle), var(--border-subtle));
+  background-position: right center;
+  /* Stopping 11px short of each edge, like the dividers between tabs. */
+  background-size: 1px calc(100% - 22px);
+  background-repeat: no-repeat;
 }
 .tabbar__scroll::-webkit-scrollbar {
   height: 0;
@@ -394,6 +404,7 @@ function onDragEnd(event: DragEvent, tabId: string): void {
   color: var(--text-primary);
 }
 .tabbar__new {
+  position: relative;
   display: grid;
   place-items: center;
   flex: 0 0 auto;
@@ -407,6 +418,22 @@ function onDragEnd(event: DragEvent, tabId: string): void {
   transition:
     background-color var(--transition),
     color var(--transition);
+}
+/* `+` sits in a slot of its own, like a tab, with its 6px margin between it
+   and a divider either side: the one that closes off the last tab, and this
+   one. 7px top and bottom, with its 4px margin, is the 11px the tabs' dividers
+   stop short of the strip's edges. Once the tabs overflow, `+` is pinned to
+   the bar's end and this falls just past it, where the pane clips it: the
+   pane's own edge closes the slot there. */
+.tabbar__new::after {
+  content: '';
+  position: absolute;
+  right: -7px;
+  top: 7px;
+  bottom: 7px;
+  width: 1px;
+  background: var(--border-subtle);
+  pointer-events: none;
 }
 .tabbar__new:hover {
   background: var(--bg-hover-strong);

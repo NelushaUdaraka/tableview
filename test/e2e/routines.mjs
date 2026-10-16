@@ -285,8 +285,8 @@ await delay(1500)
 check((await changesLabel()) === '1 change', 'a partial run moved the baseline')
 
 // --- 9. opening it again shows the same tab ----------------------------------
-// A plain query tab first — the blank one the window opened with, which `+`
-// reuses — and it has no gutter for changes at all.
+// A plain query tab first — `+` opens a new one beside the blank one the
+// window opened with — and it has no gutter for changes at all.
 await ev(`document.querySelector('.tabbar__new').click()`)
 await waitFor(`document.querySelector('.tab--active .tab__title')?.textContent.trim() === 'Query'`, 'a plain query tab')
 const plainGutter = await ev(`!!document.querySelector('.cm-changeGutter')`)
@@ -344,7 +344,7 @@ await ev(`[...document.querySelectorAll('.menu .menu__item')].find(b => b.textCo
 await prompt()
 await promptButton('Cancel')
 await promptGone()
-check((await ev(`document.querySelectorAll('.tab').length`)) === 2, 'Close all went ahead past a Cancel')
+check((await ev(`document.querySelectorAll('.tab').length`)) === tabCount, 'Close all went ahead past a Cancel')
 
 // Discard closes it, and the server keeps what it had.
 await ev(`${tabNamed('usp_e2e_orders')}.querySelector('.tab__close').click()`)

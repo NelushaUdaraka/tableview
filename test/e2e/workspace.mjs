@@ -293,13 +293,55 @@ record('editor theme', {
 })
 const shotLightWorkspace = await shot('08-light-workspace')
 
+// --- 9. `+` sits after the last tab, and opens another query tab each time --
+const strip = () =>
+  evaluate(`(() => {
+    const scroll = document.querySelector('.tabbar__scroll')
+    const visible = scroll.getBoundingClientRect()
+    const bar = document.querySelector('.tabbar').getBoundingClientRect()
+    const plus = document.querySelector('.tabbar__new').getBoundingClientRect()
+    const active = document.querySelector('.tab--active').getBoundingClientRect()
+    const tabs = [...document.querySelectorAll('.tab')]
+    return {
+      tabs: tabs.length,
+      lastActive: tabs.at(-1).classList.contains('tab--active'),
+      gap: Math.round(plus.left - tabs.at(-1).getBoundingClientRect().right),
+      overflowing: scroll.scrollWidth > scroll.clientWidth,
+      plusInView: plus.left >= bar.left && plus.right <= bar.right,
+      activeInView: active.left >= visible.left - 1 && active.right <= visible.right + 1
+    }
+  })()`)
+
+// The workspace reconnected onto one blank query tab; two more beside it.
+await evaluate(`document.querySelector('.tabbar__new').click()`)
+await evaluate(`document.querySelector('.tabbar__new').click()`)
+await waitFor(`document.querySelectorAll('.tab').length === 3`, 'two more query tabs')
+const fewTabs = await strip()
+record('new query tabs', fewTabs)
+if (!fewTabs.lastActive) bail('the new query tab is not the one on screen')
+if (fewTabs.gap < 0 || fewTabs.gap > 12) bail(`+ is ${fewTabs.gap}px from the last tab, not beside it`)
+const shotNewTabs = await shot('09-new-query-tabs')
+
+// Enough of them to overflow the strip: the tabs scroll, `+` stays in view, and
+// so does the tab each click opened.
+for (let i = 0; i < 40 && !(await strip()).overflowing; i += 1) {
+  await evaluate(`document.querySelector('.tabbar__new').click()`)
+  await delay(100)
+}
+const manyTabs = await strip()
+record('overflowing tab strip', manyTabs)
+if (!manyTabs.overflowing) bail('the tab strip never overflowed')
+if (!manyTabs.plusInView) bail('+ scrolled out of view once the tabs overflowed')
+if (!manyTabs.lastActive || !manyTabs.activeInView) bail('the new tab is out of sight past the end of the strip')
+const shotManyTabs = await shot('10-overflowing-tabs')
+
 const rendererErrors = logs
   .join('')
   .split('\n')
   .filter((line) => /ERROR|Uncaught|Failed to load|Refused to/i.test(line))
   .filter((line) => !/GPU|gpu_|dbus|libva|Vulkan|EGL|gbm|sandbox|DevTools listening|Fontconfig|MESA|swiftshader|CertVerif/i.test(line))
 
-console.log(JSON.stringify({ steps, rendererErrors, screenshots: [shotConnections, shotWorkspace, shotTable, shotStructure, shotQuery, shotError, shotLight, shotLightWorkspace] }, null, 2))
+console.log(JSON.stringify({ steps, rendererErrors, screenshots: [shotConnections, shotWorkspace, shotTable, shotStructure, shotQuery, shotError, shotLight, shotLightWorkspace, shotNewTabs, shotManyTabs] }, null, 2))
 
 socket.close()
 child.kill('SIGTERM')

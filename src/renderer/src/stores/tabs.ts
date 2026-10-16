@@ -290,19 +290,11 @@ export const useTabStore = defineStore('tabs', () => {
 
   // --- opening ---------------------------------------------------------------
 
+  /**
+   * Always a new tab, even with a blank one already open: `+` and Ctrl+T are
+   * how a second scratch query gets started beside the first.
+   */
   async function openQuery(connectionId: string, sql = '', title = 'Query'): Promise<void> {
-    const existingUntitled = tabs.value.find(
-      (tab): tab is QueryTab =>
-        tab.kind === 'query' &&
-        tab.connectionId === connectionId &&
-        !tab.dirty &&
-        tab.sql === '' &&
-        // Emptied, but still the routine's: it would save over it when run.
-        !tab.routine
-    )
-    // Reuse a blank tab rather than piling up empties.
-    if (existingUntitled && sql === '') return select(existingUntitled.id)
-
     // The new tab takes the focused pane's slot, so what is there now goes.
     if (!(await canLeave(focusedPane.value?.activeTabId))) return
 

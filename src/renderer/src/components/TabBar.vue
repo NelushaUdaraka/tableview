@@ -8,7 +8,7 @@
  * window entirely — onto another window to move into it, or onto nothing at all
  * to open in a window of their own.
  */
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
 import type { IconName } from '../lib/icons'
@@ -27,6 +27,23 @@ const menu = ref<{ x: number; y: number; id: string } | null>(null)
 
 /** Where a drop would insert, drawn as a rule between two tabs. */
 const dropIndex = ref<number | null>(null)
+
+const scroller = ref<HTMLElement | null>(null)
+
+/**
+ * Keeps the tab on screen in view. One opened into a full strip lands past
+ * its end, and the strip has no scrollbar to go and find it with.
+ */
+watch(
+  () => props.pane.activeTabId,
+  () => {
+    void nextTick(() => {
+      scroller.value
+        ?.querySelector<HTMLElement>('.tab--active')
+        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    })
+  }
+)
 
 const menuItems = computed<MenuEntry[]>(() => {
   if (!menu.value) return []
@@ -161,14 +178,16 @@ function onDragEnd(event: DragEvent, tabId: string): void {
 </script>
 
 <template>
-  <div class="tabbar" :class="{ 'tabbar--focused': tabs.focusedPaneId === pane.id }">
-    <div
-      class="tabbar__scroll"
-      @dragover="onDragOver"
-      @dragleave="onDragLeave"
-      @drop="onDrop"
-      @mousedown="tabs.focusPane(pane.id)"
-    >
+  <!-- The whole bar takes drops, so the room after `+` is still the strip's end. -->
+  <div
+    class="tabbar"
+    :class="{ 'tabbar--focused': tabs.focusedPaneId === pane.id }"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
+    @mousedown="tabs.focusPane(pane.id)"
+  >
+    <div ref="scroller" class="tabbar__scroll">
       <template v-for="(tab, index) in tabs.tabsIn(pane.id)" :key="tab.id">
         <span v-if="dropIndex === index" class="tabbar__drop" aria-hidden="true"></span>
         <button
@@ -243,9 +262,11 @@ function onDragEnd(event: DragEvent, tabId: string): void {
   box-shadow: inset 0 -1px 0 var(--border-subtle);
   flex: 0 0 auto;
 }
+/* As wide as its tabs, so `+` sits right after the last one; once they no
+   longer fit, the tabs scroll and `+` stays in view at the end. */
 .tabbar__scroll {
   display: flex;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;

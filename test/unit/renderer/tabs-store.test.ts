@@ -88,6 +88,41 @@ describe('tab store updates', () => {
 })
 
 /**
+ * A new query tab is a new tab — `+`, Ctrl+T and the empty pane's button each
+ * open one — even with a blank one already open: several scratch queries side
+ * by side is what the tabs are for.
+ */
+describe('opening a query tab', () => {
+  it('opens another blank tab beside the blank one already open', async () => {
+    const tabs = useTabStore()
+    await tabs.openQuery('c1')
+    const first = tabs.activeId!
+
+    await tabs.openQuery('c1')
+
+    const strip = tabs.tabsIn(tabs.panes[0].id).map((tab) => tab.id)
+    expect(strip).toHaveLength(2)
+    expect(strip[0]).toBe(first)
+    // The new one is at the end of the strip, and on screen.
+    expect(tabs.activeId).toBe(strip[1])
+  })
+
+  it('opens it in the pane that has the focus, not where a blank one already is', async () => {
+    const tabs = useTabStore()
+    await tabs.openQuery('c1')
+    await tabs.openTable('c1', 'dbo', 'customers')
+    await tabs.splitTab(tabs.activeId!)
+    const [left, right] = tabs.panes
+
+    await tabs.openQuery('c1')
+
+    expect(tabs.focusedPaneId).toBe(right.id)
+    expect(tabs.tabsIn(right.id).map((tab) => tab.kind)).toEqual(['table', 'query'])
+    expect(tabs.tabsIn(left.id)).toHaveLength(1)
+  })
+})
+
+/**
  * The row panel belongs to the tab showing it, not to the window: a split is
  * two things being compared, and spelling one of them out field by field says
  * nothing about the other.
@@ -561,13 +596,6 @@ describe('a routine\'s tab', () => {
 
     // The same text again is nothing new.
     await tabs.openRoutine('c1', routine, { sql: routine.baseline })
-    expect(tabs.tabs).toHaveLength(2)
-  })
-
-  it('is never taken for a blank query tab to reuse', async () => {
-    const tabs = useTabStore()
-    await tabs.openRoutine('c1', { ...routine, baseline: '' })
-    await tabs.openQuery('c1')
     expect(tabs.tabs).toHaveLength(2)
   })
 

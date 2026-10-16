@@ -99,17 +99,17 @@ export function buildMenuModel(platform: string): MenuModel[] {
   const appMenu: MenuModel[] = isMac
     ? [
         {
-          label: 'Beekeeper Clone',
+          label: 'TableView',
           items: [
-            { label: 'About Beekeeper Clone', role: 'about', nativeOnly: true },
+            { label: 'About TableView', role: 'about', nativeOnly: true },
             SEPARATOR,
             { label: 'Services', role: 'services', nativeOnly: true },
             SEPARATOR,
-            { label: 'Hide Beekeeper Clone', role: 'hide', nativeOnly: true },
+            { label: 'Hide TableView', role: 'hide', nativeOnly: true },
             { label: 'Hide Others', role: 'hideOthers', nativeOnly: true },
             { label: 'Show All', role: 'unhide', nativeOnly: true },
             SEPARATOR,
-            { label: 'Quit Beekeeper Clone', role: 'quit', nativeOnly: true }
+            { label: 'Quit TableView', role: 'quit', nativeOnly: true }
           ]
         }
       ]

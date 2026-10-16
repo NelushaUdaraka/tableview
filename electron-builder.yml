@@ -1,5 +1,6 @@
-appId: com.beekeeperclone.app
-productName: Beekeeper Clone
+appId: com.tableview.app
+# productName is read from package.json, where Electron also takes the name of
+# the app's data folder from; setting it here as well would let the two drift.
 copyright: Copyright © 2026
 
 directories:
@@ -42,7 +43,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Beekeeper Clone
+  shortcutName: TableView
   deleteAppDataOnUninstall: false
   runAfterFinish: true
 
@@ -55,7 +56,7 @@ linux:
   target:
     - AppImage
     - deb
-  maintainer: beekeeper-clone
+  maintainer: TableView
   synopsis: SQL Server client
   description: A cross-platform SQL Server client built with Electron.
 

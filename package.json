@@ -1,9 +1,10 @@
 {
-  "name": "beekeeper-clone",
+  "name": "tableview",
+  "productName": "TableView",
   "version": "0.1.0",
   "description": "A cross-platform SQL client for Microsoft SQL Server, built with Electron and Vue 3.",
   "main": "./out/main/index.js",
-  "author": "beekeeper-clone",
+  "author": "TableView",
   "license": "MIT",
   "private": true,
   "scripts": {

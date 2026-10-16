@@ -1,10 +1,12 @@
-# Beekeeper Clone
+<img src="build/icon.png" width="96" height="96" alt="">
+
+# TableView
 
 A cross-platform SQL client for **Microsoft SQL Server**, built with Electron, Vue 3 and
 TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind the
 `DbClient` seam is written so a second engine slots in without touching the UI.
 
-![Phase 1](https://img.shields.io/badge/phase-1-f0a91d) ![Engine](https://img.shields.io/badge/engine-SQL%20Server-blue)
+![Phase 1](https://img.shields.io/badge/phase-1-7390ff) ![Engine](https://img.shields.io/badge/engine-SQL%20Server-blue)
 
 ---
 
@@ -551,14 +553,28 @@ That produces, in `release/<version>/`:
 
 | Artifact | What it is |
 | --- | --- |
-| `Beekeeper Clone-0.1.0-x64.exe` | NSIS installer (per-user, choosable install directory, shortcuts) |
-| `Beekeeper Clone-0.1.0-portable.exe` | Single-file portable build |
+| `TableView-0.1.0-x64.exe` | NSIS installer (per-user, choosable install directory, shortcuts) |
+| `TableView-0.1.0-portable.exe` | Single-file portable build |
 
 Builds are unsigned by default. To sign, set `CSC_LINK` (path or base64 of a `.pfx`) and
 `CSC_KEY_PASSWORD` before running — electron-builder picks them up automatically.
 
 `npm run build:linux` and `npm run build:unpack` are also available; the latter produces an
 unpacked directory, which is the quickest way to sanity-check packaging.
+
+### Coming from Beekeeper Clone
+
+TableView used to be called Beekeeper Clone. The first time it starts, it copies what the old app
+saved (connections, query history, saved queries, settings and window layout) from
+`%APPDATA%\beekeeper-clone` into its own `%APPDATA%\TableView` (the same two folder names under
+`~/Library/Application Support` on macOS and `~/.config` on Linux), and leaves the old folder as it
+was. Saved passwords come across too, except where macOS's keychain or a Linux desktop keyring
+holds them under the old name; those have to be entered once more. It only copies into a TableView
+that has saved nothing yet, so it never runs twice.
+
+The app ID changed with the name, so Windows installs TableView beside Beekeeper Clone rather than
+over it. Once your connections are there, uninstall Beekeeper Clone. Connection exports it wrote
+still import.
 
 ---
 
@@ -785,7 +801,7 @@ what Vue reactive state is. `lib/api.ts` handles this once for every call site.
 ## Working on the UI
 
 The design tokens and shared controls live in `src/renderer/src/styles/index.css`.
-`design-system/beekeeper-clone/MASTER.md` writes the same system down — palette, type, spacing,
+`design-system/tableview/MASTER.md` writes the same system down — palette, type, spacing,
 components, motion, and what not to do — and is the first thing to read before changing how
 something looks.
 

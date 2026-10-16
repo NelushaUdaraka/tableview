@@ -1,6 +1,6 @@
 /** Translation from the app's connection model into an mssql pool config. */
 import type { config as MssqlConfig } from 'mssql'
-import type { ConnectionConfig } from '../../../shared/types'
+import { DEFAULT_SQLSERVER_OPTIONS, type ConnectionConfig } from '../../../shared/types'
 
 export interface TunnelEndpoint {
   localHost: string
@@ -47,7 +47,7 @@ export function buildMssqlConfig(
     options: {
       encrypt: options.encrypt,
       trustServerCertificate: options.trustServerCertificate,
-      appName: options.applicationName || 'Beekeeper Clone',
+      appName: options.applicationName || DEFAULT_SQLSERVER_OPTIONS.applicationName,
       readOnlyIntent: options.readOnlyIntent,
       // Dates come back as UTC so the renderer can format them predictably.
       useUTC: true,

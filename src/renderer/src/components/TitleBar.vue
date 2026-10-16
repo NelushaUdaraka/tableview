@@ -55,7 +55,7 @@ const title = computed(() => {
   const tab = tabs.active
   if (tab) parts.push(tab.kind === 'table' ? `${tab.schema}.${tab.table}` : tab.title)
   if (connections.active) parts.push(connections.active.name)
-  parts.push('Beekeeper Clone')
+  parts.push('TableView')
   return parts.join(' — ')
 })
 

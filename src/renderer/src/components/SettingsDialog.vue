@@ -124,7 +124,7 @@ const THEMES: { value: 'dark' | 'light' | 'system'; label: string; icon: IconNam
       </label>
 
       <p v-if="settings.appInfo" class="settings__about">
-        Beekeeper Clone {{ settings.appInfo.version }} · Electron
+        TableView {{ settings.appInfo.version }} · Electron
         {{ settings.appInfo.electronVersion }} · Node {{ settings.appInfo.nodeVersion }}<br />
         Data directory: <span class="mono selectable">{{ settings.appInfo.userDataPath }}</span
         ><br />

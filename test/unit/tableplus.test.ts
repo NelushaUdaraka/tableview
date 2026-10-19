@@ -174,6 +174,22 @@ describe('parseTablePlusUrl', () => {
     )
   })
 
+  // A URL never has whitespace inside it — TablePlus writes a space as %20 —
+  // and URL parsing quietly drops line breaks, so text that only starts with a
+  // URL would otherwise run whatever follows into the fields: a second
+  // connection's password into the name, say.
+  it('turns down text with more in it than one URL', () => {
+    for (const text of [
+      'sqlserver://a@h/db1?name=First\nsqlserver://bob:S3cret!@b.example.com/db2?name=Second',
+      'sqlserver://sa:pw@h/appdb\nAWS_SECRET_ACCESS_KEY=abc123',
+      `${WINDOWS_URL}\nthe staging one`,
+      'sqlserver://h/db?name=App DEV'
+    ]) {
+      expect(() => parseTablePlusUrl(text), text).toThrow(new Error(NOT_TABLEPLUS))
+      expect(() => tablePlusUrlFromClipboard(text), text).toThrow(new Error(NOT_TABLEPLUS))
+    }
+  })
+
   it('turns down anything that is not a TablePlus URL', () => {
     for (const text of [
       'hunter2',

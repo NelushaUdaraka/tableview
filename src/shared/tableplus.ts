@@ -130,6 +130,11 @@ function tunnelFrom(url: URL, usesKey: boolean): SshConfig {
  */
 export function parseTablePlusUrl(text: string): TablePlusImport {
   const trimmed = text.trim()
+  // A URL has no whitespace inside it — TablePlus writes a space as %20 — and
+  // URL parsing quietly drops line breaks, so text that only starts with a URL
+  // would run whatever follows it into the fields: another connection's
+  // password into the name, say.
+  if (/\s/.test(trimmed)) throw new Error(NOT_TABLEPLUS)
   const scheme = /^([a-z][a-z0-9.+-]*):\/\//i.exec(trimmed)?.[1].toLowerCase()
   if (!scheme) throw new Error(NOT_TABLEPLUS)
 

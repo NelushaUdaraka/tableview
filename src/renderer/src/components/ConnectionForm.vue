@@ -12,11 +12,13 @@ import type { SsmInstance, SsmPreflight } from '@shared/ipc'
 import { ACCENT_SWATCHES } from '@shared/accent'
 import { parseAwsCredentials } from '@shared/aws/credentials'
 import { isLoopbackHost } from '@shared/hosts'
+import type { TablePlusImport } from '@shared/tableplus'
 import { AWS_REGIONS, describeRegion, isRegionLike } from '@shared/aws/regions'
 import { api } from '../lib/api'
 import { useReadOnlyStore } from '../stores/readOnly'
 import AppIcon from './AppIcon.vue'
 import AwsCredentialsBox from './AwsCredentialsBox.vue'
+import TablePlusPanel from './TablePlusPanel.vue'
 
 const props = defineProps<{
   connection: SavedConnection | null
@@ -25,6 +27,10 @@ const props = defineProps<{
   selectName?: boolean
   /** Groups already in use, offered beside the field that makes new ones. */
   groups?: string[]
+  /** Open a new connection with the TablePlus steps showing rather than folded. */
+  tablePlusOpen?: boolean
+  /** Names already saved, so a paste from TablePlus can say when it repeats one. */
+  savedNames?: string[]
 }>()
 const emit = defineEmits<{
   (event: 'save', value: Partial<ConnectionConfig> & { name: string }): void
@@ -87,17 +93,25 @@ const form = reactive(blank())
 const passwordTouched = ref(false)
 const sshPasswordTouched = ref(false)
 const sshPassphraseTouched = ref(false)
+/** The last paste from TablePlus, for what the form still has to ask about. */
+const fromTablePlus = ref<TablePlusImport | null>(null)
+
+/** Everything back to a blank new connection. */
+function resetForm(): void {
+  Object.assign(form, blank())
+  credentialText.value = ''
+  clearedCredentials.value = false
+  resetInstances()
+  passwordTouched.value = false
+  sshPasswordTouched.value = false
+  sshPassphraseTouched.value = false
+  fromTablePlus.value = null
+}
 
 watch(
   () => props.connection,
   (connection) => {
-    Object.assign(form, blank())
-    credentialText.value = ''
-    clearedCredentials.value = false
-    resetInstances()
-    passwordTouched.value = false
-    sshPasswordTouched.value = false
-    sshPassphraseTouched.value = false
+    resetForm()
     if (!connection) return
 
     Object.assign(form, {
@@ -137,6 +151,21 @@ async function onReadOnlyChange(event: Event): Promise<void> {
   }
   box.checked = true
   if (await readOnlyPrompt.confirmWritable(props.connection)) form.readOnly = false
+}
+
+/**
+ * A connection pasted from TablePlus replaces the whole form, the way a pasted
+ * AWS block replaces its box: two connections half-mixed is worse than either.
+ * A secret counts as typed only when the URL carried one, so a URL with no
+ * password stores none and the connect asks for it.
+ */
+function applyTablePlus(result: TablePlusImport): void {
+  resetForm()
+  Object.assign(form, { ...result.connection, ssh: { ...result.connection.ssh } })
+  passwordTouched.value = result.connection.password !== ''
+  sshPasswordTouched.value = Boolean(result.connection.ssh.password)
+  sshPassphraseTouched.value = Boolean(result.connection.ssh.passphrase)
+  fromTablePlus.value = result
 }
 
 const isWindowsAuth = computed(() => form.authType === 'windows')
@@ -431,6 +460,13 @@ const ssmHostLabel = computed(() =>
 )
 const usesSshPassword = computed(() => form.ssh!.enabled && form.ssh!.authMode === 'password')
 const usesSshKey = computed(() => form.ssh!.enabled && form.ssh!.authMode === 'privateKey')
+/** TablePlus wanted a key file, which never travels in its URL, and none is chosen yet. */
+const keyFileMissing = computed(
+  () =>
+    Boolean(fromTablePlus.value?.keyFileNeeded) &&
+    usesSshKey.value &&
+    !form.ssh!.privateKeyPath?.trim()
+)
 
 const passwordPlaceholder = computed(() =>
   props.connection?.hasSavedPassword && !passwordTouched.value ? '•••••• (saved)' : ''
@@ -534,6 +570,15 @@ async function browseForKey(): Promise<void> {
 
     <!-- General -------------------------------------------------------- -->
     <section v-show="section === 'general'" class="form__section">
+      <TablePlusPanel
+        v-if="!connection"
+        :open="tablePlusOpen ?? false"
+        :name="form.name"
+        :saved-names="savedNames ?? []"
+        :key-file-chosen="Boolean(form.ssh?.privateKeyPath?.trim())"
+        @fill="applyTablePlus"
+      />
+
       <div class="row">
         <label class="field" style="flex: 2">
           <span class="field__label">Connection name</span>
@@ -980,6 +1025,9 @@ async function browseForKey(): Promise<void> {
               <input v-model="form.ssh!.privateKeyPath" class="input" placeholder="~/.ssh/id_ed25519" />
               <button type="button" class="btn" @click="browseForKey">Browse…</button>
             </div>
+            <span v-if="keyFileMissing" class="field__hint warn-text">
+              TablePlus does not put the key file in the URL. Choose it here.
+            </span>
           </label>
           <label class="field">
             <span class="field__label">Key passphrase</span>

@@ -678,6 +678,7 @@ function relativeTime(iso?: string): string {
         :connection="editing"
         :busy="testing"
         :groups="connections.groups"
+        :saved-names="connections.saved.map((entry) => entry.name)"
         :select-name="Boolean(copiedFrom)"
         @save="save"
         @duplicate="saveAsCopy"

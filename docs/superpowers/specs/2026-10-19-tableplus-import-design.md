@@ -118,8 +118,9 @@ paste did:
 | Another database | That's a PostgreSQL connection. TableView only connects to SQL Server. |
 | Name already saved | You already have a connection called "Orders (prod)". Saving adds this one beside it; that one stays as it is. |
 | Key file needed | Choose the SSH key file on the Tunnel tab — TablePlus doesn't put it in the URL. |
+| Sign-in not carried over | This connection signs in with Windows (or Microsoft Entra ID), which TableView can't take from the URL. Set the sign-in by hand. |
 
-The last two can appear alongside the "Filled in" line. Wording is the builder's to polish; the facts
+The last three can appear alongside the "Filled in" line. Wording is the builder's to polish; the facts
 each line states are not.
 
 ### The paste
@@ -156,13 +157,15 @@ The scheme is `sqlserver` or `microsoftsqlserver`; every value is percent-encode
 | database host / port | `host`, `port` | Port absent → 1433. |
 | path | `database` | First path segment, decoded. Absent → empty (the form's default). |
 | `name` | `name` | Decoded. Absent → the host. |
-| `statusColor` (hex, no `#`) | `color` | The nearest non-default swatch in `ACCENT_SWATCHES` (`shared/accent.ts`). Absent or unreadable → no colour. |
-| `env` | `group` | First letter capitalised (`production` → `Production`); custom tags kept as written otherwise. Absent → no group. |
+| `statusColor` (hex, no `#`) | `color` | The nearest non-default swatch in `ACCENT_SWATCHES` (`shared/accent.ts`). Absent or unreadable → no colour. *My call:* the colour TablePlus writes for a connection nobody coloured counts as no colour (identify it from the samples in open question 2). |
+| `env` | `group` | First letter capitalised (`production` → `Production`); custom tags kept as written otherwise. Absent → no group. *My call:* whatever TablePlus writes for a connection nobody tagged counts as no group, so an untouched connection does not start a "Local" group and turn group headings on for the whole list. |
 | `safeModeLevel`, `advancedSafeModeLevel` | `readOnly` | **Open question 1.** |
 | `+ssh` | `ssh.enabled: true`, `ssh.host`, `ssh.port` (absent → 22), `ssh.username` | From the first authority. |
 | ssh password | `ssh.authMode: 'password'`, `ssh.password` | When `usePrivateKey` is not `true` and a password is present. |
 | `usePrivateKey=true` | `ssh.authMode: 'privateKey'`, `ssh.privateKeyPath: ''` | The key's path is not in the URL; the "Key file needed" line shows and the Tunnel tab marks the key field. |
+| `usePrivateKey=true` and an SSH password | `ssh.passphrase` | *My call, to confirm from the samples:* with a key, the password slot is the key's passphrase. |
 | neither a key nor a password | `ssh.authMode: 'agent'` | *My call:* TablePlus falls back to the SSH config/agent in that case. |
+| a sign-in TableView can't hold (Windows sign-in as the current user, Microsoft Entra ID interactive) | `authType: 'sql'`, user and password left empty | *My call:* fill in everything else and say on the status line that the sign-in has to be set by hand, rather than turning the URL down — the person is looking at the form anyway. How TablePlus writes these in the URL comes from the samples. |
 | `tLSMode` | — | *My call:* ignored; the form's defaults (`encrypt` and `trustServerCertificate` on) stand, since TablePlus doesn't publish what its numbers mean. Revisit if open question 2 shows otherwise. |
 | `windowMode`, `driverVersion`, `lazyload`, `schema`, `table`/`view`, filter parameters | — | Ignored. |
 
@@ -182,12 +185,15 @@ says so; Save is not blocked, and saving creates a new connection beside the exi
    `advancedSafeModeLevel` (0–1). The agreed rule — "read-only in TablePlus arrives read-only here" —
    has nothing to map from as stated. Something has to decide which, if any, of those levels makes a
    connection arrive read-only in TableView.
-2. **What a Windows TablePlus URL really looks like.** The docs are written for macOS, and nothing
-   online confirms that the Windows build has *Copy as URL* or names it the same. One real URL from
-   the user's TablePlus on Windows (password and host swapped out) — ideally one plain and one over
-   SSH — would settle the menu wording in the steps, which parameters appear, how safe mode and the
-   colour are written, and whether a connection with no colour of its own still carries a
-   `statusColor`.
+2. **Whether TablePlus for Windows has *Copy as URL*, and what it copies.** The docs are written for
+   macOS. The Windows changelog mentions opening a connection *from* a URL (3.12.9) but never *Copy as
+   URL*. If the Windows build doesn't have it, option A cannot work and the approach has to be
+   decided again — the other two routes (TablePlus's settings files and its `.tableplusconnection`
+   export) are non-goals. If it does, real URLs from the user's TablePlus on Windows (password and
+   host swapped out) settle the menu wording in the steps, the parameter names, how safe mode, tag
+   and colour are written (including for a connection nobody tagged or coloured), whether spaces come
+   as `%20` or `+`, what a key-file SSH connection carries, and how a Windows or Entra ID sign-in is
+   written.
 
 ## Where it fits in the code (suggested; the builder may arrange it differently)
 

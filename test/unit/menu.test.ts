@@ -58,6 +58,11 @@ describe('buildMenuModel', () => {
     expect(view?.items.some((item) => item.action === 'view:toggle-row-panel')).toBe(true)
   })
 
+  it('offers a check for updates from the Help menu', () => {
+    const help = buildMenuModel('win32').find((menu) => menu.label === 'Help')
+    expect(help?.items.some((item) => item.action === 'help:check-updates')).toBe(true)
+  })
+
   it('quits on Windows and Linux but closes on macOS, where the app menu quits', () => {
     const file = (platform: string): MenuItemModel[] =>
       buildMenuModel(platform).find((menu) => menu.label === 'File')!.items

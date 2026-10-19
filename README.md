@@ -491,6 +491,20 @@ is decided by its login, and for a guarantee that means a login that can only re
 intent* on the Advanced tab is a different thing again: it asks an availability group to route the
 connection to a readable secondary, and stops nothing on its own.
 
+**Keeping up to date**
+- **The installed app updates itself.** It looks for a new release shortly after it starts and every
+  four hours after that, downloads one in the background, and says when it is ready: *Restart*
+  installs it there and then, and otherwise it installs the next time TableView quits. Restarting
+  asks about unsaved work first, the way quitting does, and closes the connections before the
+  installer runs.
+- **The portable app says so, and leaves the download to you.** A single exe cannot replace itself
+  while it runs, so it looks just as often and offers the release page instead.
+- **Off is off.** *Update automatically* in Settings is on by default. Turned off, nothing is looked
+  for, downloaded or installed unasked; *Help → Check for Updates*, or *Check now* beside the
+  switch, still asks, and what that finds is fetched and installed like any other update.
+- Releases come from this repository's GitHub releases, published by the release workflow — see
+  [Releasing](#releasing).
+
 **Everything else**
 - Export result sets or whole tables to CSV, TSV, JSON, JSON Lines, SQL `INSERT`s or Markdown —
   with a live preview — to a file or the clipboard
@@ -553,14 +567,51 @@ That produces, in `release/<version>/`:
 
 | Artifact | What it is |
 | --- | --- |
-| `TableView-0.1.0-x64.exe` | NSIS installer (per-user, choosable install directory, shortcuts) |
+| `TableView-Setup-0.1.0.exe` | NSIS installer (per-user, choosable install directory, shortcuts) — the copy that updates itself |
 | `TableView-0.1.0-portable.exe` | Single-file portable build |
+| `latest.yml`, `TableView-Setup-0.1.0.exe.blockmap` | What an installed copy reads to update: the newest version and its checksum, and the block map that lets it download only what changed |
 
 Builds are unsigned by default. To sign, set `CSC_LINK` (path or base64 of a `.pfx`) and
 `CSC_KEY_PASSWORD` before running — electron-builder picks them up automatically.
 
 `npm run build:linux` and `npm run build:unpack` are also available; the latter produces an
-unpacked directory, which is the quickest way to sanity-check packaging.
+unpacked directory, which is the quickest way to sanity-check packaging. None of them publishes
+anything: uploading takes `--publish`, which only the release workflow passes.
+
+### Releasing
+
+`.github/workflows/release.yml` builds and publishes releases. Bump the version and push the tag
+that makes:
+
+```bash
+npm version 0.2.0        # or patch, minor, major: sets package.json and tags v0.2.0
+git push --follow-tags
+```
+
+The workflow then:
+
+1. runs the type check and the unit tests, and stops if the tag does not match `package.json` — the
+   app compares updates against that version, so the two have to agree;
+2. drafts a GitHub release for the tag, with notes generated from what was merged since the last one;
+3. builds the installer and the portable exe on Windows and uploads them to the draft, with
+   `latest.yml` and the block map;
+4. publishes the release. Only then: a draft is invisible to installed copies, so none of them is
+   ever offered a release whose files are still on their way up.
+
+A tag with a pre-release part (`v0.3.0-beta.1`) is published as a pre-release, which the stable app
+never updates to. Running the workflow by hand from the Actions tab builds the same files without
+releasing anything, and keeps them on the run.
+
+**The repository has to be public.** Installed copies read the releases without signing in, and a
+private repository's releases are invisible to them: the check says GitHub has no published release.
+
+**Signing is optional, and once started, has to carry on.** Unsigned builds install and update, but
+Windows SmartScreen warns on the first install. To sign, add two repository secrets: `WIN_CSC_LINK`
+(the `.pfx`, base64-encoded) and `WIN_CSC_KEY_PASSWORD`. A signed copy then accepts only updates
+signed by the same publisher, so a later unsigned release, or one signed with another certificate,
+is downloaded and refused.
+
+Copies built before updating existed have nothing to update them; install the first release by hand.
 
 ### Coming from Beekeeper Clone
 
@@ -584,7 +635,7 @@ Three layers, all runnable on Linux:
 
 | Command | What it covers |
 | --- | --- |
-| `npm test` | 936 unit tests — SQL building, T-SQL lexing, the read-only check, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh, the columns a table shows |
+| `npm test` | 1007 unit tests — SQL building, T-SQL lexing, the read-only check, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh, the columns a table shows, when the app updates itself |
 | `npm run test:integration` | 72 tests against a **real SQL Server 2022** and a **real sshd** |
 | `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
 
@@ -697,6 +748,8 @@ src/
 │   ├── ipc/                  handlers, each wrapped in a result envelope
 │   ├── menu.ts, window.ts    native menu + roles, frameless windows and their state
 │   ├── closeGuard.ts         holds a window's close, and the quit, while it has unsaved work
+│   ├── updater.ts            when to look for a release and what to do with one;
+│   │                         electron-updater does the fetching and installing
 │   └── index.ts
 ├── preload/index.ts          contextBridge façade
 ├── shared/                   used by both sides
@@ -712,6 +765,7 @@ src/
 │   │                         readOnly.ts — what a read-only connection refuses to send
 │   ├── serialize.ts          driver values ⇄ IPC-safe cell values
 │   ├── export.ts             CSV/JSON/SQL/Markdown
+│   ├── updates.ts            the update state both sides share, and where releases live
 │   └── ipcSerialize.ts       strips Vue proxies before they hit contextBridge
 └── renderer/src/             Vue 3 + Pinia
     ├── lib/api.ts            the only place that touches window.api
@@ -726,13 +780,15 @@ src/
     ├── lib/changeTracking.ts the editor's change marks, the peek under a change, and its revert
     ├── lib/runQueryTab.ts    runs a query tab, on screen or not, and says whether it saved a routine
     ├── lib/sortConnections.ts the orders the connection list can be read in
+    ├── lib/updateStatus.ts   the Settings line about updating, and the one button beside it
     ├── lib/connectionGroups.ts the headings the list is filed under
     ├── lib/icons.ts          the one icon set, drawn by components/AppIcon.vue
     ├── lib/modalStack.ts     which open dialog Escape belongs to
     ├── styles/index.css      design tokens for both themes, and the shared controls
     ├── stores/               connections, schema, tabs (and panes), library,
     │                         settings, toasts, busy (the window's progress bar),
-    │                         read-only (the question before one may write again)
+    │                         read-only (the question before one may write again),
+    │                         updates (what a window says about a new release)
     ├── components/           title bar, grid, row panel (and its JSON tree),
     │                         editor, sidebar (and its structure tree), dialogs,
     │                         the toolbar's drop-down panels (a choice menu, the column picker)
@@ -900,6 +956,8 @@ Deliberately out of scope for phase 1, in rough priority order for phase 2:
   writes, so the check is the app's own reading of the T-SQL, and it errs towards refusing: `EXEC`
   is turned down even for `sp_help`, and a `#temp` table counts as a write like any other. A login
   that can only read is the guarantee; the setting is the safety net.
+- **Only Windows builds update themselves.** The release workflow builds for Windows alone, so a
+  Linux or macOS package has no release to update from and does not look for one.
 - **The renderer bundle is ~1.7 MB** (CodeMirror and the SQL formatter dominate). Fine for a desktop
   app; worth code-splitting if startup time ever matters.
 - **Query results are capped** at `maxResultRows` (50 000 by default). Rows past the cap are counted

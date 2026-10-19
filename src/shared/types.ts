@@ -604,6 +604,11 @@ export interface AppSettings {
   /** How the connection screen sorts the saved list, and which way round. */
   connectionSort: ConnectionSortKey
   connectionSortDirection: ConnectionSortDirection
+  /**
+   * Look for a new release on its own, and fetch it. Off leaves updating to
+   * whoever asks for it: nothing is checked, downloaded or installed unasked.
+   */
+  autoUpdate: boolean
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -619,7 +624,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   formatterKeywordCase: 'upper',
   formatterIndent: 2,
   connectionSort: 'created',
-  connectionSortDirection: 'desc'
+  connectionSortDirection: 'desc',
+  autoUpdate: true
 }
 
 export const DEFAULT_SQLSERVER_OPTIONS: SqlServerOptions = {

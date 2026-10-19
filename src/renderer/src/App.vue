@@ -13,7 +13,8 @@ import { useConnectionStore } from './stores/connections'
 import { useSettingsStore } from './stores/settings'
 import { useTabStore } from './stores/tabs'
 import { useToastStore } from './stores/toasts'
-import { dispatchMenuAction } from './lib/menuBus'
+import { useUpdateStore } from './stores/updates'
+import { dispatchMenuAction, onMenuAction } from './lib/menuBus'
 import { applyAccent } from './lib/accent'
 import { openTabFrom } from './lib/detach'
 import { api } from './lib/api'
@@ -22,6 +23,7 @@ const connections = useConnectionStore()
 const settings = useSettingsStore()
 const tabs = useTabStore()
 const toasts = useToastStore()
+const updates = useUpdateStore()
 const ready = ref(false)
 /**
  * Whether this window was opened to hold one tab dragged out of another.
@@ -127,6 +129,7 @@ async function answerCloseRequest(reason: WindowCloseReason): Promise<void> {
 let unsubscribeMenu: (() => void) | null = null
 let unsubscribeAttach: (() => void) | null = null
 let unsubscribeClose: (() => void) | null = null
+let unsubscribeUpdateCheck: (() => void) | null = null
 
 onMounted(async () => {
   // Actions from the native menu join the ones the title bar raises, so views
@@ -135,6 +138,11 @@ onMounted(async () => {
   // Tabs can arrive at any moment: another window is only ever a drag away.
   unsubscribeAttach = api.onAttachTab((incoming) => void adoptTab(incoming))
   unsubscribeClose = api.onCloseRequested((reason) => void answerCloseRequest(reason))
+  // Answered here rather than in a view: the connection screen and the
+  // workspace both have the Help menu, and either may be showing.
+  unsubscribeUpdateCheck = onMenuAction((action) => {
+    if (action === 'help:check-updates') void updates.check({ report: true })
+  })
   try {
     await settings.load()
     await connections.load()
@@ -144,12 +152,15 @@ onMounted(async () => {
   } finally {
     ready.value = true
   }
+  // After the window is up: news of an update can wait for what it is news to.
+  updates.load().catch((error) => toasts.fromError('Could not read the update status', error))
 })
 
 onBeforeUnmount(() => {
   unsubscribeMenu?.()
   unsubscribeAttach?.()
   unsubscribeClose?.()
+  unsubscribeUpdateCheck?.()
 })
 </script>
 

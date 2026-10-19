@@ -14,6 +14,7 @@ import fs from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { BrowserWindow, IpcMainInvokeEvent, app, clipboard, dialog, ipcMain, shell } from 'electron'
 import {
+  AppSettings,
   AppliedChanges,
   ConnectionConfig,
   ConnectionStatus,
@@ -54,10 +55,17 @@ import { chromeState } from '../window'
 import { closeGuard } from '../closeGuard'
 import { checkSsmPrerequisites } from '../tunnel/ssmPreflight'
 import { listSsmInstances } from '../tunnel/ec2Instances'
+import { UpdateController } from '../updater'
 
 export interface IpcContext {
   registry: ConnectionRegistry
   appData: AppData
+  updates: UpdateController
+  /**
+   * Restarts into a downloaded update. It lives in main/index.ts, beside the
+   * quit it is a kind of, because it has to ask every window first.
+   */
+  restartToUpdate: () => void
   /** Falls back to the focused window when a call has no identifiable sender. */
   getWindow: () => BrowserWindow | null
 }
@@ -75,7 +83,7 @@ export function scopeForWindow(window: BrowserWindow | null): string {
 }
 
 export function registerIpcHandlers(context: IpcContext): void {
-  const { registry, appData, getWindow } = context
+  const { registry, appData, updates, restartToUpdate, getWindow } = context
 
   // A connection that drops on its own has no call to return to, so the
   // registry reports it here and it is delivered to the window that owns it.
@@ -429,7 +437,18 @@ export function registerIpcHandlers(context: IpcContext): void {
   // -- settings -------------------------------------------------------------
 
   handle(CHANNELS.settingsGet, () => appData.getSettings())
-  handle(CHANNELS.settingsUpdate, (_call, patch) => appData.updateSettings(patch))
+  handle(CHANNELS.settingsUpdate, (_call, patch: Partial<AppSettings>) => {
+    const settings = appData.updateSettings(patch)
+    // The switch takes effect at once: checks start or stop with it.
+    updates.setEnabled(settings.autoUpdate)
+    return settings
+  })
+
+  // -- updates --------------------------------------------------------------
+
+  handle(CHANNELS.updatesState, () => updates.state)
+  handle(CHANNELS.updatesCheck, () => updates.check())
+  handle(CHANNELS.updatesInstall, () => restartToUpdate())
 
   // -- export & files -------------------------------------------------------
 

@@ -34,10 +34,27 @@ win:
       arch: [x64]
   artifactName: ${productName}-${version}-${arch}.${ext}
   # Unsigned builds are fine for local use; set CSC_LINK / CSC_KEY_PASSWORD
-  # to sign, and electron-builder will pick them up automatically.
+  # (or WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD, which the release workflow reads
+  # from secrets) to sign, and electron-builder will pick them up automatically.
   signAndEditExecutable: true
 
+# Releases are published to GitHub, and that is where the app looks for new
+# ones: electron-builder writes this section into the installed app as
+# resources/app-update.yml, and src/shared/updates.ts links to the same
+# repository's release pages. Publishing only happens with `--publish`, which
+# the release workflow passes; a local build:win never uploads anything.
+publish:
+  provider: github
+  owner: NelushaUdaraka
+  repo: tableview
+  # A release electron-builder creates itself starts as a draft, which no
+  # installed copy can see. The workflow drafts the release first anyway, and
+  # publishes it once every file is up — so nobody is offered half a release.
+  releaseType: draft
+
 nsis:
+  # "Setup" in the name, so the release page says which download installs.
+  artifactName: ${productName}-Setup-${version}.${ext}
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

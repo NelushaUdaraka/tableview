@@ -1,6 +1,8 @@
 /** Electron main process entry point. */
 import path from 'node:path'
 import { BrowserWindow, Menu, app, shell } from 'electron'
+import { autoUpdater } from 'electron-updater'
+import { CHANNELS } from '../shared/ipc'
 import { ConnectionRegistry } from './db/registry'
 import { AppData } from './storage/appData'
 import { createVault } from './storage/crypto'
@@ -9,6 +11,7 @@ import { registerIpcHandlers, scopeForWindow, setWindowFactory, setWindowLocator
 import { buildMenu } from './menu'
 import { WindowManager } from './window'
 import { closeGuard } from './closeGuard'
+import { UpdateController, updateMode } from './updater'
 
 // One process owns the settings files; a second launch focuses the existing
 // window rather than competing for them. Extra windows come from File → New
@@ -32,6 +35,25 @@ if (!app.requestSingleInstanceLock()) {
 
 const registry = new ConnectionRegistry()
 let windows: WindowManager | null = null
+let updates: UpdateController | null = null
+
+/**
+ * Restarts into a downloaded update.
+ *
+ * The installer closes whatever is still running, and it does not ask. So
+ * unsaved work is asked about first, the way a quit asks, and the connections
+ * are closed before the installer starts rather than racing it on the way
+ * out: an SSM session cut off mid-close leaves its plugin process behind.
+ */
+async function restartToUpdate(): Promise<void> {
+  if (updates?.state.status !== 'ready') return
+  const mayGo = (): boolean => closeGuard.mayQuit(windows?.all ?? [], () => void restartToUpdate())
+  if (!mayGo()) return
+  await registry.closeAll()
+  // Anything left unsaved while the connections were closing is asked about too.
+  if (!mayGo()) return
+  updates.install()
+}
 
 function createWindow(position?: { x: number; y: number }): BrowserWindow | null {
   if (!windows) return null
@@ -70,9 +92,23 @@ void app.whenReady().then(async () => {
 
   windows = new WindowManager(userDataDir)
 
+  updates = new UpdateController({
+    mode: updateMode({ isPackaged: app.isPackaged, platform: process.platform, env: process.env }),
+    enabled: appData.getSettings().autoUpdate,
+    updater: () => autoUpdater,
+    // Every window says how updating is going, so every window is told.
+    onChange: (state) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send(CHANNELS.eventUpdateState, state)
+      }
+    }
+  })
+
   registerIpcHandlers({
     registry,
     appData,
+    updates,
+    restartToUpdate: () => void restartToUpdate(),
     getWindow: () => windows?.current ?? null
   })
   setWindowFactory(createWindow)
@@ -82,6 +118,7 @@ void app.whenReady().then(async () => {
 
   Menu.setApplicationMenu(buildMenu(() => windows?.current ?? null, createWindow))
   createWindow()
+  updates.start()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

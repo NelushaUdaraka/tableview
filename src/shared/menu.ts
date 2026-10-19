@@ -38,6 +38,7 @@ export type MenuAction =
   | 'view:focus-filter'
   | 'schema:refresh'
   | 'help:shortcuts'
+  | 'help:check-updates'
 
 /**
  * Handled by the main process. These mirror Electron's menu roles, because the
@@ -218,7 +219,9 @@ export function buildMenuModel(platform: string): MenuModel[] {
         {
           label: 'SQL Server Documentation',
           link: 'https://learn.microsoft.com/sql/t-sql/language-reference'
-        }
+        },
+        SEPARATOR,
+        { label: 'Check for Updates…', action: 'help:check-updates' }
       ]
     }
   ]

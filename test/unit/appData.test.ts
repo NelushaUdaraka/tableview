@@ -800,4 +800,19 @@ describe('settings', () => {
     expect(reopened.getSettings().theme).toBe('light')
     expect(reopened.getSettings().pageSize).toBeGreaterThan(0)
   })
+
+  // Updating is on unless someone turns it off — including for everyone whose
+  // settings were written before the switch existed.
+  it('updates automatically by default, for old settings files too', () => {
+    expect(appData.getSettings().autoUpdate).toBe(true)
+    fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ theme: 'light' }))
+    const reopened = new AppData(dir, new LocalKeyVault(path.join(dir, 'secret.key')))
+    expect(reopened.getSettings().autoUpdate).toBe(true)
+  })
+
+  it('keeps automatic updates off once they are turned off', () => {
+    appData.updateSettings({ autoUpdate: false })
+    const reopened = new AppData(dir, new LocalKeyVault(path.join(dir, 'secret.key')))
+    expect(reopened.getSettings().autoUpdate).toBe(false)
+  })
 })

@@ -152,6 +152,20 @@ describe('nearestSwatch', () => {
     expect(nearestSwatch('3e63dd')?.label).toBe('Blue') // never the empty default swatch
   })
 
+  // Red is the colour people give production; it has to arrive red, however
+  // bright or dark TablePlus's red was, and never as orange or amber.
+  it('keeps a red red', () => {
+    for (const red of ['#FF2600', '941100', '8B0000', 'FF7E79']) {
+      expect(nearestSwatch(red)?.label, red).toBe('Red')
+    }
+  })
+
+  it('files a colour with no hue of its own under the neutral swatch', () => {
+    for (const grey of ['000000', 'FFFFFF', '808080', '5E5E5E', 'C0C0C0']) {
+      expect(nearestSwatch(grey)?.label, grey).toBe('Slate')
+    }
+  })
+
   it('has nothing to offer for something that is not a colour', () => {
     for (const value of ['', 'blue', '12345', undefined, null]) expect(nearestSwatch(value)).toBeNull()
   })

@@ -87,28 +87,59 @@ export function normalizeHex(value: string | undefined | null): string | null {
 }
 
 /**
+ * A colour's chroma and hue angle in OKLCH, where a hue reads the same however
+ * light or dark the colour is.
+ */
+function chromaAndHue({ r, g, b }: Rgb): { chroma: number; hue: number } {
+  const linear = (value: number): number => {
+    const c = value / 255
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }
+  const [lr, lg, lb] = [linear(r), linear(g), linear(b)]
+  const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb)
+  const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb)
+  const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb)
+  const green = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s
+  const blue = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s
+  return {
+    chroma: Math.hypot(green, blue),
+    hue: ((Math.atan2(blue, green) * 180) / Math.PI + 360) % 360
+  }
+}
+
+/** Below this chroma a colour has no hue worth matching: a grey, black or white. */
+const NEUTRAL_CHROMA = 0.04
+
+/**
  * The offered swatch a colour from elsewhere looks most like.
  *
  * A colour brought in with a connection — TablePlus's status colour, say — was
- * never checked against these grounds, so it lands on the nearest swatch and
- * takes that swatch's guarantees with it. Never the default: a connection that
- * arrives with a colour of its own should not arrive looking like one without.
+ * never checked against these grounds, so it lands on a swatch and takes that
+ * swatch's guarantees with it. Never the default: a connection that arrives
+ * with a colour of its own should not arrive looking like one without.
+ *
+ * Matched by hue, not by distance in RGB, which sent a bright red to Orange, a
+ * dark red to Amber and black to Green — and red is the colour people give
+ * production. A colour with no hue to speak of goes to the neutral swatch.
  */
 export function nearestSwatch(value: string | undefined | null): AccentSwatch | null {
   const colour = parseHex(value)
   if (!colour) return null
-  let nearest: AccentSwatch | null = null
-  let best = Infinity
-  for (const swatch of ACCENT_SWATCHES) {
+  const { chroma, hue } = chromaAndHue(colour)
+  const offered = ACCENT_SWATCHES.flatMap((swatch) => {
     const rgb = parseHex(swatch.hex)
-    if (!rgb) continue
-    const distance = Math.hypot(colour.r - rgb.r, colour.g - rgb.g, colour.b - rgb.b)
-    if (distance < best) {
-      best = distance
-      nearest = swatch
-    }
+    return rgb ? [{ swatch, ...chromaAndHue(rgb) }] : []
+  })
+  if (chroma < NEUTRAL_CHROMA) {
+    return offered.reduce((best, next) => (next.chroma < best.chroma ? next : best)).swatch
   }
-  return nearest
+  const apart = (angle: number): number => {
+    const turn = Math.abs(angle - hue) % 360
+    return Math.min(turn, 360 - turn)
+  }
+  return offered
+    .filter((entry) => entry.chroma >= NEUTRAL_CHROMA)
+    .reduce((best, next) => (apart(next.hue) < apart(best.hue) ? next : best)).swatch
 }
 
 function toHex({ r, g, b }: Rgb): string {

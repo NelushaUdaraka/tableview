@@ -3,7 +3,8 @@
  *
  * The button is always the next step and never more than one: look for an
  * update, fetch one that was found, restart into one that is ready — or, for
- * the portable app, which cannot install anything, go and download it.
+ * a copy that does not install updates itself (the portable exe, the .deb),
+ * go and download it.
  */
 import type { UpdateState } from '@shared/updates'
 
@@ -20,7 +21,7 @@ export const UPDATE_ACTION_LABELS: Record<UpdateAction, string> = {
 export function nextUpdateAction(state: UpdateState): UpdateAction | null {
   if (state.mode === 'unsupported') return null
   if (state.status === 'ready') return 'restart'
-  if (state.status === 'available') return state.mode === 'portable' ? 'download' : 'get'
+  if (state.status === 'available') return state.mode === 'notify' ? 'download' : 'get'
   return 'check'
 }
 
@@ -32,7 +33,7 @@ export function updateInProgress(state: UpdateState): boolean {
 /** Where updating stands, in a line. */
 export function updateSummary(state: UpdateState): string {
   if (state.mode === 'unsupported') {
-    return 'This build does not update itself. The Windows installer and the portable app do.'
+    return 'This build does not update itself. Copies downloaded from a TableView release do.'
   }
   switch (state.status) {
     case 'idle':

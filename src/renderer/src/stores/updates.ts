@@ -24,7 +24,7 @@ export const useUpdateStore = defineStore('updates', () => {
 
   /** An update waiting on the reader: to be installed, or downloaded by hand. */
   function isNews(next: UpdateState): boolean {
-    return next.status === 'ready' || (next.status === 'available' && next.mode === 'portable')
+    return next.status === 'ready' || (next.status === 'available' && next.mode === 'notify')
   }
 
   function announce(next: UpdateState): void {
@@ -42,7 +42,7 @@ export const useUpdateStore = defineStore('updates', () => {
       toasts.push(
         'info',
         `TableView ${version} is available`,
-        'The portable app cannot update itself. Download the new one from its release page.',
+        'This copy does not update itself. Download the new one from its release page.',
         { action: { label: 'Download', run: () => download(version) } }
       )
     }
@@ -58,7 +58,7 @@ export const useUpdateStore = defineStore('updates', () => {
     if (next.mode === 'unsupported') {
       toasts.info(
         'This copy of TableView does not update itself',
-        'Updates come to the Windows installer and the portable app.'
+        'Only copies downloaded from a TableView release look for updates.'
       )
       return
     }

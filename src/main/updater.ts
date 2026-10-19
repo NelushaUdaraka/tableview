@@ -5,11 +5,13 @@
  * reads them from there. What is decided here is when to look, what to do with
  * what turns up, and what the windows are told about it:
  *
- * - The installed app looks shortly after it starts and every four hours after
- *   that, fetches a newer release in the background, and installs it on
- *   restart — or on quit, for whoever never gets round to restarting.
- * - The portable exe looks just as often but only says what it found. Nothing
- *   can replace the exe it is running from, so the download is the reader's.
+ * - A copy that can update itself — the Windows install and the AppImage —
+ *   looks shortly after it starts and every four hours after that, fetches a
+ *   newer release in the background, and installs it on restart, or on quit
+ *   for whoever never gets round to restarting.
+ * - The portable exe and the .deb look just as often but only say what they
+ *   found. Nothing can replace the exe the portable app is running from, and
+ *   installing a package is its owner's business, so the download is theirs.
  * - With automatic updates off nothing is looked for or fetched unasked. A
  *   check somebody asks for still goes ahead, and what it finds is fetched and
  *   installed like any other update: asking was the point.
@@ -47,17 +49,42 @@ const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
 /**
  * Which kind of copy this is.
  *
- * Releases are only built for Windows, and a development build has no
- * installed copy to replace. The portable exe is told apart by its launcher,
- * which unpacks the app somewhere temporary and says where it was run from.
+ * Releases are built for Windows and Linux, and a development build has no
+ * installed copy to replace. The rest is told by what each package leaves
+ * behind: the portable exe's launcher and the AppImage's runtime both say
+ * where they were run from, and the .deb carries a `package-type` marker in
+ * its resources (`packageType`). An AppImage is asked first, because the .deb
+ * build writes its marker into the same folder the AppImage is packed from.
  */
 export function updateMode(app: {
   isPackaged: boolean
   platform: string
   env: Record<string, string | undefined>
+  execPath: string
+  packageType?: string
 }): UpdateMode {
-  if (!app.isPackaged || app.platform !== 'win32') return 'unsupported'
-  return app.env.PORTABLE_EXECUTABLE_DIR ? 'portable' : 'installed'
+  if (!app.isPackaged) return 'unsupported'
+  if (app.platform === 'win32') return app.env.PORTABLE_EXECUTABLE_DIR ? 'notify' : 'self'
+  if (app.platform === 'linux') {
+    if (runningAppImage(app.env, app.execPath)) return 'self'
+    if (app.packageType === 'deb') return 'notify'
+  }
+  return 'unsupported'
+}
+
+/**
+ * Whether this copy is running from an AppImage — its own, not one that
+ * started it.
+ *
+ * The AppImage runtime says which file it ran (APPIMAGE) and where it mounted
+ * it (APPDIR), and whatever it starts inherits both: a .deb opened from an
+ * AppImage terminal carries the terminal's. The updater replaces the file
+ * APPIMAGE names, so it must only be believed when this executable is inside
+ * the mount it describes.
+ */
+export function runningAppImage(env: Record<string, string | undefined>, execPath: string): boolean {
+  const mount = env.APPDIR?.replace(/\/+$/, '')
+  return Boolean(env.APPIMAGE && mount && execPath.startsWith(`${mount}/`))
 }
 
 /** What a failure is called, for the failures worth naming. */
@@ -66,7 +93,9 @@ export const UPDATE_ERRORS = {
   noRelease: 'GitHub has no published release of TableView yet.',
   noUpdateFile: 'The latest release on GitHub is missing its update file.',
   damaged: 'The update did not download intact. Try again.',
-  unsigned: 'The update is not signed by TableView’s publisher, so it was not installed.'
+  unsigned: 'The update is not signed by TableView’s publisher, so it was not installed.',
+  notWritable:
+    'The update could not be installed: TableView’s own file or folder cannot be written to. Download the new version from its release page instead.'
 } as const
 
 const OFFLINE_CODES = new Set([
@@ -108,6 +137,10 @@ export function describeUpdateError(error: unknown): string {
       return UPDATE_ERRORS.damaged
     case 'ERR_UPDATER_INVALID_SIGNATURE':
       return UPDATE_ERRORS.unsigned
+    // An AppImage replaces its own file, which needs its folder writable.
+    case 'EACCES':
+    case 'EPERM':
+      return UPDATE_ERRORS.notWritable
   }
   // An empty feed has no code of its own, only the missing element's.
   if (message.startsWith('No published versions')) return UPDATE_ERRORS.noRelease
@@ -207,7 +240,7 @@ export class UpdateController {
     if (!this.updater) return this.current
     // Found by a check that was not to fetch it — the switch went off while it
     // was out — and asked for now.
-    if (this.current.status === 'available' && this.mode === 'installed') {
+    if (this.current.status === 'available' && this.mode === 'self') {
       this.fetch(true)
       return this.current
     }
@@ -219,12 +252,16 @@ export class UpdateController {
   /**
    * Restarts into the downloaded update: silently, since the installer's
    * pages are for a first install, and running the app again afterwards.
-   * False when there is nothing to install.
+   *
+   * False when there is nothing to install, or when installing failed there
+   * and then — an AppImage whose folder cannot be written to, say. Such a
+   * failure is reported through `error` before electron-updater returns, and
+   * the app does not quit.
    */
   install(): boolean {
     if (!this.updater || this.current.status !== 'ready') return false
     this.updater.quitAndInstall(true, true)
-    return true
+    return this.current.status === 'ready'
   }
 
   private async look(asked: boolean): Promise<void> {
@@ -236,7 +273,7 @@ export class UpdateController {
       // Already reported through the updater's `error` event.
       return
     }
-    if (found && this.mode === 'installed' && (asked || this.enabled)) this.fetch(asked)
+    if (found && this.mode === 'self' && (asked || this.enabled)) this.fetch(asked)
   }
 
   private fetch(asked: boolean): void {
@@ -254,7 +291,7 @@ export class UpdateController {
 
   private syncInstallOnQuit(): void {
     if (!this.updater) return
-    this.updater.autoInstallOnAppQuit = this.mode === 'installed' && (this.enabled || this.asked)
+    this.updater.autoInstallOnAppQuit = this.mode === 'self' && (this.enabled || this.asked)
   }
 
   /** An update has been found and is waiting on somebody. */

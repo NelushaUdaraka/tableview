@@ -18,7 +18,7 @@ const updates = useUpdateStore()
 
 const updateAction = computed(() => nextUpdateAction(updates.state))
 const updateHint = computed(() =>
-  updates.state.mode === 'portable'
+  updates.state.mode === 'notify'
     ? 'Looks for a new release when TableView starts and every four hours, and says when there is one to download.'
     : 'Looks for a new release when TableView starts and every four hours, downloads it in the background, and installs it when you restart or quit.'
 )

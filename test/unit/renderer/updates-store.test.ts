@@ -2,9 +2,9 @@
  * What a window says about updating, and when.
  *
  * The main process decides everything; the window decides what is worth
- * interrupting the reader for. An update ready to install is, once; a portable
- * copy that has found a newer release is, once — with a way to the download,
- * since it cannot install anything itself. A check from the Help menu always
+ * interrupting the reader for. An update ready to install is, once; a copy that
+ * does not install updates itself (the portable exe, the .deb) finding a newer
+ * release is, once — with a way to the download. A check from the Help menu always
  * gets an answer, because somebody is waiting for one.
  */
 import { createPinia, setActivePinia } from 'pinia'
@@ -33,12 +33,12 @@ vi.mock('../../../src/renderer/src/lib/api', () => ({
 const { useUpdateStore } = await import('../../../src/renderer/src/stores/updates')
 const { useToastStore } = await import('../../../src/renderer/src/stores/toasts')
 
-const ready: UpdateState = { mode: 'installed', status: 'ready', version: '0.2.0' }
+const ready: UpdateState = { mode: 'self', status: 'ready', version: '0.2.0' }
 
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
-  getUpdateState.mockResolvedValue({ mode: 'installed', status: 'idle' })
+  getUpdateState.mockResolvedValue({ mode: 'self', status: 'idle' })
   installUpdate.mockResolvedValue(undefined)
   openExternal.mockResolvedValue(undefined)
 })
@@ -49,7 +49,7 @@ describe('news of an update', () => {
     const toasts = useToastStore()
     await updates.load()
 
-    pushState({ mode: 'installed', status: 'downloading', version: '0.2.0', percent: 60 })
+    pushState({ mode: 'self', status: 'downloading', version: '0.2.0', percent: 60 })
     expect(toasts.toasts).toEqual([])
 
     pushState(ready)
@@ -61,8 +61,8 @@ describe('news of an update', () => {
     expect(installUpdate).toHaveBeenCalledTimes(1)
   })
 
-  it('points the portable reader at the download, and never offers a restart', async () => {
-    getUpdateState.mockResolvedValue({ mode: 'portable', status: 'available', version: '0.2.0' })
+  it('points a copy that does not update itself at the download, and never offers a restart', async () => {
+    getUpdateState.mockResolvedValue({ mode: 'notify', status: 'available', version: '0.2.0' })
     const updates = useUpdateStore()
     const toasts = useToastStore()
     // A window opened while the news is out hears it too.
@@ -80,9 +80,9 @@ describe('news of an update', () => {
   it('follows the state the main process sends', async () => {
     const updates = useUpdateStore()
     await updates.load()
-    pushState({ mode: 'installed', status: 'downloading', version: '0.2.0', percent: 60 })
+    pushState({ mode: 'self', status: 'downloading', version: '0.2.0', percent: 60 })
     expect(updates.state).toEqual({
-      mode: 'installed',
+      mode: 'self',
       status: 'downloading',
       version: '0.2.0',
       percent: 60
@@ -93,7 +93,7 @@ describe('news of an update', () => {
 describe('a check from the Help menu', () => {
   it('gets an answer even when there is nothing new', async () => {
     checkForUpdates.mockResolvedValue({
-      mode: 'installed',
+      mode: 'self',
       status: 'up-to-date',
       checkedAt: '2026-10-19T09:00:00.000Z'
     })
@@ -106,7 +106,7 @@ describe('a check from the Help menu', () => {
 
   it('says why it failed', async () => {
     checkForUpdates.mockResolvedValue({
-      mode: 'installed',
+      mode: 'self',
       status: 'error',
       error: 'Could not reach GitHub. Check the connection and try again.'
     })
@@ -143,7 +143,7 @@ describe('a check from the Help menu', () => {
 
   it('leaves the answer to the Settings dialog when that is where the check came from', async () => {
     checkForUpdates.mockResolvedValue({
-      mode: 'installed',
+      mode: 'self',
       status: 'up-to-date',
       checkedAt: '2026-10-19T09:00:00.000Z'
     })

@@ -52,6 +52,8 @@ class FakeUpdater extends EventEmitter {
   checks = 0
   downloads = 0
   readonly installs: [boolean | undefined, boolean | undefined][] = []
+  /** Set to make the install fail on the spot, as replacing a read-only AppImage does. */
+  installFailure: Error | null = null
   private quitHandlerAdded = false
   private download: { finish: () => void; fail: (error: Error) => void } | null = null
 
@@ -91,6 +93,9 @@ class FakeUpdater extends EventEmitter {
 
   quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void {
     this.installs.push([isSilent, isForceRunAfter])
+    // electron-updater reports it there and then, and does not quit.
+    const failure = this.installFailure
+    if (failure) this.emit('error', failure, String(failure.stack ?? failure))
   }
 
   progress(percent: number): void {
@@ -127,7 +132,7 @@ function setup(options: { mode?: UpdateMode; enabled?: boolean } = {}): {
   const fake = new FakeUpdater()
   const changes: UpdateState[] = []
   const updates = new UpdateController({
-    mode: options.mode ?? 'installed',
+    mode: options.mode ?? 'self',
     enabled: options.enabled ?? true,
     updater: () => fake,
     onChange: (state) => changes.push(state)
@@ -152,18 +157,66 @@ afterEach(() => {
 })
 
 describe('which copies update themselves', () => {
+  const windows = 'C:\\Users\\someone\\AppData\\Local\\Programs\\TableView\\TableView.exe'
+  const deb = '/opt/TableView/tableview'
+  /** What the AppImage runtime sets for the copy it mounted. */
+  const appImage = {
+    env: {
+      APPIMAGE: '/home/someone/Applications/TableView-0.1.0-x64.AppImage',
+      APPDIR: '/tmp/.mount_TableVq7Ld2X'
+    },
+    execPath: '/tmp/.mount_TableVq7Ld2X/tableview'
+  }
+
   it('updates an installed Windows build in place', () => {
-    expect(updateMode({ isPackaged: true, platform: 'win32', env: {} })).toBe('installed')
+    expect(updateMode({ isPackaged: true, platform: 'win32', env: {}, execPath: windows })).toBe('self')
   })
 
   it('tells the portable exe apart by what its launcher sets', () => {
     const env = { PORTABLE_EXECUTABLE_DIR: 'D:\\Tools' }
-    expect(updateMode({ isPackaged: true, platform: 'win32', env })).toBe('portable')
+    expect(
+      updateMode({ isPackaged: true, platform: 'win32', env, execPath: 'C:\\Temp\\2x9\\TableView.exe' })
+    ).toBe('notify')
   })
 
-  it('leaves development builds and other platforms alone', () => {
-    expect(updateMode({ isPackaged: false, platform: 'win32', env: {} })).toBe('unsupported')
-    expect(updateMode({ isPackaged: true, platform: 'linux', env: {} })).toBe('unsupported')
+  it('replaces an AppImage, which says where it was run from', () => {
+    expect(updateMode({ isPackaged: true, platform: 'linux', ...appImage })).toBe('self')
+  })
+
+  // The .deb build writes its marker into the folder the AppImage is packed
+  // from, so an AppImage can carry one too.
+  it('takes an AppImage for an AppImage, whatever marker is packed into it', () => {
+    expect(updateMode({ isPackaged: true, platform: 'linux', ...appImage, packageType: 'deb' })).toBe(
+      'self'
+    )
+  })
+
+  // Started from an AppImage terminal, a .deb inherits the terminal's
+  // variables; taking them for its own would replace the terminal's file.
+  it('does not take the AppImage it was started from for its own', () => {
+    const env = { APPIMAGE: '/home/someone/Applications/Terminal.AppImage', APPDIR: '/tmp/.mount_TermiK2' }
+    expect(updateMode({ isPackaged: true, platform: 'linux', env, execPath: deb, packageType: 'deb' })).toBe(
+      'notify'
+    )
+    expect(updateMode({ isPackaged: true, platform: 'linux', env, execPath: deb })).toBe('unsupported')
+  })
+
+  it('only says when a .deb has a newer release, leaving the install to its owner', () => {
+    expect(updateMode({ isPackaged: true, platform: 'linux', env: {}, execPath: deb, packageType: 'deb' })).toBe(
+      'notify'
+    )
+  })
+
+  it('leaves development builds, macOS, and Linux packages no release is made as alone', () => {
+    expect(updateMode({ isPackaged: false, platform: 'win32', env: {}, execPath: windows })).toBe('unsupported')
+    expect(updateMode({ isPackaged: false, platform: 'linux', ...appImage })).toBe('unsupported')
+    expect(
+      updateMode({ isPackaged: true, platform: 'darwin', env: {}, execPath: '/Applications/TableView.app' })
+    ).toBe('unsupported')
+    expect(updateMode({ isPackaged: true, platform: 'linux', env: {}, execPath: deb })).toBe('unsupported')
+    expect(
+      updateMode({ isPackaged: true, platform: 'linux', env: {}, execPath: deb, packageType: 'rpm' })
+    ).toBe('unsupported')
   })
 
   it('never wakes electron-updater in a build that cannot update', async () => {
@@ -235,7 +288,7 @@ describe('looking on its own', () => {
   it('says it is up to date, and when it last looked', async () => {
     const { updates } = setup()
     expect(await updates.check()).toEqual({
-      mode: 'installed',
+      mode: 'self',
       status: 'up-to-date',
       checkedAt: '2026-10-19T09:00:00.000Z'
     })
@@ -258,7 +311,7 @@ describe('the installed app', () => {
 
     expect(fake.downloads).toBe(1)
     expect(updates.state).toEqual({
-      mode: 'installed',
+      mode: 'self',
       status: 'downloading',
       version: '0.2.0',
       percent: 0
@@ -269,9 +322,9 @@ describe('the installed app', () => {
 
     fake.finishDownload()
     await flush()
-    expect(updates.state).toEqual({ mode: 'installed', status: 'ready', version: '0.2.0' })
+    expect(updates.state).toEqual({ mode: 'self', status: 'ready', version: '0.2.0' })
     // The windows hear about it as well.
-    expect(changes.at(-1)).toEqual({ mode: 'installed', status: 'ready', version: '0.2.0' })
+    expect(changes.at(-1)).toEqual({ mode: 'self', status: 'ready', version: '0.2.0' })
   })
 
   it('installs a fetched update on quit only while automatic updates are on', async () => {
@@ -307,7 +360,7 @@ describe('the installed app', () => {
     vi.advanceTimersToNextTimer()
     updates.setEnabled(false)
     await flush()
-    expect(updates.state).toEqual({ mode: 'installed', status: 'available', version: '0.2.0' })
+    expect(updates.state).toEqual({ mode: 'self', status: 'available', version: '0.2.0' })
     expect(fake.downloads).toBe(0)
 
     expect(await updates.check()).toMatchObject({ status: 'downloading', version: '0.2.0' })
@@ -328,6 +381,18 @@ describe('the installed app', () => {
     // Silent, because the installer's own pages are for a first install; and
     // run afterwards, because the restart should end in the app.
     expect(fake.installs).toEqual([[true, true]])
+  })
+
+  it('says when the install fails on the spot, so nothing waits for a restart', async () => {
+    const { updates, fake } = setup()
+    fake.latest = '0.2.0'
+    await updates.check()
+    fake.finishDownload()
+    await flush()
+
+    fake.installFailure = coded("EACCES: permission denied, unlink '/opt/TableView-0.1.0-x64.AppImage'", 'EACCES')
+    expect(updates.install()).toBe(false)
+    expect(updates.state).toEqual({ mode: 'self', status: 'error', error: UPDATE_ERRORS.notWritable })
   })
 
   it('stops looking while an update waits to be installed', async () => {
@@ -351,7 +416,7 @@ describe('the installed app', () => {
 
     fake.failDownload(new Error('net::ERR_CONNECTION_RESET'))
     await flush()
-    expect(updates.state).toEqual({ mode: 'installed', status: 'error', error: UPDATE_ERRORS.offline })
+    expect(updates.state).toEqual({ mode: 'self', status: 'error', error: UPDATE_ERRORS.offline })
 
     await vi.advanceTimersByTimeAsync(4 * HOUR)
     expect(fake.downloads).toBe(2)
@@ -360,12 +425,12 @@ describe('the installed app', () => {
 
 describe('the portable exe', () => {
   it('only says that a newer release is out', async () => {
-    const { updates, fake } = setup({ mode: 'portable' })
+    const { updates, fake } = setup({ mode: 'notify' })
     fake.latest = '0.2.0'
     updates.start()
     await vi.advanceTimersByTimeAsync(MINUTE)
 
-    expect(updates.state).toEqual({ mode: 'portable', status: 'available', version: '0.2.0' })
+    expect(updates.state).toEqual({ mode: 'notify', status: 'available', version: '0.2.0' })
     expect(await updates.check()).toMatchObject({ status: 'available', version: '0.2.0' })
     expect(fake.downloads).toBe(0)
     expect(updates.install()).toBe(false)
@@ -378,7 +443,7 @@ describe('a check that fails', () => {
     fake.latest = new Error('net::ERR_INTERNET_DISCONNECTED')
     updates.start()
     await vi.advanceTimersByTimeAsync(MINUTE)
-    expect(updates.state).toEqual({ mode: 'installed', status: 'error', error: UPDATE_ERRORS.offline })
+    expect(updates.state).toEqual({ mode: 'self', status: 'error', error: UPDATE_ERRORS.offline })
 
     fake.latest = '0.1.0'
     await vi.advanceTimersByTimeAsync(4 * HOUR)
@@ -389,7 +454,7 @@ describe('a check that fails', () => {
     const { updates, fake } = setup()
     fake.latest = coded('No published versions on GitHub', 'ERR_XML_MISSED_ELEMENT')
     expect(await updates.check()).toEqual({
-      mode: 'installed',
+      mode: 'self',
       status: 'error',
       error: UPDATE_ERRORS.noRelease
     })
@@ -442,6 +507,16 @@ describe('describeUpdateError', () => {
       'the download came down damaged',
       coded('sha512 checksum mismatch, expected abc, got def', 'ERR_CHECKSUM_MISMATCH'),
       UPDATE_ERRORS.damaged
+    ],
+    [
+      'the copy sits where it cannot be replaced',
+      coded("EACCES: permission denied, unlink '/opt/TableView-0.1.0-x64.AppImage'", 'EACCES'),
+      UPDATE_ERRORS.notWritable
+    ],
+    [
+      'the file is held or protected',
+      coded("EPERM: operation not permitted, rename '/tmp/update.AppImage'", 'EPERM'),
+      UPDATE_ERRORS.notWritable
     ],
     [
       'the installer is signed by somebody else',

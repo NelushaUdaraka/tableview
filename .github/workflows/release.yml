@@ -1,5 +1,6 @@
-# Builds the Windows installer and the portable exe, and publishes them as a
-# GitHub release that installed copies of TableView update themselves from.
+# Builds the Windows installer and portable exe, and the Linux AppImages and
+# .debs, and publishes them as a GitHub release that installed copies of
+# TableView update themselves from.
 #
 # To release, bump the version and push the tag it makes:
 #
@@ -10,7 +11,7 @@
 # which the stable app never updates to.
 #
 # Run it by hand from the Actions tab to build the same files without releasing
-# anything: they are kept on the run as an artifact instead.
+# anything: they are kept on the run as artifacts instead.
 name: Release
 
 on:
@@ -54,9 +55,30 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
+  # Drafted once, before either build, so both upload to the same release —
+  # and no installed copy sees it until every file is on it: a release without
+  # its latest.yml or latest-linux.yml fails every update check.
+  draft:
+    name: Draft the release
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Draft the release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --generate-notes \
+              --title "TableView ${GITHUB_REF_NAME#v}"
+
   windows:
     name: Windows build
-    needs: verify
+    needs: draft
     runs-on: windows-latest
     timeout-minutes: 45
     permissions:
@@ -65,7 +87,7 @@ jobs:
       run:
         shell: bash
     env:
-      # Read by both gh and electron-builder.
+      # Read by electron-builder to upload to the draft.
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
@@ -75,15 +97,6 @@ jobs:
           cache: npm
       - run: npm ci
 
-      # Drafted first, so no installed copy sees the release until every file
-      # is on it — a release without its latest.yml fails every update check.
-      - name: Draft the release
-        if: github.event_name == 'push'
-        run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
-            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --generate-notes \
-              --title "TableView ${GITHUB_REF_NAME#v}"
-
       - name: Build the installer and the portable exe
         run: npm run build:win -- --publish ${{ github.event_name == 'push' && 'always' || 'never' }}
         env:
@@ -92,15 +105,6 @@ jobs:
           # base64-encoded .pfx (or a URL to one), with its password beside it.
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-
-      - name: Publish the release
-        if: github.event_name == 'push'
-        run: |
-          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
-            gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease
-          else
-            gh release edit "$GITHUB_REF_NAME" --draft=false --latest
-          fi
 
       - name: Keep the files
         if: github.event_name != 'push'
@@ -113,3 +117,56 @@ jobs:
             release/*/latest.yml
           if-no-files-found: error
           retention-days: 14
+
+  linux:
+    name: Linux build
+    needs: draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # x64 and arm64 both, from this one machine: see electron-builder.yml.
+      - name: Build the AppImages and the .debs
+        run: npm run build:linux -- --publish ${{ github.event_name == 'push' && 'always' || 'never' }}
+
+      - name: Keep the files
+        if: github.event_name != 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tableview-linux
+          path: |
+            release/*/TableView-*.AppImage
+            release/*/tableview_*.deb
+            release/*/latest-linux*.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish the release
+    needs: [windows, linux]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Publish the release
+        run: |
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease
+          else
+            gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+          fi

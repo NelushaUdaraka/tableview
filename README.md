@@ -492,13 +492,15 @@ intent* on the Advanced tab is a different thing again: it asks an availability 
 connection to a readable secondary, and stops nothing on its own.
 
 **Keeping up to date**
-- **The installed app updates itself.** It looks for a new release shortly after it starts and every
-  four hours after that, downloads one in the background, and says when it is ready: *Restart*
-  installs it there and then, and otherwise it installs the next time TableView quits. Restarting
-  asks about unsaved work first, the way quitting does, and closes the connections before the
-  installer runs.
-- **The portable app says so, and leaves the download to you.** A single exe cannot replace itself
-  while it runs, so it looks just as often and offers the release page instead.
+- **The Windows install and the Linux AppImage update themselves.** Each looks for a new release
+  shortly after it starts and every four hours after that, downloads one in the background (the
+  AppImage only the parts that changed), and says when it is ready: *Restart* installs it there and
+  then, and otherwise it installs the next time TableView quits. Restarting asks about unsaved work
+  first, the way quitting does. The AppImage swaps its own file for the new one, so it has to live
+  somewhere you can write to — `~/Applications`, say, rather than `/opt`.
+- **The portable exe and the .deb say so, and leave the download to you.** A single exe cannot
+  replace itself while it runs, and a package is installed the way its system installs packages,
+  not from inside the app — so they look just as often and offer the release page instead.
 - **Off is off.** *Update automatically* in Settings is on by default. Turned off, nothing is looked
   for, downloaded or installed unasked; *Help → Check for Updates*, or *Check now* beside the
   switch, still asks, and what that finds is fetched and installed like any other update.
@@ -574,9 +576,27 @@ That produces, in `release/<version>/`:
 Builds are unsigned by default. To sign, set `CSC_LINK` (path or base64 of a `.pfx`) and
 `CSC_KEY_PASSWORD` before running — electron-builder picks them up automatically.
 
-`npm run build:linux` and `npm run build:unpack` are also available; the latter produces an
-unpacked directory, which is the quickest way to sanity-check packaging. None of them publishes
-anything: uploading takes `--publish`, which only the release workflow passes.
+`npm run build:unpack` produces an unpacked directory instead, which is the quickest way to
+sanity-check packaging. No build script publishes anything: uploading takes `--publish`, which only
+the release workflow passes.
+
+### Build for Linux
+
+On a Linux machine:
+
+```bash
+npm install
+npm run build:linux
+```
+
+That produces, in `release/<version>/`, for both x64 and arm64 — one x64 machine builds both, since
+there is nothing native to compile:
+
+| Artifact | What it is |
+| --- | --- |
+| `TableView-0.1.0-x86_64.AppImage`, `TableView-0.1.0-arm64.AppImage` | Runs on most distributions without installing: mark it executable and open it. The copy that updates itself |
+| `tableview_0.1.0_amd64.deb`, `tableview_0.1.0_arm64.deb` | Installs into `/opt/TableView` with a menu entry, for Debian, Ubuntu and their relatives |
+| `latest-linux.yml`, `latest-linux-arm64.yml` | What an AppImage reads to update, and a .deb to say there is a newer one |
 
 ### Releasing
 
@@ -593,10 +613,11 @@ The workflow then:
 1. runs the type check and the unit tests, and stops if the tag does not match `package.json` — the
    app compares updates against that version, so the two have to agree;
 2. drafts a GitHub release for the tag, with notes generated from what was merged since the last one;
-3. builds the installer and the portable exe on Windows and uploads them to the draft, with
-   `latest.yml` and the block map;
-4. publishes the release. Only then: a draft is invisible to installed copies, so none of them is
-   ever offered a release whose files are still on their way up.
+3. builds the installer and the portable exe on Windows, and the AppImages and .debs for x64 and
+   arm64 on Linux, side by side, and uploads them all to the draft with the files installed copies
+   read: `latest.yml` and the installer's block map, `latest-linux.yml` and `latest-linux-arm64.yml`;
+4. publishes the release once both builds are done. Only then: a draft is invisible to installed
+   copies, so none of them is ever offered a release whose files are still on their way up.
 
 A tag with a pre-release part (`v0.3.0-beta.1`) is published as a pre-release, which the stable app
 never updates to. Running the workflow by hand from the Actions tab builds the same files without
@@ -635,7 +656,7 @@ Three layers, all runnable on Linux:
 
 | Command | What it covers |
 | --- | --- |
-| `npm test` | 1007 unit tests — SQL building, T-SQL lexing, the read-only check, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh, the columns a table shows, when the app updates itself |
+| `npm test` | 1014 unit tests — SQL building, T-SQL lexing, the read-only check, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh, the columns a table shows, when the app updates itself |
 | `npm run test:integration` | 72 tests against a **real SQL Server 2022** and a **real sshd** |
 | `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
 
@@ -956,8 +977,13 @@ Deliberately out of scope for phase 1, in rough priority order for phase 2:
   writes, so the check is the app's own reading of the T-SQL, and it errs towards refusing: `EXEC`
   is turned down even for `sp_help`, and a `#temp` table counts as a write like any other. A login
   that can only read is the guarantee; the setting is the safety net.
-- **Only Windows builds update themselves.** The release workflow builds for Windows alone, so a
-  Linux or macOS package has no release to update from and does not look for one.
+- **macOS builds do not update themselves.** The release workflow builds for Windows and Linux, so a
+  macOS package has no release to update from and does not look for one. Nor does a Linux package
+  other than the AppImage and the .deb.
+- **The AppImage can run without Chromium's sandbox.** Ubuntu 24.04 and later restrict the user
+  namespaces the sandbox is built on, and an AppImage cannot carry the AppArmor profile that would
+  lift that; where the sandbox cannot start, its launcher adds `--no-sandbox` rather than fail to
+  open. The .deb installs that profile, and keeps the sandbox.
 - **The renderer bundle is ~1.7 MB** (CodeMirror and the SQL formatter dominate). Fine for a desktop
   app; worth code-splitting if startup time ever matters.
 - **Query results are capped** at `maxResultRows` (50 000 by default). Rows past the cap are counted

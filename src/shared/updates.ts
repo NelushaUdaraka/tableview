@@ -9,12 +9,15 @@
 /**
  * How this copy can be brought up to date.
  *
- * `installed` is the NSIS install, which a newer installer replaces in place.
- * `portable` is the single exe, which nothing can swap out from under itself:
- * it is told about a newer release and the download is left to the reader.
- * `unsupported` is a development build, or a platform no release is built for.
+ * `self`: it installs a newer release itself — the Windows install, which a
+ * newer installer replaces in place, and the AppImage, which swaps its own
+ * file for the new one.
+ * `notify`: it is told about a newer release and the download is left to the
+ * reader — the portable exe, which nothing can swap out from under itself, and
+ * the .deb, whose installs are its owner's to make.
+ * `unsupported`: a development build, or a package no release is made as.
  */
-export type UpdateMode = 'installed' | 'portable' | 'unsupported'
+export type UpdateMode = 'self' | 'notify' | 'unsupported'
 
 export type UpdateStatus =
   /** Nothing has been looked for yet. */

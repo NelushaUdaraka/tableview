@@ -70,12 +70,28 @@ portable:
 linux:
   icon: build/icon.png
   category: Development
+  # Both architectures are built on one x64 machine: nothing in the app is
+  # native, so an arm64 build is the arm64 Electron around the same JavaScript.
+  # The AppImage is listed first, so it is packed before the .deb writes its
+  # package-type marker into the linux-unpacked folder they share; an AppImage
+  # that carried the marker would still update as one (see main/updater.ts).
   target:
-    - AppImage
-    - deb
+    - target: AppImage
+      arch: [x64, arm64]
+    - target: deb
+      arch: [x64, arm64]
   maintainer: TableView
   synopsis: SQL Server client
   description: A cross-platform SQL Server client built with Electron.
+  # Electron takes the window's app_id (Wayland) and WM_CLASS (X11) from
+  # desktopName in package.json; naming the .desktop file after it too is what
+  # lets the taskbar match a running window to TableView's entry and icon.
+  syncDesktopName: true
+
+appImage:
+  # The architecture in every name, so the two downloads cannot be mixed up;
+  # the .deb keeps Debian's own tableview_<version>_<arch>.deb.
+  artifactName: ${productName}-${version}-${arch}.${ext}
 
 mac:
   icon: build/icon.png

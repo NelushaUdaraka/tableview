@@ -1,7 +1,8 @@
 /** Electron main process entry point. */
+import fs from 'node:fs'
 import path from 'node:path'
 import { BrowserWindow, Menu, app, shell } from 'electron'
-import { autoUpdater } from 'electron-updater'
+import { AppImageUpdater, autoUpdater } from 'electron-updater'
 import { CHANNELS } from '../shared/ipc'
 import { ConnectionRegistry } from './db/registry'
 import { AppData } from './storage/appData'
@@ -11,7 +12,7 @@ import { registerIpcHandlers, scopeForWindow, setWindowFactory, setWindowLocator
 import { buildMenu } from './menu'
 import { WindowManager } from './window'
 import { closeGuard } from './closeGuard'
-import { UpdateController, updateMode } from './updater'
+import { UpdateController, runningAppImage, updateMode } from './updater'
 
 // One process owns the settings files; a second launch focuses the existing
 // window rather than competing for them. Extra windows come from File → New
@@ -36,23 +37,46 @@ if (!app.requestSingleInstanceLock()) {
 const registry = new ConnectionRegistry()
 let windows: WindowManager | null = null
 let updates: UpdateController | null = null
+/** Running from an AppImage, which then replaces its own file to update. */
+const appImage = runningAppImage(process.env, process.execPath)
 
 /**
- * Restarts into a downloaded update.
+ * How this Linux copy was installed, as the package itself records it: the
+ * .deb carries a `package-type` file in its resources. Nothing else does.
+ */
+function packageType(): string | undefined {
+  if (!app.isPackaged || process.platform !== 'linux') return undefined
+  try {
+    return fs.readFileSync(path.join(process.resourcesPath, 'package-type'), 'utf8').trim()
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Restarts into a downloaded update. Unsaved work is asked about first, the
+ * way a quit asks.
  *
- * The installer closes whatever is still running, and it does not ask. So
- * unsaved work is asked about first, the way a quit asks, and the connections
- * are closed before the installer starts rather than racing it on the way
- * out: an SSM session cut off mid-close leaves its plugin process behind.
+ * The Windows installer closes whatever is still running, and it does not
+ * ask, so there the connections are closed before it starts rather than
+ * racing it on the way out: an SSM session cut off mid-close leaves its
+ * plugin process behind. An AppImage puts the new file in place before this
+ * copy quits, and the quit closes the connections as any quit does.
  */
 async function restartToUpdate(): Promise<void> {
   if (updates?.state.status !== 'ready') return
   const mayGo = (): boolean => closeGuard.mayQuit(windows?.all ?? [], () => void restartToUpdate())
   if (!mayGo()) return
-  await registry.closeAll()
-  // Anything left unsaved while the connections were closing is asked about too.
-  if (!mayGo()) return
-  updates.install()
+  if (process.platform === 'win32') {
+    await registry.closeAll()
+    // Anything left unsaved while the connections were closing is asked about too.
+    if (!mayGo()) return
+  }
+  // The new AppImage is started before this copy has quit, and would find the
+  // single-instance lock still held and quit at once. If the install fails,
+  // nothing quits, and the lock is taken back.
+  if (appImage) app.releaseSingleInstanceLock()
+  if (!updates.install() && appImage) app.requestSingleInstanceLock()
 }
 
 function createWindow(position?: { x: number; y: number }): BrowserWindow | null {
@@ -93,9 +117,18 @@ void app.whenReady().then(async () => {
   windows = new WindowManager(userDataDir)
 
   updates = new UpdateController({
-    mode: updateMode({ isPackaged: app.isPackaged, platform: process.platform, env: process.env }),
+    mode: updateMode({
+      isPackaged: app.isPackaged,
+      platform: process.platform,
+      env: process.env,
+      execPath: process.execPath,
+      packageType: packageType()
+    }),
     enabled: appData.getSettings().autoUpdate,
-    updater: () => autoUpdater,
+    // electron-updater picks its Linux updater by the package-type marker,
+    // which an AppImage can carry too (see updateMode); so it is asked for
+    // by name here.
+    updater: () => (appImage ? new AppImageUpdater() : autoUpdater),
     // Every window says how updating is going, so every window is told.
     onChange: (state) => {
       for (const window of BrowserWindow.getAllWindows()) {

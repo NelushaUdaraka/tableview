@@ -86,6 +86,31 @@ export function normalizeHex(value: string | undefined | null): string | null {
   return rgb ? toHex(rgb) : null
 }
 
+/**
+ * The offered swatch a colour from elsewhere looks most like.
+ *
+ * A colour brought in with a connection — TablePlus's status colour, say — was
+ * never checked against these grounds, so it lands on the nearest swatch and
+ * takes that swatch's guarantees with it. Never the default: a connection that
+ * arrives with a colour of its own should not arrive looking like one without.
+ */
+export function nearestSwatch(value: string | undefined | null): AccentSwatch | null {
+  const colour = parseHex(value)
+  if (!colour) return null
+  let nearest: AccentSwatch | null = null
+  let best = Infinity
+  for (const swatch of ACCENT_SWATCHES) {
+    const rgb = parseHex(swatch.hex)
+    if (!rgb) continue
+    const distance = Math.hypot(colour.r - rgb.r, colour.g - rgb.g, colour.b - rgb.b)
+    if (distance < best) {
+      best = distance
+      nearest = swatch
+    }
+  }
+  return nearest
+}
+
 function toHex({ r, g, b }: Rgb): string {
   return `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`
 }

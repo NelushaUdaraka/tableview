@@ -93,6 +93,14 @@ appImage:
   # the .deb keeps Debian's own tableview_<version>_<arch>.deb.
   artifactName: ${productName}-${version}-${arch}.${ext}
 
+# The static AppImage runtime, which mounts with the FUSE 3 a desktop already
+# has. electron-builder's default runtime needs libfuse2, which Ubuntu stopped
+# installing with 22.04: an AppImage built with it will not even open on a
+# fresh Ubuntu. electron-builder still calls this runtime a beta; it builds,
+# runs and updates itself here, including restarting into a new version.
+toolsets:
+  appimage: '1.0.3'
+
 mac:
   icon: build/icon.png
   category: public.app-category.developer-tools

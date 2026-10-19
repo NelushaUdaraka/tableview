@@ -598,6 +598,12 @@ there is nothing native to compile:
 | `tableview_0.1.0_amd64.deb`, `tableview_0.1.0_arm64.deb` | Installs into `/opt/TableView` with a menu entry, for Debian, Ubuntu and their relatives |
 | `latest-linux.yml`, `latest-linux-arm64.yml` | What an AppImage reads to update, and a .deb to say there is a newer one |
 
+The AppImages use electron-builder's static AppImage runtime (`toolsets.appimage` in
+`electron-builder.yml`), which mounts with the FUSE 3 that desktop distributions already install.
+electron-builder's default runtime wants libfuse2, which Ubuntu stopped installing with 22.04, so an
+AppImage built with it does not even open on a fresh Ubuntu. Where FUSE is missing altogether — some
+containers and minimal installs — run the AppImage with `--appimage-extract-and-run`.
+
 ### Releasing
 
 `.github/workflows/release.yml` builds and publishes releases. Bump the version and push the tag
@@ -984,6 +990,10 @@ Deliberately out of scope for phase 1, in rough priority order for phase 2:
   namespaces the sandbox is built on, and an AppImage cannot carry the AppArmor profile that would
   lift that; where the sandbox cannot start, its launcher adds `--no-sandbox` rather than fail to
   open. The .deb installs that profile, and keeps the sandbox.
+- **The AppImage's runtime is still a beta in electron-builder.** It is the one that opens without
+  libfuse2 (see [Build for Linux](#build-for-linux)), and it has built, run and updated itself here,
+  restart included; if it ever misbehaves, deleting `toolsets` from `electron-builder.yml` goes back
+  to the default, at the price of libfuse2.
 - **The renderer bundle is ~1.7 MB** (CodeMirror and the SQL formatter dominate). Fine for a desktop
   app; worth code-splitting if startup time ever matters.
 - **Query results are capped** at `maxResultRows` (50 000 by default). Rows past the cap are counted

@@ -99,6 +99,10 @@ const fromTablePlus = ref<TablePlusImport | null>(null)
 /** Everything back to a blank new connection. */
 function resetForm(): void {
   Object.assign(form, blank())
+  // `blank()` has no id to assign over the old one. A form that was editing a
+  // saved connection and is reused for a new one — File → New Connection or
+  // Import from TablePlus over the open dialog — would otherwise save over it.
+  delete form.id
   credentialText.value = ''
   clearedCredentials.value = false
   resetInstances()

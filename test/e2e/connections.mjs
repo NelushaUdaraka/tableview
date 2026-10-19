@@ -613,6 +613,31 @@ check('no TablePlus panel when editing', await ev(`!!document.querySelector('.tp
 await ev(`[...document.querySelectorAll('.form__foot button')].find((b) => b.textContent.trim() === 'Cancel').click()`)
 await waitFor(`!document.querySelector('.form__tabs')`, 'the form to close on Cancel')
 
+// The File menu stays usable over an open dialog. Starting an import there
+// while a saved connection is being edited must not save over it: the form
+// that comes up is a new connection, through and through.
+const localDev = () => ev(`
+  (async () => JSON.stringify((await window.api.listConnections())
+    .filter((c) => c.name === 'Local dev')
+    .map((c) => ({ id: c.id, host: c.host, port: c.port, username: c.username }))))()
+`).then(JSON.parse)
+const localDevBefore = await localDev()
+await rowMenu('Local dev', 'Edit')
+await waitFor(`!!document.querySelector('.form__tabs')`, 'the form on Local dev')
+await ev(`[...document.querySelectorAll('.titlebar__menu')].find((b) => b.textContent.trim() === 'File').click()`)
+await waitFor(`!!document.querySelector('.titlebar__dropdown')`, 'the File menu')
+await ev(`[...document.querySelectorAll('.titlebar__dropdown .titlebar__item')].find((i) => i.textContent.trim().startsWith('Import from TablePlus')).click()`)
+await waitFor(`!!document.querySelector('.tpanel__steps')`, 'the TablePlus steps over the edit')
+await pasteTP('microsoftsqlserver://appuser:pw@127.0.0.1/appdb?name=Over%20Edit')
+await waitFor(`document.querySelector('.tpanel')?.textContent.includes('Filled in from TablePlus')`, 'the import over the edit')
+await saveForm()
+check('importing over an edit leaves the edited connection alone', await localDev(), localDevBefore)
+check(
+  'and saves the import as a connection of its own',
+  await ev(`(async () => (await window.api.listConnections()).filter((c) => c.name === 'Over Edit').length)()`),
+  1
+)
+
 // A plain new connection offers the paste on one line, steps folded away.
 await newConnection()
 check('folded on a plain new connection', await ev(`!!document.querySelector('.tpanel__steps')`), false)

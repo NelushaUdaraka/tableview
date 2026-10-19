@@ -8,7 +8,13 @@
  * from TablePlus is turned down before it fills in anything.
  */
 import { describe, expect, it } from 'vitest'
-import { parseTablePlusUrl, tablePlusUrlFromClipboard } from '../../src/shared/tableplus'
+import {
+  parseTablePlusUrl,
+  tablePlusStatus,
+  tablePlusUrlFromClipboard,
+  type TablePlusFormState,
+  type TablePlusImport
+} from '../../src/shared/tableplus'
 import { DEFAULT_SSH_CONFIG } from '../../src/shared/types'
 
 /**
@@ -193,5 +199,70 @@ describe('tablePlusUrlFromClipboard', () => {
   it('keeps everything else back', () => {
     expect(() => tablePlusUrlFromClipboard('hunter2')).toThrow(new Error(NOT_TABLEPLUS))
     expect(() => tablePlusUrlFromClipboard('postgres://u:pw@h/db')).toThrow(/PostgreSQL/)
+  })
+})
+
+describe('tablePlusStatus', () => {
+  const SAME_NAME =
+    'You already have a connection called “App DEV”. Saving adds this one beside it; that one stays as it is.'
+  const READ_ONLY =
+    'TablePlus had a safe mode on for this one, so it arrives read-only. Untick Read-only before saving if you do not want that.'
+  const KEY_FILE = 'Choose the SSH key file on the Tunnel tab: TablePlus does not put it in the URL.'
+  const NO_LOGIN =
+    'No login came with this URL. If the connection signs in with Windows or Microsoft Entra ID, set that up by hand before saving.'
+
+  /** The status straight after pasting this URL into an empty list. */
+  const statusOf = (url: string, state: Partial<TablePlusFormState> = {}) => {
+    const result: TablePlusImport = parseTablePlusUrl(url)
+    return tablePlusStatus(result, {
+      name: result.connection.name,
+      savedNames: [],
+      keyFileChosen: false,
+      ...state
+    })
+  }
+
+  it('sums up what came across', () => {
+    expect(statusOf(WINDOWS_URL)).toEqual({
+      summary: 'Filled in from TablePlus · password included · colour blue',
+      warnings: []
+    })
+    expect(
+      statusOf(
+        'sqlserver+ssh://deploy:ssh%40pw@bastion.example.com:2222/appuser:db%2Fpw@10.0.0.5:1433/appdb'
+      ).summary
+    ).toBe('Filled in from TablePlus · password included · SSH tunnel')
+    expect(statusOf('sqlserver://appuser@h/db').summary).toBe('Filled in from TablePlus')
+  })
+
+  it('warns about a name already saved, however it is spelt', () => {
+    expect(statusOf(WINDOWS_URL, { savedNames: [' app dev '] }).warnings[0]).toBe(SAME_NAME)
+    // Renamed in the form since the paste: nothing to warn about any more.
+    expect(
+      statusOf(WINDOWS_URL, { name: 'App DEV 2', savedNames: [' app dev '] }).warnings
+    ).not.toContain(SAME_NAME)
+  })
+
+  it('says a safe mode arrived as read-only', () => {
+    expect(statusOf('sqlserver://appuser@h/db?safeModeLevel=2').warnings).toContain(READ_ONLY)
+  })
+
+  it('asks for the key file until one is chosen', () => {
+    const url =
+      'sqlserver+ssh://deploy:keypass@bastion.example.com/appuser:pw@10.0.0.5/appdb?usePrivateKey=true'
+    expect(statusOf(url).warnings).toContain(KEY_FILE)
+    expect(statusOf(url, { keyFileChosen: true }).warnings).not.toContain(KEY_FILE)
+  })
+
+  it('says when no login came with the URL', () => {
+    expect(statusOf('sqlserver://h/db').warnings).toContain(NO_LOGIN)
+  })
+
+  it('puts the warnings in one order', () => {
+    expect(
+      statusOf('sqlserver+ssh://deploy@b/h/db?name=App%20DEV&usePrivateKey=true&safeModeLevel=1', {
+        savedNames: ['App DEV']
+      }).warnings
+    ).toEqual([SAME_NAME, READ_ONLY, KEY_FILE, NO_LOGIN])
   })
 })

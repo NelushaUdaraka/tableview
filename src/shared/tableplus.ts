@@ -172,6 +172,63 @@ export function parseTablePlusUrl(text: string): TablePlusImport {
   }
 }
 
+/** What the form holds now, which the person may have changed since the paste. */
+export interface TablePlusFormState {
+  /** The name in the form now: the person may have changed it since the paste. */
+  name: string
+  savedNames: readonly string[]
+  keyFileChosen: boolean
+}
+
+/** The line under the panel, and what it wants the person to know before saving. */
+export interface TablePlusStatus {
+  summary: string
+  warnings: string[]
+}
+
+/**
+ * What the panel says after a paste: what came across, then anything that
+ * needs doing before Save — in the order it would bite.
+ */
+export function tablePlusStatus(
+  result: TablePlusImport,
+  state: TablePlusFormState
+): TablePlusStatus {
+  const { connection } = result
+  const summary = [
+    'Filled in from TablePlus',
+    connection.password ? 'password included' : '',
+    result.colourLabel ? `colour ${result.colourLabel.toLowerCase()}` : '',
+    connection.ssh.enabled ? 'SSH tunnel' : ''
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+  const warnings: string[] = []
+  // Compared the way an import of TableView's own file compares names.
+  const name = state.name.trim()
+  const taken = state.savedNames.some((saved) => saved.trim().toLowerCase() === name.toLowerCase())
+  if (name && taken) {
+    warnings.push(
+      `You already have a connection called “${name}”. Saving adds this one beside it; that one stays as it is.`
+    )
+  }
+  if (connection.readOnly) {
+    warnings.push(
+      'TablePlus had a safe mode on for this one, so it arrives read-only. Untick Read-only before saving if you do not want that.'
+    )
+  }
+  if (result.keyFileNeeded && !state.keyFileChosen) {
+    warnings.push('Choose the SSH key file on the Tunnel tab: TablePlus does not put it in the URL.')
+  }
+  if (!connection.username) {
+    warnings.push(
+      'No login came with this URL. If the connection signs in with Windows or Microsoft Entra ID, set that up by hand before saving.'
+    )
+  }
+  return { summary, warnings }
+}
+
 /**
  * What the main process hands the window from the clipboard: a SQL Server URL
  * from TablePlus and nothing else. Whatever else was copied — a password, a

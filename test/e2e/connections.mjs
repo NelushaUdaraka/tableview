@@ -589,6 +589,30 @@ const appDevs = () => ev(`
     }))))()
 `).then(JSON.parse)
 
+// The screen's ⋮ offers it beside the import TableView has always had, and it
+// opens a new connection with the steps showing.
+await ev(`document.querySelector('.screen__more').click()`)
+await waitFor(`!!document.querySelector('.menu')`, 'the screen ⋮ menu')
+check(
+  'the screen ⋮ menu offers TablePlus between import and export',
+  await ev(`[...document.querySelectorAll('.menu .menu__item')].map((b) => b.textContent.trim())`),
+  ['Import connections…', 'Import from TablePlus…', 'Export connections…']
+)
+await ev(`[...document.querySelectorAll('.menu .menu__item')].find((b) => b.textContent.trim() === 'Import from TablePlus…').click()`)
+await waitFor(`!!document.querySelector('.tpanel__steps')`, 'the TablePlus steps')
+check('three steps to follow', await ev(`document.querySelectorAll('.tpanel__steps li').length`), 3)
+check('on a new connection', await ev(`document.querySelector('.modal .kicker')?.textContent.trim()`), 'New connection')
+await shot('08-tableplus-steps')
+await ev(`[...document.querySelectorAll('.form__foot button')].find((b) => b.textContent.trim() === 'Cancel').click()`)
+await waitFor(`!document.querySelector('.form__tabs')`, 'the form to close on Cancel')
+
+// Editing a saved connection has nothing to import into.
+await rowMenu('Local dev', 'Edit')
+await waitFor(`!!document.querySelector('.form__tabs')`, 'the form on Local dev')
+check('no TablePlus panel when editing', await ev(`!!document.querySelector('.tpanel')`), false)
+await ev(`[...document.querySelectorAll('.form__foot button')].find((b) => b.textContent.trim() === 'Cancel').click()`)
+await waitFor(`!document.querySelector('.form__tabs')`, 'the form to close on Cancel')
+
 // A plain new connection offers the paste on one line, steps folded away.
 await newConnection()
 check('folded on a plain new connection', await ev(`!!document.querySelector('.tpanel__steps')`), false)

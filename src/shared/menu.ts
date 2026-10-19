@@ -12,6 +12,7 @@ export type MenuAction =
   | 'connection:new'
   | 'connection:manage'
   | 'connections:import'
+  | 'connections:import-tableplus'
   | 'connections:export'
   | 'connection:disconnect'
   | 'connection:toggle-read-only'
@@ -128,6 +129,7 @@ export function buildMenuModel(platform: string): MenuModel[] {
           action: 'connection:manage'
         },
         { label: 'Import Connections…', action: 'connections:import' },
+        { label: 'Import from TablePlus…', action: 'connections:import-tableplus' },
         { label: 'Export Connections…', action: 'connections:export' },
         SEPARATOR,
         { label: 'New Query Tab', accelerator: 'CmdOrCtrl+T', action: 'tab:new-query' },

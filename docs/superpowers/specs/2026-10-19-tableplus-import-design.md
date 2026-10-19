@@ -194,25 +194,38 @@ protected in TablePlus arrives less protected — and costs one click to undo: t
 Read-only in the form before saving (a box ticked in this sitting unticks without a question), or
 later from the padlock on the connection list.
 
-### What the Windows URL looks like (confirmed in part)
+### What the Windows URL looks like (confirmed)
 
 The user has confirmed that TablePlus for Windows has **Copy as URL** on a saved connection's
-right-click menu. No sample URL has been seen yet, so the parser follows TablePlus's docs and is
-tolerant where Windows could differ:
+right-click menu, and pasted one. Here it is with the user, password, database and name replaced
+(the password keeps the same mix of characters):
+
+```
+microsoftsqlserver://appuser:Fake%7Bpw%27%7Cx%3B%29y~%60.z%3E9@127.0.0.1/appdb?statusColor=005392&env=development&name=App%20DEV&tLSMode=0&usePrivateKey=false&safeModeLevel=0&advancedSafeModeLevel=0&driverVersion=0&showSystemSchemas=0&driverVersion=0&lazyload=False
+```
+
+What it settles:
+
+- Windows writes the **`microsoftsqlserver`** scheme, not `sqlserver`. Both are accepted.
+- The password is in the URL, percent-encoded (`{ ' | ; ) ` > ` all encoded; `~` and `.` not).
+- The port can be left out (→ 1433).
+- Spaces are written `%20`.
+- `statusColor` is six hex digits with no `#`; `env` is the tag in lower case.
+- There are parameters the docs don't list (`showSystemSchemas`), a parameter written twice
+  (`driverVersion`), and `lazyload=False` capitalised. The parser ignores every parameter it does
+  not use and never refuses a URL over one, a repeat, or the case of a value.
+
+Tolerances kept for what the sample can't show:
 
 - Query values are decoded the way browsers decode a query string (`URLSearchParams`), so a space
-  arrives whether it is written `%20` or `+`. The user and password are percent-decoded only, so a
-  `+` in a password stays a `+`.
-- Parameter names are matched as documented (`name`, `statusColor`, `env`, `safeModeLevel`,
-  `advancedSafeModeLevel`, `usePrivateKey`, `tLSMode`); unknown ones are ignored, not refused.
+  would also arrive if written `+`. The user and password are percent-decoded only, so a `+` in a
+  password stays a `+`.
 - A `statusColor` with or without a leading `#`, in either case, is read.
 - "No group" and "no colour" for an untouched connection: an absent or empty `env` is no group. A
-  colour is mapped whenever one is present; if a real URL later shows that TablePlus writes a stock
-  colour for every connection, that stock colour is added as "no colour" — a one-line change with a
-  test.
-
-If the user pastes a real URL later (password and host swapped out), it becomes a unit-test
-fixture and settles the last point.
+  colour is mapped whenever one is present; if a URL later shows that TablePlus writes a stock
+  colour for every connection, that colour is added as "no colour" — a one-line change with a test.
+- The `+ssh` form has not been seen on Windows; it is parsed as TablePlus's docs give it, with the
+  second authority (`user:password@host:port/database`) read out of the URL's path.
 
 ## Where it fits in the code (suggested; the builder may arrange it differently)
 
@@ -238,6 +251,9 @@ fixture and settles the last point.
   right message. Safe mode: absent and 0 arrive writable; 1 and 2, with either
   `advancedSafeModeLevel`, arrive read-only. A space written as `%20` and as `+` in `name`; a `+` in
   the password kept.
+  The sample URL above is a fixture: it fills in name `App DEV`, server `127.0.0.1`, port 1433,
+  database `appdb`, user `appuser`, the password exactly as decoded, colour Blue (`#1971c2`, the
+  nearest swatch to `#005392`), group `Development`, writable, no tunnel.
 - **E2E (`test/e2e/connections.mjs`, which needs no database):** put text on the clipboard with
   `window.api.copyToClipboard` (as `ssm-form.mjs` does); open ⋮ → *Import from TablePlus…*; paste
   something that isn't a URL and check the form is untouched; paste a PostgreSQL URL and check the

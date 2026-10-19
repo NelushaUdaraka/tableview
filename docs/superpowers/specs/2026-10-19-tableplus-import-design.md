@@ -1,7 +1,7 @@
 # Importing connections from TablePlus
 
 **Date:** 2026-10-19
-**Status:** design agreed, waiting on the open questions below
+**Status:** design agreed; reviewed; waiting on the user's read-through before a plan is written
 **Mockups:** https://claude.ai/artifact/VQX8rEmRdkveRRPAA2rNyC (option A is the one chosen)
 
 ## Why
@@ -41,13 +41,14 @@ first because it can hand a connection out in a standard form, a URL. Beekeeper 
   the AWS credentials box already does: the main process reads the clipboard and hands over only
   what it was asked for.
 - The password shown in plain text anywhere along the way.
-- A connection that was protected in TablePlus arriving less protected in TableView (see open
-  question 1).
+- A connection that was protected in TablePlus arriving less protected in TableView (see "Safe
+  modes" below).
 
 ## Constraints
 
-- Windows first. TablePlus's docs are written for macOS; the Windows build's wording has to be
-  confirmed (open question 2).
+- Windows first. The user has confirmed that TablePlus for Windows has **Copy as URL**. The URL's
+  details below come from TablePlus's own docs, which are written for macOS, so the parser is
+  tolerant where they could differ (see "Settled after review").
 - SQL Server only (`DbEngine` is `'sqlserver'`).
 - The repository's invariants hold: secrets are stored encrypted by the main process; the clipboard
   is read in the main process; UI uses the tokens and shared components in
@@ -105,7 +106,7 @@ Sits at the top of the form's General tab, as drawn in mockup A. Open, it reads:
 
 with a **Paste URL** button (secondary `.btn`, clipboard icon). Folded, it is one line — "Coming from
 TablePlus? Paste its URL" — with the same button and a control that unfolds the steps. The wording of
-step 1 follows whatever open question 2 turns up.
+step 1 follows TablePlus's docs; the user has confirmed the Windows build has *Copy as URL*.
 
 Under the panel, one status line (polite live region, like `AwsCredentialsBox`'s) says what the last
 paste did:
@@ -118,9 +119,10 @@ paste did:
 | Another database | That's a PostgreSQL connection. TableView only connects to SQL Server. |
 | Name already saved | You already have a connection called "Orders (prod)". Saving adds this one beside it; that one stays as it is. |
 | Key file needed | Choose the SSH key file on the Tunnel tab — TablePlus doesn't put it in the URL. |
-| Sign-in not carried over | This connection signs in with Windows (or Microsoft Entra ID), which TableView can't take from the URL. Set the sign-in by hand. |
+| No login in the URL | No login came with this URL. If the connection signs in with Windows or Microsoft Entra ID, set that up by hand before saving. |
+| Arrives read-only | TablePlus had a safe mode on for this one, so it arrives read-only. Untick Read-only before saving if you don't want that. |
 
-The last three can appear alongside the "Filled in" line. Wording is the builder's to polish; the facts
+The last four can appear alongside the "Filled in" line. Wording is the builder's to polish; the facts
 each line states are not.
 
 ### The paste
@@ -157,16 +159,16 @@ The scheme is `sqlserver` or `microsoftsqlserver`; every value is percent-encode
 | database host / port | `host`, `port` | Port absent → 1433. |
 | path | `database` | First path segment, decoded. Absent → empty (the form's default). |
 | `name` | `name` | Decoded. Absent → the host. |
-| `statusColor` (hex, no `#`) | `color` | The nearest non-default swatch in `ACCENT_SWATCHES` (`shared/accent.ts`). Absent or unreadable → no colour. *My call:* the colour TablePlus writes for a connection nobody coloured counts as no colour (identify it from the samples in open question 2). |
+| `statusColor` (hex, no `#`) | `color` | The nearest non-default swatch in `ACCENT_SWATCHES` (`shared/accent.ts`). Absent or unreadable → no colour. See "Settled after review" for a colour TablePlus may write when nobody chose one. |
 | `env` | `group` | First letter capitalised (`production` → `Production`); custom tags kept as written otherwise. Absent → no group. *My call:* whatever TablePlus writes for a connection nobody tagged counts as no group, so an untouched connection does not start a "Local" group and turn group headings on for the whole list. |
-| `safeModeLevel`, `advancedSafeModeLevel` | `readOnly` | **Open question 1.** |
+| `safeModeLevel`, `advancedSafeModeLevel` | `readOnly` | `safeModeLevel` above 0 → `readOnly: true`, and the "Arrives read-only" line shows. Absent or 0 (Silent) → writable. `advancedSafeModeLevel` only picks between a mode's two variants and does not change the outcome. See "Safe modes" below. |
 | `+ssh` | `ssh.enabled: true`, `ssh.host`, `ssh.port` (absent → 22), `ssh.username` | From the first authority. |
 | ssh password | `ssh.authMode: 'password'`, `ssh.password` | When `usePrivateKey` is not `true` and a password is present. |
 | `usePrivateKey=true` | `ssh.authMode: 'privateKey'`, `ssh.privateKeyPath: ''` | The key's path is not in the URL; the "Key file needed" line shows and the Tunnel tab marks the key field. |
-| `usePrivateKey=true` and an SSH password | `ssh.passphrase` | *My call, to confirm from the samples:* with a key, the password slot is the key's passphrase. |
+| `usePrivateKey=true` and an SSH password | `ssh.passphrase` | *My call:* with a key, the password slot is the key's passphrase. |
 | neither a key nor a password | `ssh.authMode: 'agent'` | *My call:* TablePlus falls back to the SSH config/agent in that case. |
-| a sign-in TableView can't hold (Windows sign-in as the current user, Microsoft Entra ID interactive) | `authType: 'sql'`, user and password left empty | *My call:* fill in everything else and say on the status line that the sign-in has to be set by hand, rather than turning the URL down — the person is looking at the form anyway. How TablePlus writes these in the URL comes from the samples. |
-| `tLSMode` | — | *My call:* ignored; the form's defaults (`encrypt` and `trustServerCertificate` on) stand, since TablePlus doesn't publish what its numbers mean. Revisit if open question 2 shows otherwise. |
+| no database user in the URL (as a Windows or Microsoft Entra ID sign-in would leave it) | `authType: 'sql'`, user and password left empty | *My call:* fill in everything else and say on the status line that no login came with the URL, rather than turning it down — the person is looking at the form anyway. Detected by the missing user, so it does not depend on how TablePlus writes the sign-in type. |
+| `tLSMode` | — | *My call:* ignored; the form's defaults (`encrypt` and `trustServerCertificate` on) stand, since TablePlus doesn't publish what its numbers mean. |
 | `windowMode`, `driverVersion`, `lazyload`, `schema`, `table`/`view`, filter parameters | — | Ignored. |
 
 Everything else is the form's blank default (`DEFAULT_SQLSERVER_OPTIONS`, `DEFAULT_SSH_CONFIG`,
@@ -177,23 +179,40 @@ Everything else is the form's blank default (`DEFAULT_SQLSERVER_OPTIONS`, `DEFAU
 Compared case-insensitively against the saved list, the way `planImport` compares names. The line
 says so; Save is not blocked, and saving creates a new connection beside the existing one.
 
-## Open questions (for the user)
+## Settled after review
 
-1. **TablePlus has no read-only mode.** Its safe modes are Silent, Alert 1 and 2 (warn before
-   sending queries) and Safe 1 and 2 (ask for a password before sending queries; mode 2 lets
-   SELECT/EXPLAIN through). The URL carries them as `safeModeLevel` (0–2) and
-   `advancedSafeModeLevel` (0–1). The agreed rule — "read-only in TablePlus arrives read-only here" —
-   has nothing to map from as stated. Something has to decide which, if any, of those levels makes a
-   connection arrive read-only in TableView.
-2. **Whether TablePlus for Windows has *Copy as URL*, and what it copies.** The docs are written for
-   macOS. The Windows changelog mentions opening a connection *from* a URL (3.12.9) but never *Copy as
-   URL*. If the Windows build doesn't have it, option A cannot work and the approach has to be
-   decided again — the other two routes (TablePlus's settings files and its `.tableplusconnection`
-   export) are non-goals. If it does, real URLs from the user's TablePlus on Windows (password and
-   host swapped out) settle the menu wording in the steps, the parameter names, how safe mode, tag
-   and colour are written (including for a connection nobody tagged or coloured), whether spaces come
-   as `%20` or `+`, what a key-file SSH connection carries, and how a Windows or Entra ID sign-in is
-   written.
+### Safe modes (my call — the user was offered it and has not overruled it)
+
+TablePlus has no read-only mode. Its lock icon sets one of Silent, Alert 1 and 2 (warn before
+sending queries) or Safe 1 and 2 (ask for a password before sending queries; the "2" variants let
+SELECT/EXPLAIN through), carried in the URL as `safeModeLevel` (0–2) and `advancedSafeModeLevel`
+(0–1). TableView has only read-only on or off, and read-only is stricter than any of them: it refuses
+every write and every `EXEC`.
+
+Rule: **any safe mode other than Silent arrives read-only.** That keeps the anti-goal — nothing
+protected in TablePlus arrives less protected — and costs one click to undo: the person can untick
+Read-only in the form before saving (a box ticked in this sitting unticks without a question), or
+later from the padlock on the connection list.
+
+### What the Windows URL looks like (confirmed in part)
+
+The user has confirmed that TablePlus for Windows has **Copy as URL** on a saved connection's
+right-click menu. No sample URL has been seen yet, so the parser follows TablePlus's docs and is
+tolerant where Windows could differ:
+
+- Query values are decoded the way browsers decode a query string (`URLSearchParams`), so a space
+  arrives whether it is written `%20` or `+`. The user and password are percent-decoded only, so a
+  `+` in a password stays a `+`.
+- Parameter names are matched as documented (`name`, `statusColor`, `env`, `safeModeLevel`,
+  `advancedSafeModeLevel`, `usePrivateKey`, `tLSMode`); unknown ones are ignored, not refused.
+- A `statusColor` with or without a leading `#`, in either case, is read.
+- "No group" and "no colour" for an untouched connection: an absent or empty `env` is no group. A
+  colour is mapped whenever one is present; if a real URL later shows that TablePlus writes a stock
+  colour for every connection, that stock colour is added as "no colour" — a one-line change with a
+  test.
+
+If the user pastes a real URL later (password and host swapped out), it becomes a unit-test
+fixture and settles the last point.
 
 ## Where it fits in the code (suggested; the builder may arrange it differently)
 
@@ -216,7 +235,9 @@ says so; Save is not blocked, and saving creates a new connection beside the exi
   password; percent-encoded name, user and password (with `@`, `:`, `/`, `?`, `#`, `%`, `+` in them);
   `statusColor` mapped to the nearest swatch, absent and malformed; `env` to group; each refused
   scheme named; text that isn't a URL; the clipboard check refusing non-TablePlus text with the
-  right message. Safe-mode mapping once open question 1 is settled.
+  right message. Safe mode: absent and 0 arrive writable; 1 and 2, with either
+  `advancedSafeModeLevel`, arrive read-only. A space written as `%20` and as `+` in `name`; a `+` in
+  the password kept.
 - **E2E (`test/e2e/connections.mjs`, which needs no database):** put text on the clipboard with
   `window.api.copyToClipboard` (as `ssm-form.mjs` does); open ⋮ → *Import from TablePlus…*; paste
   something that isn't a URL and check the form is untouched; paste a PostgreSQL URL and check the

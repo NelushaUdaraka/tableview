@@ -111,6 +111,7 @@ const api: RendererApi = {
   exportToFile: (request: ExportRequest) => invoke(CHANNELS.exportToFile, request),
   copyToClipboard: (text) => invoke(CHANNELS.exportToClipboard, text),
   readAwsCredentialsFromClipboard: () => invoke(CHANNELS.clipboardAwsCredentials),
+  readTablePlusUrlFromClipboard: () => invoke(CHANNELS.clipboardTablePlusUrl),
 
   openFile: (filters) => invoke(CHANNELS.dialogOpenFile, filters),
   readTextFile: (filePath) => invoke('file:readText', filePath),

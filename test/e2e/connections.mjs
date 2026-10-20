@@ -542,9 +542,214 @@ check('and each one is inside its own toast', toasts.every((t) => t.inside), tru
 check('the two messages were different lengths', new Set(toasts.map((t) => t.lines)).size > 1, true)
 await shot('07-toasts')
 
+// --- from TablePlus -----------------------------------------------------------
+// TablePlus hands a connection out as a URL (right-click → Copy as URL), and the
+// New connection form takes one off the clipboard and fills itself in. The
+// clipboard is read by the main process, which hands over a SQL Server URL from
+// TablePlus and nothing else — so what this checks first is that anything else
+// leaves the form exactly as it was. The URL is the one TablePlus for Windows
+// copied, with every name and secret replaced.
+const TP_URL =
+  'microsoftsqlserver://appuser:Fake%7Bpw%27%7Cx%3B%29y~%60.z%3E9@127.0.0.1/appdb?statusColor=005392&env=development&name=App%20DEV&tLSMode=0&usePrivateKey=false&safeModeLevel=0&advancedSafeModeLevel=0&driverVersion=0&showSystemSchemas=0&driverVersion=0&lazyload=False'
+const val = (sel) => ev(`document.querySelector(${JSON.stringify(sel)})?.value ?? null`)
+const tpText = () =>
+  ev(`document.querySelector('.tpanel')?.textContent.replace(/\\s+/g, ' ').trim() ?? ''`)
+const pasteTP = async (text) => {
+  await ev(`window.api.copyToClipboard(${JSON.stringify(text)})`)
+  await ev(`document.querySelector('.tpanel__paste').click()`)
+}
+const newConnection = async () => {
+  await ev(`document.querySelector('.screen__actions .btn--primary').click()`)
+  await waitFor(`!!document.querySelector('.tpanel')`, 'the TablePlus panel on a new connection')
+}
+const saveForm = async () => {
+  await ev(`document.querySelector('.form button[type=submit]').click()`)
+  await waitFor(`!document.querySelector('.form__tabs')`, 'the form to close')
+}
+const FIELD = {
+  name: '.form input[placeholder="Production reporting"]',
+  server: '.form input[placeholder="localhost"]',
+  // The General tab comes first, and the Tunnel tab's fields stay in the page
+  // while hidden, so the first of each of these is the General tab's.
+  port: '.form__section input[type=number]',
+  database: '.form input[placeholder="(default)"]',
+  user: '.form input[placeholder="sa"]',
+  password: '.form input[type=password]',
+  group: '.form input[placeholder="(none)"]'
+}
+/** The App DEV rows as the window is told about them. */
+const appDevs = () => ev(`
+  (async () => JSON.stringify((await window.api.listConnections())
+    .filter((c) => c.name === 'App DEV')
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .map((c) => ({
+      host: c.host, port: c.port, database: c.database, username: c.username,
+      color: c.color, group: c.group, readOnly: c.readOnly === true,
+      hasSavedPassword: c.hasSavedPassword, passwordInWindow: c.password !== undefined
+    }))))()
+`).then(JSON.parse)
+
+// The screen's ⋮ offers it beside the import TableView has always had, and it
+// opens a new connection with the steps showing.
+await ev(`document.querySelector('.screen__more').click()`)
+await waitFor(`!!document.querySelector('.menu')`, 'the screen ⋮ menu')
+check(
+  'the screen ⋮ menu offers TablePlus between import and export',
+  await ev(`[...document.querySelectorAll('.menu .menu__item')].map((b) => b.textContent.trim())`),
+  ['Import connections…', 'Import from TablePlus…', 'Export connections…']
+)
+await ev(`[...document.querySelectorAll('.menu .menu__item')].find((b) => b.textContent.trim() === 'Import from TablePlus…').click()`)
+await waitFor(`!!document.querySelector('.tpanel__steps')`, 'the TablePlus steps')
+check('three steps to follow', await ev(`document.querySelectorAll('.tpanel__steps li').length`), 3)
+check('on a new connection', await ev(`document.querySelector('.modal .kicker')?.textContent.trim()`), 'New connection')
+await shot('08-tableplus-steps')
+await ev(`[...document.querySelectorAll('.form__foot button')].find((b) => b.textContent.trim() === 'Cancel').click()`)
+await waitFor(`!document.querySelector('.form__tabs')`, 'the form to close on Cancel')
+
+// Editing a saved connection has nothing to import into.
+await rowMenu('Local dev', 'Edit')
+await waitFor(`!!document.querySelector('.form__tabs')`, 'the form on Local dev')
+check('no TablePlus panel when editing', await ev(`!!document.querySelector('.tpanel')`), false)
+await ev(`[...document.querySelectorAll('.form__foot button')].find((b) => b.textContent.trim() === 'Cancel').click()`)
+await waitFor(`!document.querySelector('.form__tabs')`, 'the form to close on Cancel')
+
+// The File menu stays usable over an open dialog. Starting an import there
+// while a saved connection is being edited must not save over it: the form
+// that comes up is a new connection, through and through.
+const localDev = () => ev(`
+  (async () => JSON.stringify((await window.api.listConnections())
+    .filter((c) => c.name === 'Local dev')
+    .map((c) => ({ id: c.id, host: c.host, port: c.port, username: c.username }))))()
+`).then(JSON.parse)
+const localDevBefore = await localDev()
+await rowMenu('Local dev', 'Edit')
+await waitFor(`!!document.querySelector('.form__tabs')`, 'the form on Local dev')
+await ev(`[...document.querySelectorAll('.titlebar__menu')].find((b) => b.textContent.trim() === 'File').click()`)
+await waitFor(`!!document.querySelector('.titlebar__dropdown')`, 'the File menu')
+await ev(`[...document.querySelectorAll('.titlebar__dropdown .titlebar__item')].find((i) => i.textContent.trim().startsWith('Import from TablePlus')).click()`)
+await waitFor(`!!document.querySelector('.tpanel__steps')`, 'the TablePlus steps over the edit')
+await pasteTP('microsoftsqlserver://appuser:pw@127.0.0.1/appdb?name=Over%20Edit')
+await waitFor(`document.querySelector('.tpanel')?.textContent.includes('Filled in from TablePlus')`, 'the import over the edit')
+await saveForm()
+check('importing over an edit leaves the edited connection alone', await localDev(), localDevBefore)
+check(
+  'and saves the import as a connection of its own',
+  await ev(`(async () => (await window.api.listConnections()).filter((c) => c.name === 'Over Edit').length)()`),
+  1
+)
+
+// A plain new connection offers the paste on one line, steps folded away.
+await newConnection()
+check('folded on a plain new connection', await ev(`!!document.querySelector('.tpanel__steps')`), false)
+check('with a way to unfold the steps', await ev(`!!document.querySelector('.tpanel__toggle')`), true)
+
+// Something that is not a TablePlus URL is turned down, and the form keeps
+// what was typed into it.
+await setInput(FIELD.name, 'Typed first')
+await setInput(FIELD.group, 'Typed group')
+await pasteTP('hunter2 is not a URL')
+await waitFor(`document.querySelector('.tpanel')?.textContent.includes('does not hold a TablePlus URL')`, 'the clipboard turned down')
+check('a refused paste leaves the name', await val(FIELD.name), 'Typed first')
+check('a refused paste leaves the group', await val(FIELD.group), 'Typed group')
+
+// Another database's URL is turned down by name; its password never arrives.
+await pasteTP('postgres://u:pw@db.example.com:5432/app?name=Analytics')
+await waitFor(`document.querySelector('.tpanel')?.textContent.includes('That is a PostgreSQL connection')`, 'the PostgreSQL URL turned down')
+check('a PostgreSQL URL leaves the name', await val(FIELD.name), 'Typed first')
+check('a PostgreSQL URL leaves the group', await val(FIELD.group), 'Typed group')
+
+// The real thing replaces the whole form, typed fields included.
+await pasteTP(TP_URL)
+await waitFor(`document.querySelector('.tpanel')?.textContent.includes('Filled in from TablePlus')`, 'the form filled in from TablePlus')
+const filled = {
+  name: await val(FIELD.name),
+  server: await val(FIELD.server),
+  port: await val(FIELD.port),
+  database: await val(FIELD.database),
+  user: await val(FIELD.user),
+  group: await val(FIELD.group),
+  password: await val(FIELD.password),
+  passwordType: await ev(`document.querySelector(${JSON.stringify(FIELD.password)}).type`),
+  blue: await ev(`document.querySelector('.swatch[aria-label="Blue"]')?.getAttribute('aria-pressed')`),
+  readOnly: await ev(`document.querySelector('.form__toggle input[type=checkbox]').checked`),
+  status: await ev(`document.querySelector('.tpanel__status')?.textContent.replace(/\\s+/g, ' ').trim()`)
+}
+steps.push({ step: 'filled in from TablePlus', filled: { ...filled, password: '(masked)' } })
+check('the form filled in from TablePlus', { ...filled, password: undefined }, {
+  name: 'App DEV',
+  server: '127.0.0.1',
+  port: '1433',
+  database: 'appdb',
+  user: 'appuser',
+  group: 'Development',
+  passwordType: 'password',
+  blue: 'true',
+  readOnly: false,
+  status: 'Filled in from TablePlus · password included · colour blue'
+})
+check('the password decoded exactly', filled.password, "Fake{pw'|x;)y~`.z>9")
+check('nothing saved before Save', await appDevs(), [])
+await shot('08-tableplus-filled')
+
+// Saved through the ordinary path: the password is stored, and the window is
+// only ever told that it is.
+await saveForm()
+const firstImport = await appDevs()
+steps.push({ step: 'imported from TablePlus', connections: firstImport })
+check('the import saved', firstImport, [{
+  host: '127.0.0.1', port: 1433, database: 'appdb', username: 'appuser',
+  color: '#1971c2', group: 'Development', readOnly: false,
+  hasSavedPassword: true, passwordInWindow: false
+}])
+
+// The same URL again: the form says so, and saving adds a second one while the
+// first stays exactly as it was.
+await newConnection()
+await pasteTP(TP_URL)
+await waitFor(`document.querySelector('.tpanel')?.textContent.includes('Filled in from TablePlus')`, 'the second paste')
+check('a name already saved is called out', (await tpText()).includes('You already have a connection called “App DEV”'), true)
+await saveForm()
+const afterSecond = await appDevs()
+check('the second import sits beside the first', afterSecond.length, 2)
+check('and the first is untouched', afterSecond[0], firstImport[0])
+
+// No password in the URL: nothing is stored, so the connect asks for one
+// rather than trying an empty one. A typed field the URL has nothing for goes
+// back to blank.
+await newConnection()
+await setInput(FIELD.group, 'Typed group')
+await pasteTP('microsoftsqlserver://appuser@127.0.0.1/appdb?name=No%20Password')
+await waitFor(`document.querySelector('.tpanel')?.textContent.includes('Filled in from TablePlus')`, 'the URL with no password')
+check('a field the URL lacks goes back to blank', await val(FIELD.group), '')
+await saveForm()
+const noPassword = await ev(`
+  (async () => JSON.stringify((await window.api.listConnections())
+    .filter((c) => c.name === 'No Password')
+    .map((c) => ({ hasSavedPassword: c.hasSavedPassword, group: c.group ?? '' }))))()
+`).then(JSON.parse)
+check('no password came, so none is stored', noPassword, [{ hasSavedPassword: false, group: '' }])
+
+// A tunnel with a key: the key file is the one thing the URL cannot carry, and
+// both the panel and the Tunnel tab say so.
+await newConnection()
+await pasteTP('sqlserver+ssh://deploy:keypass@bastion.example.com/appuser:pw@10.0.0.5/appdb?name=Via%20Key&usePrivateKey=true')
+await waitFor(`document.querySelector('.tpanel')?.textContent.includes('Filled in from TablePlus')`, 'the key tunnel URL')
+check('the panel asks for the key file', (await tpText()).includes('Choose the SSH key file on the Tunnel tab'), true)
+await ev(`[...document.querySelectorAll('.form__tab')].find((t) => t.textContent.trim().startsWith('Tunnel')).click()`)
+check(
+  'the Tunnel tab asks for it too',
+  await ev(`document.querySelector('.form').textContent.includes('TablePlus does not put the key file in the URL')`),
+  true
+)
+await shot('08-tableplus-key')
+await ev(`[...document.querySelectorAll('.form__foot button')].find((b) => b.textContent.trim() === 'Cancel').click()`)
+await waitFor(`!document.querySelector('.form__tabs')`, 'the form to close on Cancel')
+
 const rendererErrors = logs.join('').split('\n')
   .filter((l) => /ERROR|Uncaught/i.test(l))
   .filter((l) => !/GPU|gpu_|dbus|libva|Vulkan|EGL|gbm|sandbox|DevTools|Fontconfig|MESA|swiftshader|CertVerif|ssl_client_socket/i.test(l))
+  // The pastes turned down above fail in the main process by design.
+  .filter((l) => !l.includes('clipboard:tablePlusUrl failed'))
 
 console.log(JSON.stringify({ steps, failures, rendererErrors }, null, 2))
 socket.close(); child.kill('SIGKILL')

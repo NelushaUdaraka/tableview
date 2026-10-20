@@ -206,6 +206,7 @@ export const CHANNELS = {
   exportToFile: 'export:toFile',
   exportToClipboard: 'export:toClipboard',
   clipboardAwsCredentials: 'clipboard:awsCredentials',
+  clipboardTablePlusUrl: 'clipboard:tablePlusUrl',
 
   dialogOpenFile: 'dialog:openFile',
   dialogSaveFile: 'dialog:saveFile',
@@ -358,6 +359,12 @@ export interface RendererApi {
    * there is not one — so nothing else that was copied reaches the window.
    */
   readAwsCredentialsFromClipboard(): Promise<string>
+  /**
+   * The SQL Server URL from TablePlus on the clipboard. Fails, saying why, when
+   * what is there is not one — so nothing else that was copied, another
+   * database's URL and its password included, reaches the window.
+   */
+  readTablePlusUrlFromClipboard(): Promise<string>
 
   openFile(filters?: { name: string; extensions: string[] }[]): Promise<string | null>
   readTextFile(filePath: string): Promise<string>

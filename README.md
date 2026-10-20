@@ -39,6 +39,20 @@ TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind
   discovered at connect time. A name already saved is left alone rather than imported beside
   itself, so re-importing the same file to pick up one new connection does not leave you with two
   of everything.
+- **…or brought over from TablePlus** — *Import from TablePlus…*, on the list's ⋮ and in the File
+  menu, opens a new connection with the three steps for getting one out of TablePlus: right-click
+  it in TablePlus's start window, choose *Copy as URL*, and press *Paste URL* here. The form fills
+  itself in — server, login and password, database, the colour (matched to the nearest of
+  TableView's own), the TablePlus tag as its group, and the SSH tunnel when there is one — and
+  nothing is saved until *Save*, so it can be looked over and tested first. A name already in the
+  list is called out before saving, and saving puts the new one beside it without touching the
+  old; a connection TablePlus kept in a safe mode arrives read-only, since TablePlus has no
+  read-only mode of its own and refusing writes is the nearest TableView has to its warnings; and
+  what the URL cannot carry — an SSH key file, a Windows sign-in — the form asks for. The
+  clipboard is read in the main process, and only a SQL Server URL from TablePlus is handed to the
+  window: anything else that was copied, another database's URL with its password in it
+  included, stays where it is. A new connection opened the usual way offers the same paste,
+  folded to one line.
 - SQL Server logins, Windows/NTLM (with domain), and Azure AD password auth
 - TLS options: `encrypt`, `trustServerCertificate`, named instances, `ApplicationIntent=ReadOnly`,
   connect/request timeouts, pool sizing, application name
@@ -662,7 +676,7 @@ Three layers, all runnable on Linux:
 
 | Command | What it covers |
 | --- | --- |
-| `npm test` | 1014 unit tests — SQL building, T-SQL lexing, the read-only check, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh, the columns a table shows, when the app updates itself |
+| `npm test` | 1042 unit tests — SQL building, T-SQL lexing, the read-only check, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh, the columns a table shows, TablePlus URLs, when the app updates itself |
 | `npm run test:integration` | 72 tests against a **real SQL Server 2022** and a **real sshd** |
 | `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
 
@@ -696,7 +710,13 @@ The suites:
   as real `Error`s, and a saved password never appears in renderer-visible data
 - **connections** — duplicates a saved connection from the list and from inside the form, checks
   the copy opens ready to edit with the secrets carried over, that the original comes through
-  untouched either way, and that a copy of a copy is numbered rather than suffixed twice. Needs no
+  untouched either way, and that a copy of a copy is numbered rather than suffixed twice. Then
+  the TablePlus import: the ⋮ menu's *Import from TablePlus…* opens a new connection with its
+  steps showing and editing one shows no panel; a paste of anything but a SQL Server URL from
+  TablePlus leaves the form as it was, and the real one replaces every field — the password
+  masked, the colour and group mapped — and saves with the password stored but never handed back
+  to the window; the same URL again is called out and saved beside the first, which is
+  untouched, a URL with no password stores none, and a key tunnel asks for its file. Needs no
   database: nothing in it connects.
 - **workspace** — connects to the container, loads the schema tree, opens a table, reads the grid,
   checks the structure tab, types and runs a JOIN in the editor, provokes a SQL error, toggles theme
@@ -788,6 +808,7 @@ src/
 │   ├── accent.ts             a connection's colour, and the shades derived from it
 │   ├── copyName.ts           what a duplicated connection is called
 │   ├── connectionTransfer.ts the connection export file, and what it leaves out
+│   ├── tableplus.ts          a connection copied out of TablePlus as a URL, and what it fills in
 │   ├── sql/                  identifier escaping, T-SQL lexer, query builders, and
 │   │                         readOnly.ts — what a read-only connection refuses to send
 │   ├── serialize.ts          driver values ⇄ IPC-safe cell values

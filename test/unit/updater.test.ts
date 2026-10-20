@@ -23,7 +23,7 @@ const HOUR = 60 * MINUTE
 
 /** A release as electron-updater reads it out of `latest.yml`. */
 function release(version: string): Record<string, unknown> {
-  const file = `TableView-Setup-${version}.exe`
+  const file = `TableView-${version}-windows-x64-setup.exe`
   return {
     version,
     files: [{ url: file, sha512: 'c2hhNTEy', size: 104_857_600 }],

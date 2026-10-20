@@ -583,9 +583,15 @@ That produces, in `release/<version>/`:
 
 | Artifact | What it is |
 | --- | --- |
-| `TableView-Setup-0.1.0.exe` | NSIS installer (per-user, choosable install directory, shortcuts) — the copy that updates itself |
-| `TableView-0.1.0-portable.exe` | Single-file portable build |
-| `latest.yml`, `TableView-Setup-0.1.0.exe.blockmap` | What an installed copy reads to update: the newest version and its checksum, and the block map that lets it download only what changed |
+| `TableView-0.1.0-windows-x64-setup.exe` | NSIS installer (per-user, choosable install directory, shortcuts) — the copy that updates itself |
+| `TableView-0.1.0-windows-x64-portable.exe` | Single-file portable build |
+| `latest.yml`, `TableView-0.1.0-windows-x64-setup.exe.blockmap` | What an installed copy reads to update: the newest version and its checksum, and the block map that lets it download only what changed |
+
+Every file is named for the system it runs on, then the processor, so the Windows and Linux files
+of a release sit apart on its page. The names come from `artifactName` in `electron-builder.yml`.
+Installed copies find their update through `latest.yml`, not by name, so a rename does not stop them
+updating. It does cost the next Windows update its download of only what changed: that looks for the
+previous release's block map under the new name, finds none, and downloads the whole installer.
 
 Builds are unsigned by default. To sign, set `CSC_LINK` (path or base64 of a `.pfx`) and
 `CSC_KEY_PASSWORD` before running — electron-builder picks them up automatically.
@@ -608,9 +614,12 @@ there is nothing native to compile:
 
 | Artifact | What it is |
 | --- | --- |
-| `TableView-0.1.0-x86_64.AppImage`, `TableView-0.1.0-arm64.AppImage` | Runs on most distributions without installing: mark it executable and open it. The copy that updates itself |
-| `tableview_0.1.0_amd64.deb`, `tableview_0.1.0_arm64.deb` | Installs into `/opt/TableView` with a menu entry, for Debian, Ubuntu and their relatives |
+| `TableView-0.1.0-linux-x86_64.AppImage`, `TableView-0.1.0-linux-arm64.AppImage` | Runs on most distributions without installing: mark it executable and open it. The copy that updates itself |
+| `TableView-0.1.0-linux-amd64.deb`, `TableView-0.1.0-linux-arm64.deb` | Installs into `/opt/TableView` with a menu entry, for Debian, Ubuntu and their relatives |
 | `latest-linux.yml`, `latest-linux-arm64.yml` | What an AppImage reads to update, and a .deb to say there is a newer one |
+
+`x86_64` and `amd64` are the AppImage's and Debian's names for the same 64-bit Intel and AMD
+processors — Windows calls them `x64`; `arm64` is for ARM machines.
 
 The AppImages use electron-builder's static AppImage runtime (`toolsets.appimage` in
 `electron-builder.yml`), which mounts with the FUSE 3 that desktop distributions already install.

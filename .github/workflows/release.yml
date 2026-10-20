@@ -146,7 +146,7 @@ jobs:
           name: tableview-linux
           path: |
             release/*/TableView-*.AppImage
-            release/*/tableview_*.deb
+            release/*/TableView-*.deb
             release/*/latest-linux*.yml
           if-no-files-found: error
           retention-days: 14

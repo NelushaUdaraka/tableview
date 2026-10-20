@@ -271,7 +271,9 @@ defineExpose({ focusFilter, refresh })
         :aria-pressed="panel === entry"
         @click="panel = entry"
       >
-        {{ entry === 'objects' ? 'Schema' : entry === 'history' ? 'History' : 'Saved' }}
+        <span class="sidebar__tab-label">
+          {{ entry === 'objects' ? 'Schema' : entry === 'history' ? 'History' : 'Saved' }}
+        </span>
       </button>
     </nav>
 
@@ -617,7 +619,16 @@ defineExpose({ focusFilter, refresh })
   margin: 12px 12px 0 14px;
 }
 .sidebar__tab {
-  flex: 1;
+  /* Equal shares that may shrink below their labels: a narrow sidebar
+     shortens the labels instead of pushing the switch out of its edge. */
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 4px;
+}
+.sidebar__tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* --- filter --------------------------------------------------------------- */

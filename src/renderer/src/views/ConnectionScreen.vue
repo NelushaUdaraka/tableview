@@ -579,7 +579,7 @@ function relativeTime(iso?: string): string {
               <AppIcon name="database" :size="16" />
             </span>
 
-            <div class="row__cell row__cell--wide">
+            <div class="row__cell row__cell--wide row__identity">
               <div class="row__title">
                 <div class="row__name truncate">{{ connection.name }}</div>
                 <!-- Said before connecting, so nobody opens production expecting
@@ -590,7 +590,7 @@ function relativeTime(iso?: string): string {
                   title="Read-only: edits and statements that would change the database are refused"
                 >
                   <AppIcon name="lock" :size="11" />
-                  Read-only
+                  <span class="row__readonly-label">Read-only</span>
                 </span>
               </div>
               <div class="row__sub truncate">{{ connection.database || 'master' }}</div>
@@ -1076,6 +1076,17 @@ function relativeTime(iso?: string): string {
 .row__readonly {
   flex: 0 0 auto;
   gap: 4px;
+}
+/* A narrow window leaves the name cell little room, and the name is what the
+   row is for: the badge gives up its word before the name gives up its
+   letters, and keeps the lock (and its title) to say the same thing. */
+.row__identity {
+  container-type: inline-size;
+}
+@container (max-width: 240px) {
+  .row__readonly-label {
+    display: none;
+  }
 }
 .row__endpoint {
   font-size: 12px;

@@ -15,6 +15,7 @@ import { useSchemaStore } from '../stores/schema'
 import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toasts'
 import { useLibraryStore } from '../stores/library'
+import { useUiStateStore } from '../stores/uiState'
 import { useRowPanel } from '../lib/rowPanel'
 import { runQueryTab } from '../lib/runQueryTab'
 import { api } from '../lib/api'
@@ -30,9 +31,12 @@ const schema = useSchemaStore()
 const settings = useSettingsStore()
 const toasts = useToastStore()
 const library = useLibraryStore()
+const uiState = useUiStateStore()
 
 const editor = ref<InstanceType<typeof SqlEditor> | null>(null)
-const editorHeight = ref(336)
+/** Shared by every query tab, and kept across restarts: the last drag decides it. */
+const editorHeight = ref(uiState.state.queryEditorHeight)
+watch(editorHeight, (height) => uiState.remember({ queryEditorHeight: height }))
 const cursor = ref(0)
 
 /** The results' row panel, which belongs to this tab and not to the window. */

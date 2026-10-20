@@ -70,7 +70,9 @@ rather than folding it away.
 - **Auto refresh, when you ask for it** — beside *Refresh*, a table can be set to re-read itself
   every 5, 10 or 30 seconds, every minute, or every 5 or 15 minutes, picked from a menu that hangs
   from the button in the window's own colours, with the interval in force ticked. It is *Off*
-  whenever a table opens, and the choice belongs to the tab: a table left on a second screen to watch a queue drain
+  when a table opens unless that table was last left refreshing — the interval is remembered per
+  table (connection, database, schema and name) across restarts, and choosing *Off* forgets it.
+  While it is open the choice belongs to the tab: a table left on a second screen to watch a queue drain
   keeps refreshing across a trip to another tab, into a split, or out into a window of its own,
   while every other table stays still. Each read is the same quiet re-read a reselected tab does —
   nothing dims, and only rows that actually changed are redrawn — and the next is timed from the

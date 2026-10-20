@@ -4,6 +4,17 @@ What changed in each release of TableView, newest first. The downloads are on th
 [Releases page](https://github.com/NelushaUdaraka/tableview/releases); a version at the top that is
 not there yet is the next release, still being prepared.
 
+## 0.2.0
+
+- TableView remembers how you left it: after a restart the sidebar comes back at the same width,
+  shown or hidden as you left it and on the same Schema, History or Saved panel, the query editor
+  keeps its height, and a table you left refreshing automatically refreshes again at the same
+  interval when you next open it (choose *Off* to stop that).
+- A narrow sidebar no longer pushes the Schema, History and Saved switch past its edge: the labels
+  shorten to fit instead.
+- In a narrow window the connection list no longer hides the names of read-only connections: their
+  *Read-only* badge shrinks to its lock icon so the name keeps its room.
+
 ## 0.1.3
 
 - Restarting to install an update no longer just makes TableView vanish: the window says it is

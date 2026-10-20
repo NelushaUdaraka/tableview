@@ -12,6 +12,7 @@ import ReadOnlyWarningDialog from './components/ReadOnlyWarningDialog.vue'
 import UpdateInstallingOverlay from './components/UpdateInstallingOverlay.vue'
 import { useConnectionStore } from './stores/connections'
 import { useSettingsStore } from './stores/settings'
+import { useUiStateStore } from './stores/uiState'
 import { useTabStore } from './stores/tabs'
 import { useToastStore } from './stores/toasts'
 import { useUpdateStore } from './stores/updates'
@@ -22,6 +23,7 @@ import { api } from './lib/api'
 
 const connections = useConnectionStore()
 const settings = useSettingsStore()
+const uiState = useUiStateStore()
 const tabs = useTabStore()
 const toasts = useToastStore()
 const updates = useUpdateStore()
@@ -146,6 +148,8 @@ onMounted(async () => {
   })
   try {
     await settings.load()
+    // A layout that cannot be read back just opens as it always did.
+    await uiState.load().catch(() => undefined)
     await connections.load()
     await openDetachedTab()
   } catch (error) {

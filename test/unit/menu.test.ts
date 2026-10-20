@@ -58,6 +58,15 @@ describe('buildMenuModel', () => {
     expect(view?.items.some((item) => item.action === 'view:toggle-row-panel')).toBe(true)
   })
 
+  it('offers Import from TablePlus in the File menu, right after Import Connections', () => {
+    const file = buildMenuModel('win32').find((menu) => menu.label === 'File')!.items
+    const at = file.findIndex((item) => item.action === 'connections:import')
+    expect(file[at + 1]).toMatchObject({
+      label: 'Import from TablePlus…',
+      action: 'connections:import-tableplus'
+    })
+  })
+
   it('quits on Windows and Linux but closes on macOS, where the app menu quits', () => {
     const file = (platform: string): MenuItemModel[] =>
       buildMenuModel(platform).find((menu) => menu.label === 'File')!.items

@@ -28,6 +28,8 @@ const editing = ref<SavedConnection | null>(null)
 /** The connection the open form is a copy of, when it is one. */
 const copiedFrom = ref<string | null>(null)
 const showForm = ref(false)
+/** Whether the form opens with the TablePlus steps showing rather than folded. */
+const tablePlusOpen = ref(false)
 const testing = ref(false)
 const search = ref('')
 /**
@@ -109,6 +111,7 @@ onMounted(() => {
   unsubscribeMenu = onMenuAction((action) => {
     if (action === 'connection:new') startNew()
     else if (action === 'connections:import') void importConnections()
+    else if (action === 'connections:import-tableplus') startTablePlusImport()
     else if (action === 'connections:export') void exportConnections()
   })
 })
@@ -124,7 +127,19 @@ const formKicker = computed(() => {
 function startNew(): void {
   editing.value = null
   copiedFrom.value = null
+  tablePlusOpen.value = false
   showForm.value = true
+}
+
+/**
+ * A new connection with the steps for getting one out of TablePlus showing.
+ *
+ * Its own function rather than a flag on `startNew`, which is bound straight
+ * to a button's click and would take the click event for the flag.
+ */
+function startTablePlusImport(): void {
+  startNew()
+  tablePlusOpen.value = true
 }
 
 function startEdit(connection: SavedConnection): void {
@@ -338,11 +353,13 @@ function rowMenuItems(connection: SavedConnection): MenuEntry[] {
 
 const transferItems: MenuEntry[] = [
   { label: 'Import connections…', action: 'import' },
+  { label: 'Import from TablePlus…', action: 'import-tableplus' },
   { label: 'Export connections…', action: 'export' }
 ]
 
 async function onMenuSelect(action: string): Promise<void> {
   if (action === 'import') return importConnections()
+  if (action === 'import-tableplus') return startTablePlusImport()
   if (action === 'export') return exportConnections()
 
   const connection = menu.value?.connection
@@ -678,6 +695,8 @@ function relativeTime(iso?: string): string {
         :connection="editing"
         :busy="testing"
         :groups="connections.groups"
+        :saved-names="connections.saved.map((entry) => entry.name)"
+        :table-plus-open="tablePlusOpen"
         :select-name="Boolean(copiedFrom)"
         @save="save"
         @duplicate="saveAsCopy"

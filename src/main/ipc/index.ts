@@ -41,6 +41,7 @@ import {
 import { exportFileName, type ImportSummary } from '../../shared/connectionTransfer'
 import { MenuRole } from '../../shared/menu'
 import { EXPORT_EXTENSIONS, exportRows } from '../../shared/export'
+import { tablePlusUrlFromClipboard } from '../../shared/tableplus'
 import {
   credentialsFromClipboard,
   credentialsToEnv,
@@ -463,6 +464,12 @@ export function registerIpcHandlers(context: IpcContext): void {
   // handed over: whatever else is on the clipboard stays there.
   handle(CHANNELS.clipboardAwsCredentials, async () =>
     credentialsFromClipboard(await clipboard.readText())
+  )
+
+  // The same for a connection copied out of TablePlus: a SQL Server URL is
+  // handed over, and anything else stays on the clipboard.
+  handle(CHANNELS.clipboardTablePlusUrl, async () =>
+    tablePlusUrlFromClipboard(await clipboard.readText())
   )
 
   handle(

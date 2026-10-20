@@ -12,6 +12,7 @@ import {
   ACCENT_SWATCHES,
   accentVariables,
   contrastRatio,
+  nearestSwatch,
   normalizeHex,
   parseHex,
   textOn
@@ -135,5 +136,37 @@ describe('the offered swatches', () => {
   it('is distinct, so two connections cannot be told apart only by squinting', () => {
     expect(new Set(colours.map((swatch) => swatch.hex)).size).toBe(colours.length)
     expect(new Set(colours.map((swatch) => swatch.label)).size).toBe(colours.length)
+  })
+})
+
+/**
+ * A colour brought in from elsewhere — TablePlus's status colour, say — lands
+ * on the swatch it looks most like, so the connection keeps the contrast the
+ * offered colours were chosen for rather than whatever it arrived with.
+ */
+describe('nearestSwatch', () => {
+  it('matches a colour to the nearest of the offered swatches', () => {
+    expect(nearestSwatch('005392')?.hex).toBe('#1971c2') // TablePlus's dark blue → Blue
+    expect(nearestSwatch('#E03131')?.label).toBe('Red') // an exact swatch, # and case either way
+    expect(nearestSwatch('808080')?.label).toBe('Slate')
+    expect(nearestSwatch('3e63dd')?.label).toBe('Blue') // never the empty default swatch
+  })
+
+  // Red is the colour people give production; it has to arrive red, however
+  // bright or dark TablePlus's red was, and never as orange or amber.
+  it('keeps a red red', () => {
+    for (const red of ['#FF2600', '941100', '8B0000', 'FF7E79']) {
+      expect(nearestSwatch(red)?.label, red).toBe('Red')
+    }
+  })
+
+  it('files a colour with no hue of its own under the neutral swatch', () => {
+    for (const grey of ['000000', 'FFFFFF', '808080', '5E5E5E', 'C0C0C0']) {
+      expect(nearestSwatch(grey)?.label, grey).toBe('Slate')
+    }
+  })
+
+  it('has nothing to offer for something that is not a colour', () => {
+    for (const value of ['', 'blue', '12345', undefined, null]) expect(nearestSwatch(value)).toBeNull()
   })
 })

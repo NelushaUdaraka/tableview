@@ -25,6 +25,9 @@ const ICON: Record<'info' | 'success' | 'error', IconName> = {
       <div class="toast__body">
         <div class="toast__message">{{ toast.message }}</div>
         <div v-if="toast.detail" class="toast__detail selectable">{{ toast.detail }}</div>
+        <button v-if="toast.action" class="btn btn--sm toast__action" @click="toasts.act(toast.id)">
+          {{ toast.action.label }}
+        </button>
       </div>
       <button
         class="btn btn--ghost btn--icon btn--sm toast__close"
@@ -105,6 +108,10 @@ const ICON: Record<'info' | 'success' | 'error', IconName> = {
 .toast__close {
   flex: 0 0 auto;
   margin: -3px 0 0 auto;
+}
+/* What the toast offers to do, under what it says. */
+.toast__action {
+  margin-top: 10px;
 }
 .toast__detail {
   margin-top: 4px;

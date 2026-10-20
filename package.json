@@ -1,6 +1,7 @@
 {
   "name": "tableview",
   "productName": "TableView",
+  "desktopName": "tableview.desktop",
   "version": "0.1.0",
   "description": "A cross-platform SQL client for Microsoft SQL Server, built with Electron and Vue 3.",
   "main": "./out/main/index.js",
@@ -40,6 +41,7 @@
     "test:e2e:ssm": "scripts/e2e.sh ssm-form"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "mssql": "^12.7.0",
     "sql-formatter": "^15.8.2",
     "ssh2": "^1.17.0"

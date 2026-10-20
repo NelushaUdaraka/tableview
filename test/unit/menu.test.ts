@@ -58,6 +58,11 @@ describe('buildMenuModel', () => {
     expect(view?.items.some((item) => item.action === 'view:toggle-row-panel')).toBe(true)
   })
 
+  it('offers a check for updates from the Help menu', () => {
+    const help = buildMenuModel('win32').find((menu) => menu.label === 'Help')
+    expect(help?.items.some((item) => item.action === 'help:check-updates')).toBe(true)
+  })
+
   it('offers Import from TablePlus in the File menu, right after Import Connections', () => {
     const file = buildMenuModel('win32').find((menu) => menu.label === 'File')!.items
     const at = file.findIndex((item) => item.action === 'connections:import')

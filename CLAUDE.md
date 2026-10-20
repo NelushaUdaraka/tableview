@@ -13,7 +13,7 @@ relevant section before changing a feature.
 npm install            # postinstall runs `install-electron`; run `npx install-electron` by hand if dev says "Electron uninstall"
 npm run dev            # hot-reloading dev build (electron-vite)
 npm run build          # electron-vite build into out/
-npm run build:win | build:linux | build:unpack   # packaged builds via electron-builder, into release/
+npm run build:win | build:linux | build:unpack   # packaged builds via electron-builder, into release/ (never published)
 
 npm run typecheck      # tsc for main/preload/shared (tsconfig.node.json) + vue-tsc for renderer (tsconfig.web.json)
 npm test               # unit tests only (vitest project "unit", test/unit/**)
@@ -22,6 +22,12 @@ npx vitest run --project unit -t "name of test"           # one test by name
 ```
 
 There is no lint script; `npm run typecheck` plus the unit tests are the fast checks.
+
+**Releases** are made by `.github/workflows/release.yml` from a version tag (`npm version x.y.z`, then
+`git push --follow-tags`; the tag must match `package.json`). It drafts a GitHub release, builds the
+Windows installer and portable exe and the Linux AppImages and .debs (x64 and arm64) into it, and
+publishes it once every file is up. Installed copies update from those releases, so the repository
+must stay public. Building the Windows targets on Linux needs wine (32- and 64-bit).
 
 **Integration tests** (`test/integration/`) run against a real SQL Server 2022 and sshd in Docker:
 
@@ -48,7 +54,11 @@ Three Electron layers plus a shared module, with path aliases `@shared` → `src
   `tunnel/` provides SSH (`ssh2`) and AWS SSM port forwarding (spawns `aws ssm start-session`; on
   Windows the plugin grandchild must be killed as a process tree). `storage/` holds JSON stores and the
   credential vault (Electron `safeStorage`, falling back to AES-256-GCM with a 0600 key file).
-  `closeGuard.ts` blocks window close/quit while there is unsaved work.
+  `closeGuard.ts` blocks window close/quit while there is unsaved work. `updater.ts` decides when to
+  look for a release and what to do with one (electron-updater is handed in, never imported there):
+  the Windows install and the AppImage update themselves (mode `self`), the portable exe and the .deb
+  only announce a new release (`notify`), anything else is `unsupported`. Restarting into an update
+  (`restartToUpdate` in `index.ts`) asks the close guard first, like a quit.
 - **`src/preload/index.ts`** — `contextBridge` façade. Unwraps each `IpcResult` envelope and rethrows
   failures as real `Error`s carrying SQL Server error number/line/procedure.
 - **`src/shared/`** — code used on both sides. `ipc.ts` defines `CHANNELS` and the `RendererApi`
@@ -86,6 +96,9 @@ Invariants that span multiple files:
   background; `lib/tableCache.ts` decides whether the result actually differs before touching the grid.
   Loads carry a token so only the latest request's answer is applied.
 - One connection per window: the schema store is keyed to a single connection.
+- **Releases are found in one place, named twice:** the `publish` section of `electron-builder.yml`
+  (written into the app as `app-update.yml`) and `RELEASES_URL` in `shared/updates.ts` must name the
+  same GitHub repository.
 
 ## UI work
 

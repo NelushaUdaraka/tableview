@@ -25,6 +25,7 @@ import {
 } from './types'
 import type { ImportSummary } from './connectionTransfer'
 import type { MenuRole } from './menu'
+import type { UpdateState } from './updates'
 
 /**
  * A tab being handed to a window of its own.
@@ -198,6 +199,10 @@ export const CHANNELS = {
   settingsGet: 'settings:get',
   settingsUpdate: 'settings:update',
 
+  updatesState: 'updates:state',
+  updatesCheck: 'updates:check',
+  updatesInstall: 'updates:install',
+
   exportToFile: 'export:toFile',
   exportToClipboard: 'export:toClipboard',
   clipboardAwsCredentials: 'clipboard:awsCredentials',
@@ -212,7 +217,8 @@ export const CHANNELS = {
   eventMenuAction: 'event:menuAction',
   eventWindowChrome: 'event:windowChrome',
   eventAttachTab: 'event:attachTab',
-  eventCloseRequested: 'event:closeRequested'
+  eventCloseRequested: 'event:closeRequested',
+  eventUpdateState: 'event:updateState'
 } as const
 
 /**
@@ -336,6 +342,16 @@ export interface RendererApi {
   getSettings(): Promise<AppSettings>
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>
 
+  /** Where updating this copy of the app stands. */
+  getUpdateState(): Promise<UpdateState>
+  /**
+   * Looks for a newer release now, whatever the setting says, and fetches what
+   * it finds. Resolves with the state it leaves behind, failures included.
+   */
+  checkForUpdates(): Promise<UpdateState>
+  /** Restarts into the downloaded update, asking about unsaved work first. */
+  installUpdate(): Promise<void>
+
   exportToFile(request: ExportRequest): Promise<string | null>
   copyToClipboard(text: string): Promise<void>
   /**
@@ -361,6 +377,8 @@ export interface RendererApi {
   onAttachTab(handler: (tab: DetachedTab) => void): () => void
   /** The window is closing, or the app quitting, with unsaved work in it. */
   onCloseRequested(handler: (reason: WindowCloseReason) => void): () => void
+  /** Updating has moved on: a check, a download, a failure. Sent to every window. */
+  onUpdateState(handler: (state: UpdateState) => void): () => void
 }
 
 declare global {

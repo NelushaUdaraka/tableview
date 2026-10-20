@@ -21,6 +21,7 @@ import type {
   TableChangeSet,
   TableDataRequest
 } from '../shared/types'
+import type { UpdateState } from '../shared/updates'
 
 /** Rethrows a failed envelope as an Error carrying the server's error fields. */
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
@@ -103,6 +104,10 @@ const api: RendererApi = {
   getSettings: () => invoke(CHANNELS.settingsGet),
   updateSettings: (patch) => invoke(CHANNELS.settingsUpdate, patch),
 
+  getUpdateState: () => invoke(CHANNELS.updatesState),
+  checkForUpdates: () => invoke(CHANNELS.updatesCheck),
+  installUpdate: () => invoke(CHANNELS.updatesInstall),
+
   exportToFile: (request: ExportRequest) => invoke(CHANNELS.exportToFile, request),
   copyToClipboard: (text) => invoke(CHANNELS.exportToClipboard, text),
   readAwsCredentialsFromClipboard: () => invoke(CHANNELS.clipboardAwsCredentials),
@@ -121,7 +126,9 @@ const api: RendererApi = {
   onAttachTab: (handler: (tab: DetachedTab) => void) =>
     subscribe(CHANNELS.eventAttachTab, handler as (payload: never) => void),
   onCloseRequested: (handler: (reason: WindowCloseReason) => void) =>
-    subscribe(CHANNELS.eventCloseRequested, handler as (payload: never) => void)
+    subscribe(CHANNELS.eventCloseRequested, handler as (payload: never) => void),
+  onUpdateState: (handler: (state: UpdateState) => void) =>
+    subscribe(CHANNELS.eventUpdateState, handler as (payload: never) => void)
 }
 
 contextBridge.exposeInMainWorld('api', api)

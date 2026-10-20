@@ -14,6 +14,7 @@ import type { UpdateState } from '../../../src/shared/updates'
 const getUpdateState = vi.fn()
 const checkForUpdates = vi.fn()
 const installUpdate = vi.fn()
+const takeInstalledUpdate = vi.fn()
 const openExternal = vi.fn()
 let pushState: (state: UpdateState) => void = () => undefined
 
@@ -22,6 +23,7 @@ vi.mock('../../../src/renderer/src/lib/api', () => ({
     getUpdateState: () => getUpdateState(),
     checkForUpdates: () => checkForUpdates(),
     installUpdate: () => installUpdate(),
+    takeInstalledUpdate: () => takeInstalledUpdate(),
     openExternal: (url: string) => openExternal(url),
     onUpdateState: (handler: (state: UpdateState) => void) => {
       pushState = handler
@@ -40,6 +42,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   getUpdateState.mockResolvedValue({ mode: 'self', status: 'idle' })
   installUpdate.mockResolvedValue(undefined)
+  takeInstalledUpdate.mockResolvedValue(null)
   openExternal.mockResolvedValue(undefined)
 })
 
@@ -153,5 +156,43 @@ describe('a check from the Help menu', () => {
     expect(await updates.check()).toMatchObject({ status: 'up-to-date' })
     expect(updates.state.status).toBe('up-to-date')
     expect(toasts.toasts).toEqual([])
+  })
+})
+
+describe('restarting into an update', () => {
+  it('says when the update went in, with the way to what it changed', async () => {
+    takeInstalledUpdate.mockResolvedValue('0.2.0')
+    const updates = useUpdateStore()
+    const toasts = useToastStore()
+    await updates.load()
+
+    expect(toasts.toasts).toHaveLength(1)
+    expect(toasts.toasts[0]).toMatchObject({ kind: 'success', message: 'TableView updated to 0.2.0' })
+    toasts.act(toasts.toasts[0].id)
+    expect(openExternal).toHaveBeenCalledWith(
+      'https://github.com/NelushaUdaraka/tableview/releases/tag/v0.2.0'
+    )
+  })
+
+  it('says nothing after a run of the same version', async () => {
+    const updates = useUpdateStore()
+    const toasts = useToastStore()
+    await updates.load()
+    expect(toasts.toasts).toEqual([])
+  })
+
+  it('says so when the restart fails, since the app was expected to close', async () => {
+    const updates = useUpdateStore()
+    const toasts = useToastStore()
+    await updates.load()
+    pushState(ready)
+    toasts.dismiss(toasts.toasts[0].id)
+
+    pushState({ mode: 'self', status: 'installing', version: '0.2.0' })
+    expect(toasts.toasts).toEqual([])
+    pushState({ mode: 'self', status: 'error', error: 'The update could not be installed.' })
+    expect(toasts.toasts.map((toast) => [toast.kind, toast.message])).toEqual([
+      ['error', 'Could not install the update']
+    ])
   })
 })

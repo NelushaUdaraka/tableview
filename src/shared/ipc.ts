@@ -202,6 +202,7 @@ export const CHANNELS = {
   updatesState: 'updates:state',
   updatesCheck: 'updates:check',
   updatesInstall: 'updates:install',
+  updatesInstalled: 'updates:installed',
 
   exportToFile: 'export:toFile',
   exportToClipboard: 'export:toClipboard',
@@ -351,6 +352,11 @@ export interface RendererApi {
   checkForUpdates(): Promise<UpdateState>
   /** Restarts into the downloaded update, asking about unsaved work first. */
   installUpdate(): Promise<void>
+  /**
+   * The version this copy has been updated to since it last ran, or null. It
+   * is handed out once, so only the first window to ask says so.
+   */
+  takeInstalledUpdate(): Promise<string | null>
 
   exportToFile(request: ExportRequest): Promise<string | null>
   copyToClipboard(text: string): Promise<void>

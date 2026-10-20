@@ -17,9 +17,12 @@ export const UPDATE_ACTION_LABELS: Record<UpdateAction, string> = {
   download: 'Download'
 }
 
-/** What the button does next; nothing, for a copy that does not update itself. */
+/**
+ * What the button does next; nothing, for a copy that does not update itself
+ * or one already restarting into its update.
+ */
 export function nextUpdateAction(state: UpdateState): UpdateAction | null {
-  if (state.mode === 'unsupported') return null
+  if (state.mode === 'unsupported' || state.status === 'installing') return null
   if (state.status === 'ready') return 'restart'
   if (state.status === 'available') return state.mode === 'notify' ? 'download' : 'get'
   return 'check'
@@ -50,6 +53,8 @@ export function updateSummary(state: UpdateState): string {
       return `Downloading TableView ${state.version}… ${state.percent ?? 0}%`
     case 'ready':
       return `TableView ${state.version} is ready to install.`
+    case 'installing':
+      return `Installing TableView ${state.version}…`
     case 'error':
       return state.error ?? 'The last check failed.'
   }

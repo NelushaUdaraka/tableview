@@ -15,6 +15,7 @@ describe('nextUpdateAction', () => {
     ['up to date', { mode: 'self', status: 'up-to-date', checkedAt: '2026-10-19T09:00:00.000Z' }, 'check'],
     ['a failed check', { mode: 'notify', status: 'error', error: 'Could not reach GitHub.' }, 'check'],
     ['an update ready to install', { mode: 'self', status: 'ready', version: '0.2.0' }, 'restart'],
+    ['a restart into the update under way', { mode: 'self', status: 'installing', version: '0.2.0' }, null],
     ['an update found but not fetched', { mode: 'self', status: 'available', version: '0.2.0' }, 'get'],
     ['a copy that cannot replace itself, with a newer release out', { mode: 'notify', status: 'available', version: '0.2.0' }, 'download'],
     ['a copy that does not update itself', { mode: 'unsupported', status: 'idle' }, null]

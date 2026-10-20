@@ -7,6 +7,11 @@
  * found — once each, however often that state comes round again. A check
  * somebody asked for from the Help menu always gets an answer, since they are
  * waiting for one; a check from the Settings dialog is answered by the dialog.
+ *
+ * Restarting into an update closes the app for as long as the installer takes,
+ * so the window says so first (`installing`, drawn over everything by
+ * `UpdateInstallingOverlay`), and the first window of the new version says
+ * that the update went in.
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
@@ -49,6 +54,10 @@ export const useUpdateStore = defineStore('updates', () => {
   }
 
   function receive(next: UpdateState): void {
+    // The restart was meant to close the app; that it did not needs saying.
+    if (state.value.status === 'installing' && next.status === 'error') {
+      toasts.error('Could not install the update', next.error)
+    }
     state.value = next
     if (isNews(next) && next.version !== announced) announce(next)
   }
@@ -82,6 +91,12 @@ export const useUpdateStore = defineStore('updates', () => {
       listening = true
     }
     receive(await api.getUpdateState())
+    const installed = await api.takeInstalledUpdate()
+    if (installed) {
+      toasts.push('success', `TableView updated to ${installed}`, undefined, {
+        action: { label: 'What’s new', run: () => download(installed) }
+      })
+    }
   }
 
   /**
@@ -112,7 +127,7 @@ export const useUpdateStore = defineStore('updates', () => {
     api.installUpdate().catch((error) => toasts.fromError('Could not restart into the update', error))
   }
 
-  /** Opens the page a newer portable release is downloaded from. */
+  /** Opens a release's page: to download it, or to read what it changed. */
   function download(version = state.value.version): void {
     if (!version) return
     api

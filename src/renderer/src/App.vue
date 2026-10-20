@@ -9,6 +9,7 @@ import WorkspaceView from './views/WorkspaceView.vue'
 import ToastHost from './components/ToastHost.vue'
 import CredentialsExpiredDialog from './components/CredentialsExpiredDialog.vue'
 import ReadOnlyWarningDialog from './components/ReadOnlyWarningDialog.vue'
+import UpdateInstallingOverlay from './components/UpdateInstallingOverlay.vue'
 import { useConnectionStore } from './stores/connections'
 import { useSettingsStore } from './stores/settings'
 import { useTabStore } from './stores/tabs'
@@ -183,6 +184,8 @@ onBeforeUnmount(() => {
     <CredentialsExpiredDialog />
     <!-- Asked by every read-only toggle — the status bar, the list, the form. -->
     <ReadOnlyWarningDialog />
+    <!-- Last, over everything: the app is about to close into an update. -->
+    <UpdateInstallingOverlay />
   </div>
 </template>
 

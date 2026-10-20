@@ -74,11 +74,17 @@ interface QueriesFile {
   queries: SavedQuery[]
 }
 
+interface LastRunFile {
+  /** The app version that last ran with this data, or null before any has. */
+  appVersion: string | null
+}
+
 export class AppData {
   private readonly connections: JsonStore<ConnectionsFile>
   private readonly history: JsonStore<HistoryFile>
   private readonly queries: JsonStore<QueriesFile>
   private readonly settings: JsonStore<AppSettings>
+  private readonly lastRun: JsonStore<LastRunFile>
 
   constructor(
     userDataDir: string,
@@ -98,6 +104,9 @@ export class AppData {
     }))
     this.settings = new JsonStore(path.join(userDataDir, 'settings.json'), () => ({
       ...DEFAULT_SETTINGS
+    }))
+    this.lastRun = new JsonStore(path.join(userDataDir, 'last-run.json'), () => ({
+      appVersion: null
     }))
     this.retireLegacyAppName()
   }
@@ -457,5 +466,20 @@ export class AppData {
     const next = { ...this.getSettings(), ...patch }
     this.settings.write(next)
     return next
+  }
+
+  // -- the version that last ran --------------------------------------------
+
+  /**
+   * Records which version of the app is running, and answers with that
+   * version if it is not the one that ran last time — that is, if TableView
+   * has been updated since. A first run has nothing to compare with, so it
+   * answers null, as does a run of the same version.
+   */
+  noteRunningVersion(version: string): string | null {
+    const previous = this.lastRun.read().appVersion
+    if (previous === version) return null
+    this.lastRun.write({ appVersion: version })
+    return previous === null ? null : version
   }
 }

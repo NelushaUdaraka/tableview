@@ -54,6 +54,12 @@ function packageType(): string | undefined {
 }
 
 /**
+ * How long the windows say the update is going in before the app closes, so
+ * the message is read rather than flashed.
+ */
+const INSTALL_NOTICE_MS = 1500
+
+/**
  * Restarts into a downloaded update. Unsaved work is asked about first, the
  * way a quit asks.
  *
@@ -62,16 +68,26 @@ function packageType(): string | undefined {
  * racing it on the way out: an SSM session cut off mid-close leaves its
  * plugin process behind. An AppImage puts the new file in place before this
  * copy quits, and the quit closes the connections as any quit does.
+ *
+ * Before anything closes, every window says the update is going in and that
+ * TableView will open again by itself: the installer runs out of sight, and
+ * a window that simply vanishes for a minute looks like a crash.
  */
 async function restartToUpdate(): Promise<void> {
   if (updates?.state.status !== 'ready') return
   const mayGo = (): boolean => closeGuard.mayQuit(windows?.all ?? [], () => void restartToUpdate())
   if (!mayGo()) return
+  updates.beginInstall()
   if (process.platform === 'win32') {
     await registry.closeAll()
-    // Anything left unsaved while the connections were closing is asked about too.
-    if (!mayGo()) return
+    // Anything left unsaved while the connections were closing is asked about
+    // too — with the update back to waiting, so the question is not hidden.
+    if (!mayGo()) {
+      updates.cancelInstall()
+      return
+    }
   }
+  await new Promise((resolve) => setTimeout(resolve, INSTALL_NOTICE_MS))
   // The new AppImage is started before this copy has quit, and would find the
   // single-instance lock still held and quit at once. If the install fails,
   // nothing quits, and the lock is taken back.
@@ -125,6 +141,7 @@ void app.whenReady().then(async () => {
       packageType: packageType()
     }),
     enabled: appData.getSettings().autoUpdate,
+    installed: appData.noteRunningVersion(app.getVersion()),
     // electron-updater picks its Linux updater by the package-type marker,
     // which an AppImage can carry too (see updateMode); so it is asked for
     // by name here.

@@ -32,7 +32,13 @@ sudo apt install ./TableView-<version>-linux-amd64.deb   # or -linux-arm64.deb
   shortly after it starts and every four hours after that, downloads one in the background (the
   AppImage only the parts that changed), and says when it is ready: *Restart* installs it there and
   then, and otherwise it installs the next time TableView quits. Restarting asks about unsaved work
-  first, the way quitting does. The AppImage swaps its own file for the new one, so it has to live
+  first, the way quitting does, then says *Installing TableView <version>* over the window for a
+  moment before it closes: the Windows installer runs out of sight and TableView is gone until it
+  has finished, which can take a minute, so the window going should not be taken for a crash. The
+  first window of the new version then says *TableView updated to <version>*, with *What's new*
+  for that release's page. That notice compares the version with the one that last ran (kept in
+  `last-run.json` in the app's data folder), so it shows after any update, a .deb upgraded by hand
+  included, and not on a first run. The AppImage swaps its own file for the new one, so it has to live
   somewhere you can write to — `~/Applications`, say, rather than `/opt`.
 - **The portable exe and the .deb say so, and leave the download to you.** A single exe cannot
   replace itself while it runs, and a package is installed the way its system installs packages,

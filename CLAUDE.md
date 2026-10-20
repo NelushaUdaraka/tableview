@@ -26,11 +26,14 @@ npx vitest run --project unit -t "name of test"           # one test by name
 
 There is no lint script; `npm run typecheck` plus the unit tests are the fast checks.
 
-**Releases** are made by `.github/workflows/release.yml` from a version tag (`npm version x.y.z`, then
-`git push --follow-tags`; the tag must match `package.json`). It drafts a GitHub release, builds the
-Windows installer and portable exe and the Linux AppImages and .debs (x64 and arm64) into it, and
-publishes it once every file is up. Installed copies update from those releases, so the repository
-must stay public. Building the Windows targets on Linux needs wine (32- and 64-bit).
+**Releases** are made by `.github/workflows/release.yml` from a `v*` tag that must match the version
+in `package.json`. Changes bump that version as they land (see *Every change prepares the next
+release* below), so releasing is tagging `main` at it (`git tag v0.2.0 && git push origin v0.2.0`;
+`docs/releasing.md`). It drafts a GitHub release whose notes open with that version's
+`CHANGELOG.md` section, builds the Windows installer and portable exe and the Linux AppImages and
+.debs (x64 and arm64) into it, and publishes it once every file is up. Installed copies update from
+those releases, so the repository must stay public. Building the Windows targets on Linux needs wine
+(32- and 64-bit).
 
 **Integration tests** (`test/integration/`) run against a real SQL Server 2022 and sshd in Docker:
 
@@ -46,6 +49,28 @@ starts Xvfb on `:99` when there is no `DISPLAY`, kills stray `electron` processe
 lock), and uses a fresh profile in `.tmp/profile-<suite>`. Most suites need the test environment up;
 `connections` and `ssm-form` do not (`ssm-form` uses a fake `aws` CLI from `test/fixtures/fake-aws.mjs`
 installed into `.tmp/bin`). Screenshots go to `.tmp/`.
+
+## Every change prepares the next release
+
+`main` is kept ready to release. A branch that changes what ships (anything under `src/` or `build/`,
+`electron-builder.yml`, or the dependencies in `package.json`) also prepares the next release, in the
+same branch and without being asked:
+
+1. **Bump the version, once per release.** Run `git fetch --tags`, then compare `package.json` with
+   the newest tag (`git tag --list 'v*' --sort=-v:refname | head -1`). If they are the same, this is
+   the first change since that release: run `npm version patch --no-git-tag-version` for fixes and
+   small improvements, or `npm version minor --no-git-tag-version` for a new feature, which updates
+   `package.json` and `package-lock.json` together. If the version is already past the tag, leave
+   it, unless this change is a new feature and the bump so far was only a patch: then make it a
+   minor, and rename the changelog heading to match. A major bump only when the user asks for one.
+2. **Add the change to `CHANGELOG.md`**, under the heading for that version (`## 0.2.0`; start the
+   section at the top if this is the first change since the release): a bullet saying what changed
+   for someone using the app, in plain words. The release workflow opens the release notes with that
+   section.
+
+Never create or push a `v*` tag: a tag publishes a release to every installed copy, and when to
+release is the user's call. Docs, tests and tooling on their own don't ship, so they leave the
+version and the changelog alone.
 
 ## Architecture
 

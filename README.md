@@ -61,6 +61,7 @@ the connections where a mistake would hurt. It is built with Electron, Vue 3 and
 ## Download
 
 Get the latest version from the [Releases page](https://github.com/NelushaUdaraka/tableview/releases/latest).
+The [changelog](CHANGELOG.md) says what changed in each release.
 
 | System | File | Updates |
 | --- | --- | --- |

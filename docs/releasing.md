@@ -1,18 +1,29 @@
 # Releasing
 
-`.github/workflows/release.yml` builds and publishes releases. Bump the version and push the tag
-that makes:
+`.github/workflows/release.yml` builds and publishes releases, and pushing a version tag is what
+starts it.
+
+`main` is kept ready to release. Every change to what ships prepares the next release as it lands:
+the first one after a release bumps the version in `package.json` (a patch for fixes and small
+improvements, a minor for a new feature), and each one adds a line about itself to that version's
+section of [`CHANGELOG.md`](../CHANGELOG.md). `CLAUDE.md` holds the rule. Releasing is then tagging
+`main` at the version it already carries:
 
 ```bash
-npm version 0.2.0        # or patch, minor, major: sets package.json and tags v0.2.0
-git push --follow-tags
+git checkout main && git pull
+git tag v0.2.0           # the version package.json says
+git push origin v0.2.0
 ```
+
+If nothing has bumped the version, `npm version patch` (or `minor`, `major`) sets it and makes the
+tag in one step; push both with `git push --follow-tags`.
 
 The workflow then:
 
 1. runs the type check and the unit tests, and stops if the tag does not match `package.json` — the
    app compares updates against that version, so the two have to agree;
-2. drafts a GitHub release for the tag, with notes generated from what was merged since the last one;
+2. drafts a GitHub release for the tag. Its notes open with the version's section of
+   `CHANGELOG.md`, followed by the pull requests merged since the last release;
 3. builds the installer and the portable exe on Windows, and the AppImages and .debs for x64 and
    arm64 on Linux, side by side, and uploads them all to the draft with the files installed copies
    read: `latest.yml` and the installer's block map, `latest-linux.yml` and `latest-linux-arm64.yml`;

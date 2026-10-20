@@ -69,9 +69,8 @@ const INSTALL_NOTICE_MS = 1500
  * plugin process behind. An AppImage puts the new file in place before this
  * copy quits, and the quit closes the connections as any quit does.
  *
- * Before anything closes, every window says the update is going in and that
- * TableView will open again by itself: the installer runs out of sight, and
- * a window that simply vanishes for a minute looks like a crash.
+ * Before anything closes, every window says the update is going in and what
+ * comes next, since a window that simply vanishes looks like a crash.
  */
 async function restartToUpdate(): Promise<void> {
   if (updates?.state.status !== 'ready') return

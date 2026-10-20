@@ -2,17 +2,20 @@
 /**
  * Drawn over the whole window while the app restarts into an update.
  *
- * The app closes for as long as the installer takes — out of sight on
- * Windows, where that can be a minute — and a window that simply vanishes
- * looks like a crash. So it says first what is about to happen, and that
- * TableView opens again on its own. There is nothing to press: by now the
- * unsaved work has been asked about, and the restart is under way.
+ * A window that simply vanishes looks like a crash, so it says first what is
+ * about to happen: on Windows the installer opens in its place and is clicked
+ * through, and its last page starts TableView again; an AppImage swaps its
+ * file and is back in a moment. There is nothing to press: by now the unsaved
+ * work has been asked about, and the restart is under way.
  */
 import { computed } from 'vue'
+import { useSettingsStore } from '../stores/settings'
 import { useUpdateStore } from '../stores/updates'
 
 const updates = useUpdateStore()
+const settings = useSettingsStore()
 const version = computed(() => updates.state.version)
+const windows = computed(() => settings.appInfo?.platform === 'win32')
 </script>
 
 <template>
@@ -22,10 +25,11 @@ const version = computed(() => updates.state.version)
         <span class="spinner"></span>
       </div>
       <div class="empty-state__title">Installing TableView {{ version }}</div>
-      <p>
-        TableView closes while the update installs, and opens again on its own when it is done.
-        This can take a minute.
+      <p v-if="windows">
+        TableView closes and the installer opens. Follow it through, and TableView opens again when
+        it finishes.
       </p>
+      <p v-else>TableView closes and opens again on its own in a moment.</p>
     </div>
   </div>
 </template>

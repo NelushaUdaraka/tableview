@@ -285,8 +285,14 @@ export class UpdateController {
   }
 
   /**
-   * Restarts into the downloaded update: silently, since the installer's
-   * pages are for a first install, and running the app again afterwards.
+   * Restarts into the downloaded update, running the app again afterwards.
+   *
+   * The Windows installer is shown rather than run silently: a silent one
+   * leaves nothing on screen until the new version opens, which can be a
+   * minute. Run as an update it skips the folder page, keeps the install mode
+   * that is already there, and its last page starts TableView again. An
+   * update that installs on quit stays silent: whoever quit is done with the
+   * app.
    *
    * False when there is nothing to install, or when installing failed there
    * and then — an AppImage whose folder cannot be written to, say. Such a
@@ -296,7 +302,7 @@ export class UpdateController {
   install(): boolean {
     if (this.current.status === 'ready') this.beginInstall()
     if (!this.updater || this.current.status !== 'installing') return false
-    this.updater.quitAndInstall(true, true)
+    this.updater.quitAndInstall(false, true)
     return this.current.status === 'installing'
   }
 

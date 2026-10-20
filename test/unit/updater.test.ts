@@ -368,7 +368,7 @@ describe('the installed app', () => {
     expect(fake.downloads).toBe(1)
   })
 
-  it('restarts into the update silently, and only once there is one', async () => {
+  it('restarts into the update with the installer in view, and only once there is one', async () => {
     const { updates, fake } = setup()
     expect(updates.install()).toBe(false)
 
@@ -379,9 +379,9 @@ describe('the installed app', () => {
     await flush()
 
     expect(updates.install()).toBe(true)
-    // Silent, because the installer's own pages are for a first install; and
-    // run afterwards, because the restart should end in the app.
-    expect(fake.installs).toEqual([[true, true]])
+    // Not silent, so the installer shows how it is going; and run
+    // afterwards, because the restart should end in the app.
+    expect(fake.installs).toEqual([[false, true]])
   })
 
   it('says the update is going in before anything closes, and can take that back', async () => {
@@ -405,7 +405,7 @@ describe('the installed app', () => {
 
     updates.beginInstall()
     expect(updates.install()).toBe(true)
-    expect(fake.installs).toEqual([[true, true]])
+    expect(fake.installs).toEqual([[false, true]])
   })
 
   it('hands out the version it was updated to once', () => {

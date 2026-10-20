@@ -1,1034 +1,129 @@
-<img src="build/icon.png" width="96" height="96" alt="">
+<p align="center">
+  <img src="build/icon.png" width="96" height="96" alt="">
+</p>
 
-# TableView
+<h1 align="center">TableView</h1>
 
-A cross-platform SQL client for **Microsoft SQL Server**, built with Electron, Vue 3 and
-TypeScript. Phase 1 targets SQL Server as the only engine, but everything behind the
-`DbClient` seam is written so a second engine slots in without touching the UI.
+<p align="center">
+  A desktop client for Microsoft SQL Server, on Windows and Linux.
+</p>
 
-![Phase 1](https://img.shields.io/badge/phase-1-7390ff) ![Engine](https://img.shields.io/badge/engine-SQL%20Server-blue)
+<p align="center">
+  <a href="https://github.com/NelushaUdaraka/tableview/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/NelushaUdaraka/tableview"></a>
+  <img alt="Platforms: Windows and Linux" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-informational">
+  <img alt="Engine: SQL Server" src="https://img.shields.io/badge/engine-SQL%20Server-blue">
+  <a href="LICENSE"><img alt="Licence: MIT" src="https://img.shields.io/badge/licence-MIT-green"></a>
+</p>
 
----
+TableView connects to SQL Server directly, through an SSH tunnel or through an AWS Systems Manager
+bastion. It gives you a fast table browser, a T-SQL editor that knows your schema, and safeguards for
+the connections where a mistake would hurt. It is built with Electron, Vue 3 and TypeScript.
 
-## What's in phase 1
+## Features
 
 **Connections**
-- Saved connections with name, host/port and default database — each with a colour that becomes the
-  whole window's accent, so production never looks like staging
-- **Ordered the way you look for them** — the list opens on the connection made most recently and
-  re-sorts by name, last opened or endpoint, either way round. The choice is a setting rather than a
-  session's whim, so the list is in the same order tomorrow morning. A connection nobody has opened
-  yet has no last-opened time at all, so it sorts *after* the ones that have rather than leaping to
-  the top when the order is reversed.
-- **One button per row, and a ⋮ for the rest** — *Connect* is what a row is for, so it is the only
-  button on it; edit, duplicate and delete sit behind the row's ⋮, which raises the same menu a
-  right-click always has
-- **Filed under groups** — a connection carries the name of a group ("Production", "Client work"),
-  and the list draws a heading for each one with the loose connections gathered under *Ungrouped* at
-  the end. Typing a name no connection carries yet is what creates a group; the row's ⋮ files others
-  under it, and taking the last connection out takes the group with it — there is no empty folder to
-  tidy up. Headings fold away, and a search reaches into the folded ones, because the connection
-  being typed for is exactly the one a closed heading would be hiding.
-- **Import and export, without the secrets** — *Export connections* writes the list to a JSON file
-  and *Import connections* reads one back, which is how a setup moves to a second machine. **No
-  password, SSH passphrase or AWS credential block is ever written to that file**: an export lands
-  in a downloads folder, goes out as an attachment and ends up in a backup, and none of those are
-  places for the key to production. What travels is the shape of each connection — including its
-  group, its colour, whether it is read-only and the day it was made — plus a note of which secrets
-  it had, so the toast can say how many will need a password entering rather than leaving it to be
-  discovered at connect time. A name already saved is left alone rather than imported beside
-  itself, so re-importing the same file to pick up one new connection does not leave you with two
-  of everything.
-- **…or brought over from TablePlus** — *Import from TablePlus…*, on the list's ⋮ and in the File
-  menu, opens a new connection with the three steps for getting one out of TablePlus: right-click
-  it in TablePlus's start window, choose *Copy as URL*, and press *Paste URL* here. The form fills
-  itself in — server, login and password, database, the colour (matched to the nearest of
-  TableView's own), the TablePlus tag as its group, and the SSH tunnel when there is one — and
-  nothing is saved until *Save*, so it can be looked over and tested first. A name already in the
-  list is called out before saving, and saving puts the new one beside it without touching the
-  old; a connection TablePlus kept in a safe mode arrives read-only, since TablePlus has no
-  read-only mode of its own and refusing writes is the nearest TableView has to its warnings; and
-  what the URL cannot carry — an SSH key file, a Windows sign-in — the form asks for. The
-  clipboard is read in the main process, and only a SQL Server URL from TablePlus is handed to the
-  window: anything else that was copied, another database's URL with its password in it
-  included, stays where it is. A new connection opened the usual way offers the same paste,
-  folded to one line.
-- SQL Server logins, Windows/NTLM (with domain), and Azure AD password auth
-- TLS options: `encrypt`, `trustServerCertificate`, named instances, `ApplicationIntent=ReadOnly`,
-  connect/request timeouts, pool sizing, application name
-- **SSH tunnelling** with password, private key (with passphrase) or agent auth, `~` expansion,
-  keepalives, and an ephemeral loopback-only local port
-- **AWS SSM Session Manager** port forwarding — the app runs `aws ssm start-session` for you and
-  points the connection at the port it opens, so there is no second terminal to babysit (see below)
-- **Bastion picked from the account, not remembered** — paste credentials, choose a region, and the
-  connection form lists the instances in it with their Name tags and whether Systems Manager can
-  actually reach them
-- **…or named rather than picked** — a connection can hold the bastion's *Name tag* instead of its
-  ID and resolve it on every connect, so a redeployed bastion needs no edit at all
-- Passwords and SSH secrets encrypted at rest — the OS keystore via Electron `safeStorage` where
-  available, AES-256-GCM under a `0600` key file otherwise. Secrets never reach the renderer.
-- **Duplicate, then edit** — most connections are a variant of one that already works, so
-  *Duplicate* copies a saved connection whole (password, SSH passphrase and AWS credentials
-  included) and opens the copy in the form with its name selected, ready to be typed over. The
-  copy is named apart from its source — `Prod (copy)`, then `Prod (copy 2)`, never
-  `Prod (copy) (copy)` — and the original is not touched. From inside the form, *Save as copy*
-  does the same the other way round: change a field, fork it, and the connection you opened stays
-  as it was. A copy is saved the moment it is made, so *Cancel* stops editing it rather than
-  un-making it.
-- Test-connection button that reports the server edition and version
-- **Read-only, for the one that is production** — a connection marked read-only refuses anything
-  that would change the database: the grid offers no edits, *Truncate* and *Drop* are greyed, and a
-  script with a statement that writes is turned down whole, before any of it is sent. The check is
-  made in the main process, so no window can get round it, and the list, the status bar and the
-  toolbars all say which connection it applies to. It is switched from the *Read-only* switch in
-  the status bar while connected, or from the padlock beside each connection in the list, without
-  opening the connection's settings; it changes at once, with no reconnect, and turning it off
-  always asks first (see below)
-- **Kept alive, and put back when it drops** — an idle connection is poked once a minute (the
-  *Keepalive* option; 0 turns it off) so an SSM session, an SSH forward or a firewall does not tear
-  it down for want of traffic. A connection that goes anyway is reopened in the background with a
-  backoff, for about eight minutes; the status bar says what is happening and offers *Reconnect*
-  once it stops trying. Credentials that have run out and a login the server refuses are not retried
-  at all — neither is going to fix itself. The window keeps its tabs and staged edits throughout.
-
-**Connecting through an AWS bastion (SSM)**
-
-Pick *AWS SSM* on the connection's Tunnel tab instead of running the CLI by hand. The session starts
-when you connect and is torn down when you disconnect — including the `session-manager-plugin`
-grandchild, which on Windows has to be killed as a process tree or it keeps holding the local port.
-
-- **Forward to a remote host** — the bastion relays to an RDS endpoint or another internal listener.
-  Uses `AWS-StartPortForwardingSessionToRemoteHost`; the Server field is resolved *from the bastion*.
-- **Forward to the instance itself** — SQL Server runs on the bastion. Uses
-  `AWS-StartPortForwardingSession`.
-
-**Picking the bastion.** An instance ID is not a durable setting: a redeploy replaces the bastion
-and the saved ID quietly points at something that no longer exists. So once the credentials are in
-place and a region is chosen, **Fetch instances** lists what is actually there and the ID becomes a
-choice from a list:
-
-```
-prod-bastion — i-0ba5711000fee1dad · running · 10.0.2.11 · SSM Online
-old-bastion  — i-0dead00beef001122 · running · 10.0.2.12 · SSM ConnectionLost
-app-server   — i-0abc123def4567890 · running · 10.0.3.40 · not in SSM
-```
-
-Two calls stand behind it — `ec2 describe-instances` for what exists, with Name tags and state, and
-`ssm describe-instance-information` for what Session Manager can reach, which is what decides
-whether a session can start at all. The reachable ones sort first, `mi-` managed instances that are
-not EC2 are included, and either call being denied by IAM degrades to the other's list with a note
-rather than to nothing. Reopen a saved connection, fetch, and an ID the region no longer knows about
-is called out as replaced.
-
-**Or name it, and stop picking.** *Find the bastion by* switches the connection from an ID to the
-instance's **Name tag**, which is the half of the pair that survives a redeploy. Nothing is stored
-but the name; the ID is looked up each time the connection opens, so an instance replaced overnight
-needs no edit in the morning. The form still lists the account's instances — picking one fills the
-name in — and shows what the name resolves to right now:
-
-```
-Find the bastion by  [ Name tag ▾ ]   Bastion name  [ prod-bastion ]
-
-“prod-bastion” is i-0ba5711000fee1dad · running · 10.0.2.11 · SSM Online
-```
-
-EC2 does the matching, so its `*` wildcards work (`prod-bastion-*`), and filtering there rather than
-over the answer is what keeps a large account from cutting the bastion off the end of the list.
-Where several instances answer to one name — an autoscaled pair, a half-finished replacement — the
-one Systems Manager can reach is used, and that second lookup only runs when there is something to
-decide. Nothing answering to the name, or nothing running, fails the connection with that sentence
-rather than with a session timeout.
-
-The list is per region, so the region field is the one that has to be right; it is prefilled from
-the pasted block when that names one. You can still type an ID by hand — the field stays editable,
-and the picker only fills it in.
-
-Set a fixed local port (blank picks a free one) and an explicit CLI path if you need them.
-**Check prerequisites** verifies the three things that actually go wrong — the AWS CLI, the Session
-Manager plugin, and whether your credentials are still valid — and `aws sts get-caller-identity`
-confirms which identity you are about to connect as.
-
-**Credentials.** Two sources, chosen per connection:
-
-- **Paste them into the app** (the default). Copy the block straight out of the AWS access portal
-  and paste it in — bash `export`, PowerShell `$Env:`, cmd `set`, or a credentials-file stanza are
-  all accepted, quotes and stray semicolons included. **Paste from clipboard** beside the box does
-  it in one click, in the connection form and in the dialog that asks for fresh credentials when
-  they run out. The clipboard is read in the main process and only a credentials block is handed to
-  the window: with anything else copied — a password, a paragraph — the box stays empty and says
-  why. However the block got there, the line under the box shows what it holds as soon as it is in
-  (`ASIA************MPLE · eu-west-2 · temporary`), or what is wrong with it, rather than leaving
-  that to Save. The block is **saved with that connection**, encrypted by the same vault that
-  protects database passwords, so connections in different AWS accounts each carry their own.
-  Re-paste when they expire.
-- **Let the AWS CLI resolve them** — the normal chain: `--profile`, environment variables, SSO
-  cache, `credential_process`, assume-role, instance profile. Use this if you keep profiles in
-  `~/.aws/`.
-
-Only a masked summary (`ASIA****…MPLE · eu-west-2 · temporary`) ever reaches the renderer; the
-secret and session token stay in the main process. The app never *derives* credentials: it either
-passes through what you pasted, as environment variables on the CLI child, or stays out of the way
-entirely. Pasted credentials take precedence over anything inherited, so a stale `AWS_PROFILE` in
-the app's environment cannot quietly win, and `--profile` is suppressed for them.
-
-Failures are translated rather than passed through: a missing plugin, `TargetNotConnected`, an IAM
-denial, an expired SSO session, a bad profile or a busy port each produce a specific instruction
-instead of an exit code.
-
-**A destination the session cannot reach** is the one failure that does not announce itself at
-startup. Session Manager binds the local port before anything is dialled at the far end, so a
-bastion without SQL Server on it, or an RDS endpoint its security group will not let it reach, looks
-like a healthy session until the first byte moves — and then the driver reports nothing but
-`Connection lost - socket hang up`. So the CLI's output is watched for the whole life of the session,
-not just at exit (`Connection to destination port failed`, `Unable to dial connection to port`), the
-message is given a moment to arrive after the driver has already given up, and the advice names the
-topology in use: the remote host and its security group, the "Forward to" setting when the port was
-dialled on the bastion itself, or — for a relayed `localhost`, which the *bastion* resolves and so
-forwards to itself — the Server field. The connection form flags that last one before you connect. A drop the CLI never explains says so plainly rather than passing
-on the driver's wording.
-
-Readiness comes from the plugin's own `Waiting for connections` banner rather than a probe
-connection, because `AWS-StartPortForwardingSession` carries one client at a time and a probe that
-connects and hangs up can leave the far side torn down for the connection that follows.
-
-Requires AWS CLI v2 and the Session Manager plugin on the machine running the app, and
-`ssm:StartSession` permission on the instance and the port-forwarding document. The instance picker
-additionally uses `ec2:DescribeInstances` and `ssm:DescribeInstanceInformation`; neither is needed to
-connect, and holding only one of them still produces a usable list.
-
-**Schema explorer**
-- Database switcher (system databases hidden by default), schema/table/view/procedure/function tree
-- Row-count estimates, live filter box, pinned tables, per-schema collapse
-- **Tables open where they stand** into what is in them — `columns`, `keys`, `foreign keys`,
-  `indexes`, each with its count — so "what was that column called" costs a twisty rather than a tab
-- Context menu: open data, open structure, generate `SELECT`/`INSERT`/`UPDATE`/`DELETE`/`CREATE TABLE`,
-  copy qualified name, show routine definition, truncate, drop
-
-**A table, opened in the tree**
-
-The structure tab spells everything out in tables; the tree has one line per thing, which is the
-right shape for finding a name. Clicking a table's twisty reads its structure once, keeps it, and
-opens it into the four folders that say what is in it:
-
-```
-▾ ▤ com_set_DefaultLocalization                 148
-    ▾ COLUMNS                                     9
-        ◆ id                        uniqueidentifier
-        ▪ locale_code                  nvarchar(10)
-        ▪ language_name               nvarchar(100)
-        ▪ is_system_default                     bit
-    ▸ KEYS                                        3
-    ▸ FOREIGN KEYS                                0
-    ▸ INDEXES                                     3
-```
-
-The primary key is marked with a gold key, as it is in the grid and the row panel; a foreign key
-names what it points at and opens that table when it is clicked. "Keys" is the primary key and the unique ones,
-each shown once however the DDL declared it — SQL Server backs a `PRIMARY KEY` and a `UNIQUE`
-constraint with an index of the same name, so the same key is reported two or three ways. The
-structure is the schema store's copy, the one the structure tab and the statement builders already
-read, so opening a table twice costs one query, and refreshing the schema re-reads what is open
-rather than folding it away.
-
-**Table browser**
-- Virtualised grid — only visible rows are rendered, so large results scroll smoothly
-- Server-side paging, multi-column sorting (shift-click to add a key)
-- Filter builder (16 operators, AND/OR) and a raw `WHERE` mode; values are always **bound
-  parameters**, and `contains`/`starts with`/`ends with` escape LIKE wildcards. **Clear filters**
-  in the filter bar takes every filter away at once — the builder's rows and the raw `WHERE` —
-  and reads the table again only if the rows on screen went through one; a filter that was only
-  drafted goes without a round trip
-- Column resize by drag, double-click a divider to fit
-- **Choose the columns on show** — *Columns* in the toolbar ticks off the table's columns, with a
-  search for wide tables and *Show all* / *Hide all* (which act on the matches while searching);
-  *Hide this column* on a header's menu takes one out. Nothing is read for it: the page is read
-  whole either way, so keys, edits and the row count are untouched and a column put back is there
-  at once. The row panel, the keyboard, copies and exports go by the columns on show. The choice
-  belongs to the tab, like its auto refresh — it outlasts a trip to another tab or a reload, and
-  goes with the tab into a window of its own — and the button says how many are on show
-- **Right-click a column header** for what can be done to that column: sort either way, add it to
-  the sort, clear the order, filter on it (including `IS NULL` / `IS NOT NULL` in one click), fit
-  the widths, and hide it — the spreadsheet's header menu, over a server-side query
-- **The rows stay while the next page loads.** Sorting or filtering leaves what is on screen where
-  it is, dimmed and inert, until the replacements arrive; a thin bar under the title bar carries the
-  wait for the whole window
-- **A tab keeps its page.** Picking another tab takes the browser down with it, so what a table tab
-  was showing — its rows, its sort, its filters, the page it was on, even where it was scrolled to —
-  is kept on the tab. Coming back draws it straight away and re-reads it *behind* the rows, with
-  only a "Checking for changes…" beside the row count to say so. The answer reaches the grid only
-  where it differs, so a table nobody has touched does not blink, and one that has changed updates
-  in place. A table opened for the first time shows the wait from the first frame rather than
-  flashing "No rows match" at it
-- **Auto refresh, when you ask for it** — beside *Refresh*, a table can be set to re-read itself
-  every 5, 10 or 30 seconds, every minute, or every 5 or 15 minutes, picked from a menu that hangs
-  from the button in the window's own colours, with the interval in force ticked. It is *Off*
-  whenever a table opens, and the choice belongs to the tab: a table left on a second screen to watch a queue drain
-  keeps refreshing across a trip to another tab, into a split, or out into a window of its own,
-  while every other table stays still. Each read is the same quiet re-read a reselected tab does —
-  nothing dims, and only rows that actually changed are redrawn — and the next is timed from the
-  end of the last, so a slow table is never asked twice at once. It waits while edits are staged
-  (they are keyed by row position, and new rows under them would move them onto other rows), while
-  a cell is being typed into, and while the connection is down; the control greys and says why. A
-  read that fails turns it off and says so, rather than raising the same error every few seconds
-- **The toolbar fits its pane.** A split, or a small window, takes the words off the secondary
-  buttons — *Refresh*, *Auto*, *Filter*, *Columns*, *Row details*, *Add row* keep their icons,
-  tooltips and names — and with edits staged the row count gives way first, so *Discard* and
-  *Apply* are never pushed off the end
-- **Row panel** beside the grid (`Ctrl+I`): the selected row as one field per line, with room for
-  the values a 26px cell cannot show, editable in place and moving with the selection. The same
-  panel sits beside query results, read-only, and "View row details" on any row's menu opens it
-  there. It belongs to the tab, not to the window — two tables side by side in a split each show or
-  hide their own fields, and the last choice made is how the next tab opens
-- **A JSON document is shown as one.** SQL Server has no JSON type, so a document lives in an
-  `nvarchar(max)` column and comes back as one long line. Where a field holds an object or an array,
-  the row panel draws it as a tree instead — collapsible, two levels open to start with — and the
-  field's own `{4}` / `raw` switch gives back the stored text, which is what editing edits. Only
-  objects and arrays: a bare `42` or `"done"` is valid JSON too, and a tree of one line would say
-  nothing the field did not
-- **Follow a foreign key**: a `›` at the end of a referencing cell opens the referenced table in its
-  own tab, filtered to the row it points at — composite keys included
-
-**Following a foreign key**
-
-A cell in a column that references another table carries a small arrow. Clicking it opens the
-referenced table filtered to that row, shows the filter that produced it, and puts the row straight
-into the row panel:
-
-```
-sales.orders                          dbo.customers   WHERE customer_id = 2
-┌────────────┬──────────────┬─────┐   ┌─────────────┬───────────────────┐
-│ order_id   │ customer_id  │ …   │   │ customer_id │ email             │
-│ 110        │ 2         ›  │ …   │ → │ 2           │ alan@example.com  │
-└────────────┴──────────────┴─────┘   └─────────────┴───────────────────┘
-```
-
-Values travel as bound parameters, so the referenced row is found by an ordinary `WHERE`. Two shapes
-have no conversion worth trusting — a NULL, and a binary key — and the arrow stays inert for them
-rather than opening a query that would match nothing.
-
-**Table editing**
-- Edit cells in place — the editor grows past the cell for long or multi-line values, `Enter`
-  commits, `Shift+Enter` adds a line, `Tab` moves on — or edit the same row from the row panel
-- Insert rows, mark rows for deletion — all staged locally
-- **Staged edits are never dropped without a word** — reloading, sorting, filtering or paging,
-  picking another tab, switching to the table's structure, closing the tab, disconnecting, closing
-  the window and quitting all stop and ask first: apply them, discard them, or stay where you are.
-  The question says which of those it is
-- One `Apply` sends the whole change set, executed **inside a transaction**: either all of it lands
-  or none of it does
-- Rows are addressed by primary key; a keyless table falls back to matching every column and the UI
-  says so
-- Identity and computed columns are excluded from inserts; `rowversion` is read-only
-
-**Query editor**
-- CodeMirror 6 with T-SQL highlighting and schema-aware completion pulled from the live database
-- Run all / run selection / run the statement under the cursor; cancel a running query
-- Scripts split on `GO` (like SSMS), so `BEGIN … END` bodies and `CREATE PROCEDURE` work; `GO 5` repeats
-- Multiple result sets per batch, rows-affected, `PRINT` output, and errors with their
-  message number, state and line
-- Results sort by clicking a header — a local reorder, since the statement is yours to re-issue, not
-  ours to rewrite — with NULLs kept at the end either way
-- SQL formatting, open/save `.sql` files, saved queries, searchable query history
-- **A routine's definition shows what you changed in it**, and lets you put back any one change on
-  its own — see below
-
-**Editing a stored procedure**
-
-Clicking a procedure or function in the tree opens its definition as `CREATE OR ALTER`, so running
-the tab saves it back. That tab remembers what the server holds, and the editor marks every line
-that differs from it, the way a source-control gutter does — a bar beside lines that changed or were
-added, a wedge where lines were taken out:
-
-```
-   5    SET NOCOUNT ON;
-   6 ▌  SELECT order_id, customer_id, total            ← changed
-     ┌ CHANGE 1 OF 3 · 1 line changed  [Revert] ‹ › ✕ ┐
-     │ STORED                                          │
-     │   6    SELECT order_id, customer_id             │
-     └─────────────────────────────────────────────────┘
-   7      FROM sales.orders
-   8 ▌    -- only the ones asked for                   ← added
-   9      WHERE status = @status
-  10 ▸ END                                             ← ORDER BY removed above
-```
-
-Clicking a mark opens a strip under the change showing what the stored routine had there, and
-**Revert** puts back that change alone; the others stay where they are. Every revert is an ordinary
-edit, so `Ctrl+Z` takes it back. The toolbar counts the changes, steps through them (`Alt+F5`, `Shift+Alt+F5`) and
-reverts the lot; `Ctrl+Alt+Z` reverts the change under the cursor.
-
-Running the whole tab without an error is what saves the routine, so from then on the marks are
-measured against what was run — in every tab open on that routine. A selection, a single statement,
-a failure or a cancel moves nothing. It is the script that ran rather than the definition read back,
-because SQL Server does not keep what it was sent: `CREATE OR ALTER` comes back as `CREATE` with the
-`OR ALTER` blanked out, and comparing against that would mark the first line of every routine the
-moment it was saved. A definition stored with Windows line endings reads the same as the editor's.
-
-A routine already open is shown where it is rather than opened twice — each tab has its own idea of
-what is stored and what has changed, and two of them would quietly undo each other's saves. The
-tab's dot means "differs from the database", so it goes away once the changes are run or reverted.
-
-Closing a routine's tab with its changes unsaved asks first, the way a table with staged edits
-does: **Save and close** runs the script, **Discard** closes without it, **Cancel** keeps the tab.
-The difference is where the work lives. A table's staged edits live in its view and are gone the
-moment it is unmounted; a routine's text lives on the tab, so switching away loses nothing and never
-asks — but closing does, whether the tab is on screen or not: its ✕ in the background, *Close
-others* and *Close all* all ask about every routine they would close. A save that fails keeps the
-tab and puts it on screen with the error; dragging the tab into another window takes its text
-along, so that does not ask either.
-
-Disconnecting, closing the window and quitting take every tab with them, so they ask the same
-questions — tables' staged edits first, then each routine — and say which of them it is: "Save and
-disconnect", "Save and quit". Cancel on any one keeps the connection, the window and every tab as
-they were. A window's close is held by the main process while the window says it has unsaved work,
-and quitting asks each such window in turn, bringing it to the front; quitting needs asking for on its
-own, because with connections open the app exits outright and no window ever gets a close event.
-
-**One title bar**
-
-Window controls and the menu live in the same strip, VS Code style: the window is frameless on
-Windows and Linux (inset on macOS, where the traffic lights stay put and the system menu bar keeps
-the menus), and the renderer draws the menus, the document title and the minimise/maximise/close
-buttons itself. The native menu is still installed and still owns every accelerator — the title bar
-and it are built from one shared model in `src/shared/menu.ts`, so they cannot drift apart.
-
-**Panes, and tabs that move between them**
-
-A tab can be put in a pane of its own beside the one it is in — `Ctrl+\`, the tab's own menu, or by
-dragging it onto the other pane's strip — so two tables, or a query and its table, can be read at
-once. Each pane has its own strip of tabs and its own tab showing; the pane you last clicked in is
-the one `Ctrl+Enter` and `F5` act on. Splitting the only tab in a pane opens a second view of the
-same thing rather than leaving an empty pane behind. `Ctrl+Shift+\` folds the split away, keeping
-every tab.
-
-Tabs drag: within a strip to reorder, onto the other strip to move pane, and **out of the window
-entirely** — onto another window to move into it, or onto nothing at all to open in a window of
-their own (also on the tab's menu, and File → Move Tab to New Window, which always opens a new one).
-Nothing is carried across but a description of what to open — a window has its own connection pool,
-so the one that takes the tab connects for itself, which needs the connection's password to be
-saved, unless it already holds that connection and can simply show the tab. Staged edits stay with
-the window they were made in: a tab that is holding them asks before it goes.
-
-**A drag does not cross windows**, which is why the main process decides where one ends: a drag
-event belongs to the document it started in, so the strip cannot be told it was dropped over another
-window. What the renderer can say is where the pointer was — `screenX`/`screenY` at the end of the
-drag — and the window manager turns that back into a window, taking the most recently focused of any
-that cover the point, since raising a window is what focuses it. The window under it is sent the
-tab; when there is none, a window is opened for it.
-
-A window opened that way **is that one tab**: it opens onto the tab alone, with no schema tree
-beside it, the way a dragged-out editor opens in a window of its own with none of the workbench
-around it. The tree is not merely hidden, it is not built — though the schema behind it is still
-read, so a query tab in that window still completes table and column names. `Ctrl+B` brings the
-tree in for anyone who wants it, and it stays once it is there. Drag that tab back into the window
-it came from and the empty frame goes with it: the window *was* the tab.
-
-**Windows and connections**
-
-One connection is active per window, and **File → New Window** (`Ctrl+N`) opens as many as you like
-— the intended way to work with several databases at once. Each window keeps its own connection,
-tabs and schema tree; connections are namespaced per window, so two windows opening the *same* saved
-connection get their own pool and tunnel rather than evicting one another. Closing a window closes
-what it opened — once anything unsaved in it has been asked about. Saved connections and settings are shared, since one process owns those files.
-
-**A connection's colour is the window's accent**
-
-One colour runs through this UI — the button that acts, the tab that is showing, the selection, the
-focus ring — so giving a connection a colour colours the window it is open in, and two windows side
-by side stop looking alike. It is not the theme: dark and light are still yours to choose, and the
-connection tints whichever one you are in.
-
-The connection stores one hex value. Everything else is derived from it: the hover shade, the tint
-the SQL keywords take (lighter on the dark theme, darker on the light one), and whether text on top
-of the accent should be white or ink — which is what keeps a pale colour readable rather than
-leaving a button nobody can read. The swatches offered are chosen to carry at least 3:1 against both
-grounds, since the accent is used as text as well as as a fill. A connection with no colour is the
-app's own indigo, exactly as the stylesheet defines it. Red is a swatch rather than the default: it
-is the colour people reach for to mark production, which is exactly why every window should not
-already be wearing it.
-
-**A read-only connection**
-
-Turn *Read-only* on for a connection and it refuses to change anything:
-
-- the table grid offers no editing — no *Add row*, no cell editor, nothing to stage — and says why
-- *Truncate table…* and *Drop…* stay on the tree's menu, greyed, with "Read-only" beside them
-- a script with a statement that writes is not run at all, not even the reads before it, and the
-  results say which statement it was and on which line:
-
-```
-Not run on a read-only connection, Line 2
-DELETE changes data — this connection is read-only, so nothing was run.
-```
-
-Reads go on as before: `SELECT`, CTEs, variables, `SET` options, cursors, transactions, `PRINT`,
-`WAITFOR`, `USE`. The connection list marks a read-only connection before it is opened, and once it
-is, the status bar and the query and table toolbars carry a lock.
-
-It is switched where it is used rather than in the connection's settings. While connected, the
-status bar carries a *Read-only* switch beside the connection's name, labelled whichever way it is
-so it can be found before it is needed: on, its padlock is closed and the switch filled; off, the
-padlock is open and the switch empty. *File → Toggle Read-only* does the same from the menu. In the
-connection list, the padlock beside each connection's *Connect* button turns it on or off without
-connecting, as does the row's ⋮ menu, and the *Read-only* box on the General tab is still there.
-Whichever is used, it is one setting saved with the connection, and it changes at once in every
-window that has the connection open: the next statement is checked against it, with no reconnect,
-so nothing open in the window is lost. Edits staged in a table before it went on stay staged, with
-*Discard* to let them go, and a connection still opening when it is switched opens the way it was
-switched.
-
-Turning it on just happens. Turning it off always asks first — *Turn off read-only?* — naming the
-connection and the server and database it is about to write to. *Keep read-only* has the focus, so
-Enter or Escape leaves it on, and only *Turn off read-only* takes it off. Asked over the connection
-form, Escape answers the question and leaves the form open as it was; the form's own change still
-waits for *Save*.
-
-The script is read by the app's own T-SQL lexer, with comments, literals and `[quoted]` names
-blanked out, and turned down on any reserved word that changes something — `INSERT`, `UPDATE`,
-`DELETE`, `MERGE`, `TRUNCATE`, DDL, `GRANT`, `BACKUP`, `DBCC`, `KILL` — and on `SELECT … INTO`.
-Reserved words cannot be bare names in T-SQL, so a `DELETE` found in the code is a `DELETE`
-statement, while a column called `[delete]` or a string that mentions one goes through. What it
-cannot see into it does not guess at: `EXEC`, dynamic SQL, `OPENQUERY`/`OPENROWSET`, and a
-procedure called by name at the head of a batch — which SQL Server runs without an `EXEC` — are
-refused outright, whatever they would have done. A raw `WHERE` in the filter bar is checked the
-same way, since a `;` ends the `SELECT` there as readily as anywhere.
-
-The check sits in the main process, beside the code that sends the SQL, so the grid not offering
-an edit is a courtesy rather than the protection: an edit, a truncate or a drop that reaches the
-main process for a read-only connection is refused there too. The window takes its lock from the
-main process's word on the open connection rather than from the saved list, so the two cannot
-disagree: a switch changes the open connection in the main process first, and each window that has
-it open is told after.
-
-It is a safety net for the window you took for staging, not a permission. What a connection may do
-is decided by its login, and for a guarantee that means a login that can only read. *Read-only
-intent* on the Advanced tab is a different thing again: it asks an availability group to route the
-connection to a readable secondary, and stops nothing on its own.
-
-**Keeping up to date**
-- **The Windows install and the Linux AppImage update themselves.** Each looks for a new release
-  shortly after it starts and every four hours after that, downloads one in the background (the
-  AppImage only the parts that changed), and says when it is ready: *Restart* installs it there and
-  then, and otherwise it installs the next time TableView quits. Restarting asks about unsaved work
-  first, the way quitting does. The AppImage swaps its own file for the new one, so it has to live
-  somewhere you can write to — `~/Applications`, say, rather than `/opt`.
-- **The portable exe and the .deb say so, and leave the download to you.** A single exe cannot
-  replace itself while it runs, and a package is installed the way its system installs packages,
-  not from inside the app — so they look just as often and offer the release page instead.
-- **Off is off.** *Update automatically* in Settings is on by default. Turned off, nothing is looked
-  for, downloaded or installed unasked; *Help → Check for Updates*, or *Check now* beside the
-  switch, still asks, and what that finds is fetched and installed like any other update.
-- Releases come from this repository's GitHub releases, published by the release workflow — see
-  [Releasing](#releasing).
-
-**Everything else**
-- Export result sets or whole tables to CSV, TSV, JSON, JSON Lines, SQL `INSERT`s or Markdown —
-  with a live preview — to a file or the clipboard
-- Structure tab: columns, indexes (including filtered and `INCLUDE`d), foreign keys in both
-  directions, check/unique/default constraints, triggers, and a regenerated `CREATE TABLE` script
-- Dark and light themes (and "follow the system"), window state persistence, full menu bar and
-  keyboard shortcuts (`Ctrl+/` lists them)
-- **A calm, layered interface** — cool neutral grounds that step forward in lightness from the
-  chrome to the content to anything floating, hairline borders, soft radii and one accent. Inter
-  sets the interface and JetBrains Mono sets anything that is data or code; one SVG icon set
-  replaces the typed glyphs that used to render differently on every platform. Menus, dialogs and
-  toasts arrive with a short fade, and all of it stands still when the OS asks for reduced motion
-
----
+- SQL Server logins, Windows (NTLM) and Azure AD password sign-in, with TLS options and named
+  instances
+- SSH tunnels, and AWS SSM port forwarding that starts the session for you and can find the bastion
+  by its Name tag
+- Connections filed under groups, each with its own colour; duplicate, export and import them
+  (passwords stay out of the file), or bring them over from TablePlus
+- Passwords encrypted at rest; idle connections kept alive, and dropped ones reopened
+
+**Tables**
+- A schema tree with a database switcher, a filter, pinned tables and row-count estimates; a table
+  unfolds into its columns, keys, foreign keys and indexes
+- A virtualised grid with server-side paging and sorting, a filter builder or a raw `WHERE`, a column
+  picker and optional auto refresh
+- Edit cells, add and delete rows — changes are staged, then applied in one transaction
+- A row panel that shows JSON as a tree, and foreign keys that open the row they point at
+- Export to CSV, TSV, JSON, JSON Lines, SQL `INSERT`s or Markdown
+
+**Queries**
+- A T-SQL editor with completion from the live schema, and formatting
+- Run everything, a selection or the statement under the cursor; scripts split on `GO`, as in SSMS
+- Several result sets per batch, messages, and errors with their line numbers; saved queries and
+  history
+- Stored procedures and functions open as `CREATE OR ALTER`, with every change from the stored
+  version marked, and each one revertible on its own
+
+**Safety**
+- Read-only connections: a script that writes is refused before any of it is sent
+- Staged edits and unsaved routines are never dropped without asking
+- A connection's colour tints its whole window, so production never looks like staging
+
+**Workspace**
+- Tabs, a side-by-side split, and tabs that drag out into windows of their own
+- One connection per window, and as many windows as you like
+- Dark and light themes, and a full menu with keyboard shortcuts (`Ctrl+/` lists them)
+- The Windows installer and the Linux AppImage keep themselves up to date
+
+## Download
+
+Get the latest version from the [Releases page](https://github.com/NelushaUdaraka/tableview/releases/latest).
+
+| System | File | Updates |
+| --- | --- | --- |
+| Windows | `TableView-<version>-windows-x64-setup.exe` — installer | Automatic |
+| Windows | `TableView-<version>-windows-x64-portable.exe` — runs without installing | Tells you when one is out |
+| Linux | `TableView-<version>-linux-x86_64.AppImage` (or `-arm64`) | Automatic |
+| Debian, Ubuntu | `TableView-<version>-linux-amd64.deb` (or `-arm64`) | Tells you when one is out |
+
+There is no macOS release. [Installing and updating](docs/install-and-update.md) has notes for each
+platform, explains how updates work, and covers moving over from Beekeeper Clone, TableView's old
+name.
 
 ## Getting started
 
-```bash
-npm install
-npm run dev          # hot-reloading dev build
-```
+1. Open TableView and choose **New connection**.
+2. Fill in the server and login — or paste a URL copied from TablePlus — then press
+   **Test connection** and **Save**.
+3. Press **Connect**. The sidebar lists the database's tables, views and routines: click a table to
+   browse it, or press `Ctrl+T` for a new query tab.
 
-### If `npm run dev` says "Electron uninstall"
+## Documentation
 
-Electron 44 has no postinstall hook — it exposes an `install-electron` bin and otherwise fetches its
-binary lazily on first launch. electron-vite reads `node_modules/electron/path.txt` directly, so it
-never triggers that lazy fetch and fails instead. The `postinstall` script in `package.json` runs the
-installer for you; if you installed with `--ignore-scripts`, or the download was blocked, run it by
-hand:
+**Using TableView**
+- [Connections](docs/connections.md) — saving and organising connections, signing in, SSH tunnels,
+  colours
+- [Connecting through an AWS bastion](docs/aws-ssm.md) — SSM port forwarding, finding the bastion,
+  credentials
+- [Read-only connections](docs/read-only.md) — what is refused, and how it is switched
+- [Tables](docs/tables.md) — the schema tree, browsing, filtering, editing and export
+- [Query editor](docs/query-editor.md) — running scripts, and editing stored procedures
+- [The workspace](docs/workspace.md) — the title bar, panes, tabs and windows
+- [Installing and updating](docs/install-and-update.md)
+- [Known limitations](docs/limitations.md)
 
-```bash
-npx install-electron
-```
+**Working on TableView**
+- [Development](docs/development.md) — running from source, building packages, testing
+- [Architecture](docs/architecture.md) — how the code is laid out, and the decisions behind it
+- [Releasing](docs/releasing.md) — cutting a release
 
-That downloads roughly 100 MB from GitHub releases and writes `path.txt`. Behind a proxy or a
-mirror, point it somewhere reachable first:
+## Building from source
 
-```bash
-# a mirror
-set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
-npx install-electron
-
-# or an already-downloaded, unzipped build
-set ELECTRON_OVERRIDE_DIST_PATH=C:\path\to\electron-v44.1.1-win32-x64
-```
-
-### Build for Windows
-
-The whole production dependency tree is **pure JavaScript** — no native modules — so there is no
-node-gyp step and nothing to rebuild per platform.
-
-On a Windows machine:
+TableView builds with Node.js 22, the version its release workflow uses.
 
 ```bash
 npm install
-npm run build:win
+npm run dev          # run the app with hot reload
+npm test             # unit tests
+npm run build:win    # or build:linux — packages land in release/<version>/
 ```
 
-That produces, in `release/<version>/`:
+[Development](docs/development.md) covers the integration and end-to-end tests, and what to do if
+`npm run dev` says "Electron uninstall".
 
-| Artifact | What it is |
-| --- | --- |
-| `TableView-0.1.0-windows-x64-setup.exe` | NSIS installer (per-user, choosable install directory, shortcuts) — the copy that updates itself |
-| `TableView-0.1.0-windows-x64-portable.exe` | Single-file portable build |
-| `latest.yml`, `TableView-0.1.0-windows-x64-setup.exe.blockmap` | What an installed copy reads to update: the newest version and its checksum, and the block map that lets it download only what changed |
+## Limitations
 
-Every file is named for the system it runs on, then the processor, so the Windows and Linux files
-of a release sit apart on its page. The names come from `artifactName` in `electron-builder.yml`.
-Installed copies find their update through `latest.yml`, not by name, so a rename does not stop them
-updating. It does cost the next Windows update its download of only what changed: that looks for the
-previous release's block map under the new name, finds none, and downloads the whole installer.
+TableView is at phase 1, which leaves some things for later:
 
-Builds are unsigned by default. To sign, set `CSC_LINK` (path or base64 of a `.pfx`) and
-`CSC_KEY_PASSWORD` before running — electron-builder picks them up automatically.
+- SQL Server is the only engine.
+- One connection per window — for a second, open another window (`Ctrl+N`).
+- No visual schema designer, and no backup, restore, import or diff tools.
 
-`npm run build:unpack` produces an unpacked directory instead, which is the quickest way to
-sanity-check packaging. No build script publishes anything: uploading takes `--publish`, which only
-the release workflow passes.
-
-### Build for Linux
-
-On a Linux machine:
-
-```bash
-npm install
-npm run build:linux
-```
-
-That produces, in `release/<version>/`, for both x64 and arm64 — one x64 machine builds both, since
-there is nothing native to compile:
-
-| Artifact | What it is |
-| --- | --- |
-| `TableView-0.1.0-linux-x86_64.AppImage`, `TableView-0.1.0-linux-arm64.AppImage` | Runs on most distributions without installing: mark it executable and open it. The copy that updates itself |
-| `TableView-0.1.0-linux-amd64.deb`, `TableView-0.1.0-linux-arm64.deb` | Installs into `/opt/TableView` with a menu entry, for Debian, Ubuntu and their relatives |
-| `latest-linux.yml`, `latest-linux-arm64.yml` | What an AppImage reads to update, and a .deb to say there is a newer one |
-
-`x86_64` and `amd64` are the AppImage's and Debian's names for the same 64-bit Intel and AMD
-processors — Windows calls them `x64`; `arm64` is for ARM machines.
-
-The AppImages use electron-builder's static AppImage runtime (`toolsets.appimage` in
-`electron-builder.yml`), which mounts with the FUSE 3 that desktop distributions already install.
-electron-builder's default runtime wants libfuse2, which Ubuntu stopped installing with 22.04, so an
-AppImage built with it does not even open on a fresh Ubuntu. Where FUSE is missing altogether — some
-containers and minimal installs — run the AppImage with `--appimage-extract-and-run`.
-
-### Releasing
-
-`.github/workflows/release.yml` builds and publishes releases. Bump the version and push the tag
-that makes:
-
-```bash
-npm version 0.2.0        # or patch, minor, major: sets package.json and tags v0.2.0
-git push --follow-tags
-```
-
-The workflow then:
-
-1. runs the type check and the unit tests, and stops if the tag does not match `package.json` — the
-   app compares updates against that version, so the two have to agree;
-2. drafts a GitHub release for the tag, with notes generated from what was merged since the last one;
-3. builds the installer and the portable exe on Windows, and the AppImages and .debs for x64 and
-   arm64 on Linux, side by side, and uploads them all to the draft with the files installed copies
-   read: `latest.yml` and the installer's block map, `latest-linux.yml` and `latest-linux-arm64.yml`;
-4. publishes the release once both builds are done. Only then: a draft is invisible to installed
-   copies, so none of them is ever offered a release whose files are still on their way up.
-
-A tag with a pre-release part (`v0.3.0-beta.1`) is published as a pre-release, which the stable app
-never updates to. Running the workflow by hand from the Actions tab builds the same files without
-releasing anything, and keeps them on the run.
-
-**The repository has to be public.** Installed copies read the releases without signing in, and a
-private repository's releases are invisible to them: the check says GitHub has no published release.
-
-**Signing is optional, and once started, has to carry on.** Unsigned builds install and update, but
-Windows SmartScreen warns on the first install. To sign, add two repository secrets: `WIN_CSC_LINK`
-(the `.pfx`, base64-encoded) and `WIN_CSC_KEY_PASSWORD`. A signed copy then accepts only updates
-signed by the same publisher, so a later unsigned release, or one signed with another certificate,
-is downloaded and refused.
-
-Copies built before updating existed have nothing to update them; install the first release by hand.
-
-### Coming from Beekeeper Clone
-
-TableView used to be called Beekeeper Clone. The first time it starts, it copies what the old app
-saved (connections, query history, saved queries, settings and window layout) from
-`%APPDATA%\beekeeper-clone` into its own `%APPDATA%\TableView` (the same two folder names under
-`~/Library/Application Support` on macOS and `~/.config` on Linux), and leaves the old folder as it
-was. Saved passwords come across too, except where macOS's keychain or a Linux desktop keyring
-holds them under the old name; those have to be entered once more. It only copies into a TableView
-that has saved nothing yet, so it never runs twice.
-
-The app ID changed with the name, so Windows installs TableView beside Beekeeper Clone rather than
-over it. Once your connections are there, uninstall Beekeeper Clone. Connection exports it wrote
-still import.
-
----
-
-## Testing
-
-Three layers, all runnable on Linux:
-
-| Command | What it covers |
-| --- | --- |
-| `npm test` | 1042 unit tests — SQL building, T-SQL lexing, the read-only check, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh, the columns a table shows, TablePlus URLs, when the app updates itself |
-| `npm run test:integration` | 72 tests against a **real SQL Server 2022** and a **real sshd** |
-| `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
-
-### Bringing up the test environment
-
-```bash
-scripts/test-env.sh up      # SQL Server on :11433, sshd on :2222
-npm run test:integration
-scripts/test-env.sh down
-```
-
-The script also generates the SSH keypairs the tunnel tests use (one plain, one passphrase-protected)
-and flips `AllowTcpForwarding` on, which the `linuxserver/openssh-server` image ships disabled.
-
-### End-to-end
-
-```bash
-scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | table-tools | routines | auto-refresh | unsaved | read-only | ssm-form
-```
-
-On a headless box it starts Xvfb itself. It needs Electron's usual Linux libraries:
-
-```bash
-apt-get install -y xvfb libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
-  libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
-  libasound2t64 libnss3 libnspr4 libgtk-3-0t64 libatspi2.0-0t64
-```
-
-The suites:
-- **smoke** — the window opens, the preload bridge exposes the API, settings load, IPC errors arrive
-  as real `Error`s, and a saved password never appears in renderer-visible data
-- **connections** — duplicates a saved connection from the list and from inside the form, checks
-  the copy opens ready to edit with the secrets carried over, that the original comes through
-  untouched either way, and that a copy of a copy is numbered rather than suffixed twice. Then
-  the TablePlus import: the ⋮ menu's *Import from TablePlus…* opens a new connection with its
-  steps showing and editing one shows no panel; a paste of anything but a SQL Server URL from
-  TablePlus leaves the form as it was, and the real one replaces every field — the password
-  masked, the colour and group mapped — and saves with the password stored but never handed back
-  to the window; the same URL again is called out and saved beside the first, which is
-  untouched, a URL with no password stores none, and a key tunnel asks for its file. Needs no
-  database: nothing in it connects.
-- **workspace** — connects to the container, loads the schema tree, opens a table, reads the grid,
-  checks the structure tab, types and runs a JOIN in the editor, provokes a SQL error, toggles theme
-- **editing** — edits a cell, stages an insert, applies the change set, verifies the rows in the
-  database, deletes through the context menu, and drives the filter builder
-- **table-ui** — opens the title bar's View menu, reads the selected row out of the row panel, edits
-  a field there and applies it to the database, follows a foreign key into the referenced table and
-  checks the filter and the row it lands on, opens the expanding cell editor, and hides the panel
-- **table-tools** — opens the columns picker and checks it hangs from its button with every column
-  ticked; hides a column and checks it goes at once without the table being read (a row written
-  from outside stays out); narrows the list with a search and hides what matches; hides a column
-  from the header menu, and checks the arrow keys step over it, the row panel leaves it out and a
-  copied row is the columns on show; takes the tab away and back, hides every column and puts them
-  back from the empty grid. Then *Clear filters*: off with nothing to clear, back to every row
-  after a builder filter and after a raw `WHERE`, and no read at all for a filter only drafted.
-  Last it narrows the window with an edit staged and checks the toolbar still fits
-- **routines** — creates a procedure, opens it from the tree, edits three places in it and checks
-  each is marked as what it is (changed, added, removed); opens a change and reads the stored line
-  in it, reverts that change alone and takes the revert back with `Ctrl+Z`, steps between changes
-  from the toolbar and the keyboard, reverts the rest, then runs the tab and checks the server has
-  the edit and the marks start again from it — and that a partial run moves nothing. Then closes
-  it with changes unsaved: Cancel keeps it, *Close all* from another tab still asks, Discard leaves
-  the server alone, an unchanged routine closes without asking, *Save and close* writes it, and a
-  save that fails keeps the tab and shows it
-- **unsaved** — disconnects with nothing unsaved and checks nothing is asked; then, with a row staged
-  in a table and a routine changed, checks disconnecting asks about both and says it is
-  disconnecting, and that Cancel keeps the connection; that switching the table to its structure
-  asks too; that the window's ✕ and File → Exit ask in
-  their own words and Cancel keeps the window and the app; and that once every question is answered
-  the window really does close and the app goes with it
-- **auto-refresh** — checks a table opens with it off and offers the fixed intervals in a menu lined
-  up under its button, with *Off* ticked and focused; turns it on and waits for a row written from
-  outside to turn up unprompted, stages an edit and checks it holds
-  (and says why) until the edit is discarded, takes the tab away and back, turns it off, and drops
-  the table under it to see a failed read switch it off with a word about it
-- **read-only** — saves a writable and a read-only connection to the container and checks the list
-  marks only the read-only one and its form keeps the setting; connects it and checks the status bar
-  and the query toolbar say so; runs a script that reads and then deletes and checks it is refused
-  whole, by line, and that a read on its own still runs; opens a table and checks nothing there can
-  be edited, and that *Truncate* and *Drop* are greyed in the tree's menu. Then it goes round the
-  window: staged edits, truncate, drop and a raw filter with a `DELETE` in it, sent straight to the
-  main process, are each refused, and the rows are counted to show none of it happened. Last it
-  switches it where it is used: the status bar's *Read-only* switch asks before turning it off, with
-  the focus on *Keep read-only* and Escape keeping it; once told, a delete goes through with no
-  reconnect, the switch still there and still labelled, and turned back on — without a question —
-  the next one is refused. *File → Toggle Read-only* asks the same; the padlock on a row of the
-  list, and the row's ⋮ menu, turn a connection on and, after the question, off without connecting
-  it; and in the form, unticking it asks over the form, Escape answers only the question, and
-  *Cancel* leaves the saved setting as it was
-- **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block
-  with *Paste from clipboard* (after checking that something else on the clipboard never reaches
-  the box), fetches the account's instances and picks the bastion from the list (including the
-  empty answer a wrong region gives), switches the connection to finding that bastion by its Name
-  tag and back, runs the prerequisite check in both its failing and passing states, saves, reopens
-  the connection to confirm the stored summary appears while the secret never reaches the renderer,
-  pastes a fresh block into the dialog a run-out one raises, and opens a second window.
-  `scripts/e2e.sh` writes stand-ins for `aws` and `session-manager-plugin` into `.tmp/bin`, so it
-  needs no AWS account.
-
-Screenshots land in `.tmp/`.
-
----
-
-## Architecture
-
-```
-src/
-├── main/                     Electron main process
-│   ├── db/
-│   │   ├── registry.ts       live client per connection
-│   │   └── sqlserver/        client, config mapping, catalog queries, type mapping
-│   ├── tunnel/               ssh.ts, ssm.ts (AWS Session Manager), ec2Instances.ts
-│   │                         (the bastion picker's lookup, and the name a
-│   │                         connection resolves on connect), shared contract
-│   ├── storage/              JSON stores + credential vault
-│   ├── ipc/                  handlers, each wrapped in a result envelope
-│   ├── menu.ts, window.ts    native menu + roles, frameless windows and their state
-│   ├── closeGuard.ts         holds a window's close, and the quit, while it has unsaved work
-│   ├── updater.ts            when to look for a release and what to do with one;
-│   │                         electron-updater does the fetching and installing
-│   └── index.ts
-├── preload/index.ts          contextBridge façade
-├── shared/                   used by both sides
-│   ├── types.ts              the IPC contract
-│   ├── menu.ts               the menu model the native menu and title bar share
-│   ├── foreignKeys.ts        which cells carry an arrow, and what it filters on
-│   ├── aws/credentials.ts    parses the AWS portal's credential blocks
-│   ├── aws/regions.ts        the region list the connection form offers
-│   ├── accent.ts             a connection's colour, and the shades derived from it
-│   ├── copyName.ts           what a duplicated connection is called
-│   ├── connectionTransfer.ts the connection export file, and what it leaves out
-│   ├── tableplus.ts          a connection copied out of TablePlus as a URL, and what it fills in
-│   ├── sql/                  identifier escaping, T-SQL lexer, query builders, and
-│   │                         readOnly.ts — what a read-only connection refuses to send
-│   ├── serialize.ts          driver values ⇄ IPC-safe cell values
-│   ├── export.ts             CSV/JSON/SQL/Markdown
-│   ├── updates.ts            the update state both sides share, and where releases live
-│   └── ipcSerialize.ts       strips Vue proxies before they hit contextBridge
-└── renderer/src/             Vue 3 + Pinia
-    ├── lib/api.ts            the only place that touches window.api
-    ├── lib/menuBus.ts        menu actions, whichever menu raised them
-    ├── lib/schemaTree.ts     a table's structure as the sidebar tree shows it
-    ├── lib/jsonCell.ts       which cells hold a document, and what is inside one
-    ├── lib/tableCache.ts     the page a table tab keeps, and what counts as it changing
-    ├── lib/autoRefresh.ts    a table re-reading itself: the intervals, and what holds a read back
-    ├── lib/columnVisibility.ts which columns a table's grid shows, and the page cut down to them
-    ├── lib/tableFilters.ts   whether a table read goes through a filter, as the main process decides
-    ├── lib/lineDiff.ts       what differs from a routine's stored definition, and putting one change back
-    ├── lib/changeTracking.ts the editor's change marks, the peek under a change, and its revert
-    ├── lib/runQueryTab.ts    runs a query tab, on screen or not, and says whether it saved a routine
-    ├── lib/sortConnections.ts the orders the connection list can be read in
-    ├── lib/updateStatus.ts   the Settings line about updating, and the one button beside it
-    ├── lib/connectionGroups.ts the headings the list is filed under
-    ├── lib/icons.ts          the one icon set, drawn by components/AppIcon.vue
-    ├── lib/modalStack.ts     which open dialog Escape belongs to
-    ├── styles/index.css      design tokens for both themes, and the shared controls
-    ├── stores/               connections, schema, tabs (and panes), library,
-    │                         settings, toasts, busy (the window's progress bar),
-    │                         read-only (the question before one may write again),
-    │                         updates (what a window says about a new release)
-    ├── components/           title bar, grid, row panel (and its JSON tree),
-    │                         editor, sidebar (and its structure tree), dialogs,
-    │                         the toolbar's drop-down panels (a choice menu, the column picker)
-    └── views/                connection screen, workspace, pane, query, table
-```
-
-A few decisions worth knowing about:
-
-**`src/main/db/**` never imports Electron.** That is what lets the integration tests drive the real
-client directly against a container, with no app running.
-
-**Values are bound, identifiers are quoted.** `src/shared/sql/identifiers.ts` is the only module
-allowed to interpolate into SQL text, and it only ever receives identifiers. Everything a user types
-becomes a parameter. The one deliberate exception is the raw `WHERE` box, where the user is
-explicitly writing SQL.
-
-**Scripts split on `GO`, not `;`.** A semicolon terminates a statement *inside* a batch, so splitting
-on it would cut `BEGIN … END` bodies in half. `splitStatements` (which does split on `;`) exists only
-for editor conveniences like "run the statement under the cursor".
-
-**Cell values are tagged across IPC.** Dates, binary and bigints do not survive structured clone
-with their identity intact, so they cross as `{ t: 'date' | 'bytes' | 'bigint' | 'json', v: … }` and
-round-trip back when a row is written. `bigint` stays textual so precision beyond 2^53 is not lost.
-
-**The menu is described once and rendered twice.** `src/shared/menu.ts` holds the model; the main
-process turns it into an Electron `Menu` (which macOS shows and which supplies the accelerators on
-every platform) and the title bar draws the same items in the window. Items the renderer cannot
-carry out itself — clipboard, zoom, dev tools, closing the window — name an Electron role and come
-back over IPC.
-
-**App data is written new-file-then-rename, and the rename retries.** A crash mid-write then leaves
-the previous copy intact rather than half of the new one. On Windows that rename is not guaranteed
-to go through first time — a virus scanner or the search indexer holding either file open comes back
-`EPERM` — so `JsonStore` retries, and falls back to writing over the file directly. Window geometry
-takes the same route but is also *coalesced*: dragging a window's edge raises `resize` dozens of
-times a second, and one write per event is both wasted work and the surest way to meet that lock.
-One write per burst, one more when the window closes, and a geometry write that cannot be made is
-logged rather than thrown — it is not worth failing the app over.
-
-**A tab belongs to a pane, and only a pane's active tab is mounted.** The tab store holds one flat
-list of tabs and one or two panes naming which of them they hold. Because only the mounted tab can be
-holding staged edits, the view that owns them registers a leave guard *against its own tab id*, and
-everything that would unmount a view — selecting another tab, closing one, moving it to the other
-pane, folding the split away, dragging it into a new window — asks the tabs that are about to go.
-The split pane is always rendered, collapsed rather than replaced when there is no second pane:
-swapping between two layouts would remount the first pane's view and take its staged edits with it.
-
-**A table tab keeps its last page, and re-reads it behind the rows.** Unmounting a view takes
-everything it was holding with it, so reselecting a tab used to mean an empty grid and a spinner for
-as long as the server took — to arrive at the rows it had a second earlier. The page it last drew is
-kept on the tab instead (`markRaw`, like a query tab's result, so a page of rows stays out of the
-reactivity graph), and the view is seeded from it during setup, before its first render. What
-follows is an ordinary read marked `background`: nothing is dimmed and nothing is blocked, and
-`lib/tableCache.ts` compares the answer against what is drawn so that only a real difference reaches
-the grid — handing it new columns resets the widths and the selection, and new rows lose the scroll
-position, which is a poor way to say "nothing has changed". Loads carry a token for the same reason:
-the reader can sort, filter or page while that read is in flight, and the last thing asked for is
-the one whose answer counts.
-
-**The renderer converts reactive state to plain data before the bridge.** `contextBridge` clones
-arguments with the structured clone algorithm, which refuses to clone a Proxy — which is exactly
-what Vue reactive state is. `lib/api.ts` handles this once for every call site.
-
----
-
-## Working on the UI
-
-The design tokens and shared controls live in `src/renderer/src/styles/index.css`.
-`design-system/tableview/MASTER.md` writes the same system down — palette, type, spacing,
-components, motion, and what not to do — and is the first thing to read before changing how
-something looks.
-
----
-
-## Claude Code setup
-
-`.claude/` holds project skills and one hook. Claude Code picks them up in any session on this
-repository, local or in the cloud, with nothing to install.
-
-**UI UX Pro Max** ([nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill),
-MIT) lives in `.claude/skills/ui-ux-pro-max/`. Ask for it by name, or let a UI task trigger it. It
-searches a local database of styles, palettes, font pairings and UX guidelines with
-`python3 .claude/skills/ui-ux-pro-max/scripts/search.py` — Python 3 and the standard library, no
-network. Its instructions have Claude read `MASTER.md` before building a screen and leave it
-unchanged without your say-so, so new work follows the shipped system rather than a freshly
-generated one.
-
-It was installed from `ui-ux-pro-max-cli` 2.15.0. To move to a newer release:
-
-```bash
-npx ui-ux-pro-max-cli@latest init --ai claude --force
-# The installer also adds six companion skills (banners, brand, logos, slides,
-# design tokens, shadcn/Tailwind) that this project has no use for.
-rm -rf .claude/skills/{banner-design,brand,design,design-system,slides,ui-styling}
-```
-
-**Superpowers** ([obra/superpowers](https://github.com/obra/superpowers), MIT) is Jesse Vincent's
-library of working-method skills: brainstorming a design before building it, writing and executing
-plans, test-driven development, systematic debugging, verifying before calling something done,
-requesting and receiving code review, worktrees, subagent-driven development and finishing a branch.
-Its fifteen skills sit beside UI UX Pro Max in `.claude/skills/` (`brainstorming` through
-`writing-skills`), copied unmodified from the v7.0.0 release.
-
-What makes it more than a shelf of skills is its session-start hook, and that is wired up too:
-`.claude/settings.json` runs Superpowers' own script (`.claude/hooks/`, also unmodified) at the
-start of a session, after `/clear` and after compaction. It loads the `using-superpowers` skill into
-the conversation, which has Claude check for a skill that applies before it acts — brainstorming
-before building, systematic debugging before fixing — the way the plugin does. The command sets
-`CLAUDE_PLUGIN_ROOT` only because that is what makes the script answer in Claude Code's format;
-Claude Code sets it for plugins but not for project hooks. Instructions in `CLAUDE.md`, or given
-directly, still take precedence over the skills.
-
-- **To keep the skills but drop the always-on behaviour**, delete the `SessionStart` entry from
-  `.claude/settings.json`. The skills stay available when asked for by name.
-- **The skills refer to each other as `superpowers:<name>`**, the plugin's namespace. As project
-  skills they are named without it: `brainstorming`, not `superpowers:brainstorming`.
-- **Don't also install the Superpowers plugin** (`/plugin install superpowers@claude-plugins-official`)
-  for this repository, or every skill and the hook will be loaded twice.
-
-To move to a newer release, copy its skills and hook script over these, and delete any skill the
-release dropped:
-
-```bash
-TAG=v7.0.0   # the release to move to
-git clone --depth 1 --branch "$TAG" https://github.com/obra/superpowers /tmp/superpowers
-cp -R /tmp/superpowers/skills/. .claude/skills/
-cp /tmp/superpowers/hooks/run-hook.cmd /tmp/superpowers/hooks/session-start .claude/hooks/
-```
-
----
-
-## Known limitations
-
-Deliberately out of scope for phase 1, in rough priority order for phase 2:
-
-- **One engine.** Only SQL Server. The `DbClient` seam is in place but there is no second driver.
-- **One connection per window.** Several windows work, and a window can show two panes side by side,
-  but both panes talk to the same connection — the schema store is keyed for one connection at a
-  time. Two connections at once means two windows.
-- **Two panes, not more.** A tab can be split off into a second pane; there is no third, and no
-  stacking panes vertically.
-- **No schema editing UI.** You can drop and truncate from the sidebar and run any DDL you like in
-  the editor, but there is no visual "add column" / "create index" builder.
-- **No backup/restore, import, or diff tooling.**
-- **Confirmations use native `window.confirm`.** Functional, but it blocks the renderer and does not
-  match the app's styling; an in-app modal would be better.
-- **Named instances cannot be used through an SSH tunnel** — SQL Browser resolves them over UDP 1434,
-  which a TCP forward cannot carry. Give an explicit port instead. The app ignores `instanceName`
-  when tunnelling rather than failing confusingly.
-- **Azure AD support is password-flow only** — no interactive, device-code or managed-identity flows.
-- **A dropped connection is reopened, not resumed.** The keepalive keeps an idle session from being
-  torn down, and a connection that goes anyway is reopened in the background — but reopening means a
-  fresh SSM session and a fresh pool, so anything that was in flight is lost and has to be re-run.
-  Credentials that ran out are not something reopening can fix; the status bar says so and offers
-  the paste box.
-- **No interactive AWS prompts.** The CLI child is spawned without stdin, so a profile configured
-  with `mfa_serial` cannot be answered, and `aws sso login` (a browser flow) has to be run yourself —
-  the app detects the expiry and says so. Pasting portal credentials sidesteps both.
-- **Expiry is only known when the block says so.** The portal's environment-variable format carries
-  no expiry, so the app can tell you the credentials *are* temporary but not when they lapse; it
-  reports the failure when they do.
-- **A named bastion needs `ec2:DescribeInstances`.** Names are matched by EC2, so an identity that
-  can start a session but cannot describe instances has to point the connection at an ID instead.
-- **Read-only mode reads the script, not the server.** SQL Server has no session switch that refuses
-  writes, so the check is the app's own reading of the T-SQL, and it errs towards refusing: `EXEC`
-  is turned down even for `sp_help`, and a `#temp` table counts as a write like any other. A login
-  that can only read is the guarantee; the setting is the safety net.
-- **macOS builds do not update themselves.** The release workflow builds for Windows and Linux, so a
-  macOS package has no release to update from and does not look for one. Nor does a Linux package
-  other than the AppImage and the .deb.
-- **The AppImage can run without Chromium's sandbox.** Ubuntu 24.04 and later restrict the user
-  namespaces the sandbox is built on, and an AppImage cannot carry the AppArmor profile that would
-  lift that; where the sandbox cannot start, its launcher adds `--no-sandbox` rather than fail to
-  open. The .deb installs that profile, and keeps the sandbox.
-- **The AppImage's runtime is still a beta in electron-builder.** It is the one that opens without
-  libfuse2 (see [Build for Linux](#build-for-linux)), and it has built, run and updated itself here,
-  restart included; if it ever misbehaves, deleting `toolsets` from `electron-builder.yml` goes back
-  to the default, at the price of libfuse2.
-- **The renderer bundle is ~1.7 MB** (CodeMirror and the SQL formatter dominate). Fine for a desktop
-  app; worth code-splitting if startup time ever matters.
-- **Query results are capped** at `maxResultRows` (50 000 by default). Rows past the cap are counted
-  but not retained, and the results header says so.
+[Known limitations](docs/limitations.md) has the full list.
 
 ## Licence
 
-MIT
+[MIT](LICENSE)

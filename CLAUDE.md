@@ -4,8 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TableView is an Electron + Vue 3 + TypeScript desktop SQL client. Phase 1 supports only Microsoft
 SQL Server, but everything behind the `DbClient` interface (`src/main/db/types.ts`) is engine-agnostic.
-`README.md` is the detailed feature spec and documents the reasoning behind most behaviour; read the
-relevant section before changing a feature.
+`docs/` is the detailed feature spec and documents the reasoning behind most behaviour, one page per
+area (connections, aws-ssm, read-only, tables, query-editor, workspace, install-and-update,
+development, releasing, architecture, limitations); read the relevant page before changing a
+feature, and update it with the change. `README.md` is the short overview that links them; keep it
+short.
 
 ## Commands
 

@@ -71,7 +71,12 @@ const focusedView = computed<PaneView | null>(() =>
 )
 
 const mainArea = ref<HTMLElement | null>(null)
-const sidebarWidth = ref(280)
+/**
+ * Width of the sidebar. In the default 1440px window, 320px still leaves a
+ * table's toolbar room for its labels with edits staged; much wider and the
+ * toolbar would lose them.
+ */
+const sidebarWidth = ref(320)
 /** Width of the second pane when the workspace is split. */
 const splitWidth = ref(640)
 

@@ -4,6 +4,12 @@ What changed in each release of TableView, newest first. The downloads are on th
 [Releases page](https://github.com/NelushaUdaraka/tableview/releases); a version at the top that is
 not there yet is the next release, still being prepared.
 
+## 0.2.1
+
+- Typing `>=` or `<=` into a text box, such as the filter's raw `WHERE` or a field in the row panel,
+  no longer shows it as `=`. Text boxes now show exactly the characters you type, without the
+  joined-up symbols the code font draws for them in the SQL editor and the grid.
+
 ## 0.2.0
 
 - TableView remembers how you left it: after a restart the sidebar comes back at the same width,

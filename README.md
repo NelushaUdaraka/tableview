@@ -19,6 +19,8 @@ TableView connects to SQL Server directly, through an SSH tunnel or through an A
 bastion. It gives you a fast table browser, a T-SQL editor that knows your schema, and safeguards for
 the connections where a mistake would hurt. It is built with Electron, Vue 3 and TypeScript.
 
+![Opening a saved connection, sorting the orders table newest first, and following an order's customer_id from the row panel to the customer, whose preferences show as a JSON tree](docs/images/browse.gif)
+
 ## Features
 
 **Connections**
@@ -39,6 +41,8 @@ the connections where a mistake would hurt. It is built with Electron, Vue 3 and
 - A row panel that shows JSON as a tree, and foreign keys that open the row they point at
 - Export to CSV, TSV, JSON, JSON Lines, SQL `INSERT`s or Markdown
 
+![Filtering the orders with a raw WHERE, marking three of them shipped in the grid, and applying the three changes](docs/images/edit.gif)
+
 **Queries**
 - A T-SQL editor with completion from the live schema, and formatting
 - Run everything, a selection or the statement under the cursor; scripts split on `GO`, as in SSMS
@@ -47,10 +51,14 @@ the connections where a mistake would hurt. It is built with Electron, Vue 3 and
 - Stored procedures and functions open as `CREATE OR ALTER`, with every change from the stored
   version marked, and each one revertible on its own
 
+![Typing a query that joins orders to customers, picking table names from the completion list, and running it to get revenue by country](docs/images/query.gif)
+
 **Safety**
 - Read-only connections: a script that writes is refused before any of it is sent
 - Staged edits and unsaved routines are never dropped without asking
 - A connection's colour tints its whole window, so production never looks like staging
+
+![A read-only production connection, tinted red, refusing to run a DELETE: nothing is sent to the server](docs/images/read-only.gif)
 
 **Workspace**
 - Tabs, a side-by-side split, and tabs that drag out into windows of their own

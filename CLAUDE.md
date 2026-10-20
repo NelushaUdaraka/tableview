@@ -50,6 +50,11 @@ lock), and uses a fresh profile in `.tmp/profile-<suite>`. Most suites need the 
 `connections` and `ssm-form` do not (`ssm-form` uses a fake `aws` CLI from `test/fixtures/fake-aws.mjs`
 installed into `.tmp/bin`). Screenshots go to `.tmp/`.
 
+**README GIFs** (`docs/images/`) are filmed from the real app by `npm run readme:gifs`
+(`scripts/readme-gifs/`; `-- <scene>` for one): its own Xvfb, real input through xdotool, ffmpeg, and
+a demo database it rebuilds on the test server. It needs the test environment, xdotool and ffmpeg.
+Re-record a scene when a change alters what it shows (`docs/development.md`).
+
 ## Every change prepares the next release
 
 `main` is kept ready to release. A branch that changes what ships (anything under `src/` or `build/`,

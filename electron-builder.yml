@@ -32,7 +32,11 @@ win:
       arch: [x64]
     - target: portable
       arch: [x64]
-  artifactName: ${productName}-${version}-${arch}.${ext}
+  # Every download is named for the system it runs on and the processor it is
+  # for, so a release page lists TableView-<version>-windows-x64-… apart from
+  # TableView-<version>-linux-…. The installer and the portable exe add which
+  # of the two they are (see nsis and portable below).
+  artifactName: ${productName}-${version}-windows-${arch}.${ext}
   # Unsigned builds are fine for local use; set CSC_LINK / CSC_KEY_PASSWORD
   # (or WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD, which the release workflow reads
   # from secrets) to sign, and electron-builder will pick them up automatically.
@@ -53,8 +57,8 @@ publish:
   releaseType: draft
 
 nsis:
-  # "Setup" in the name, so the release page says which download installs.
-  artifactName: ${productName}-Setup-${version}.${ext}
+  # "setup" in the name, so the release page says which download installs.
+  artifactName: ${productName}-${version}-windows-${arch}-setup.${ext}
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
@@ -65,7 +69,7 @@ nsis:
   runAfterFinish: true
 
 portable:
-  artifactName: ${productName}-${version}-portable.${ext}
+  artifactName: ${productName}-${version}-windows-${arch}-portable.${ext}
 
 linux:
   icon: build/icon.png
@@ -87,11 +91,11 @@ linux:
   # desktopName in package.json; naming the .desktop file after it too is what
   # lets the taskbar match a running window to TableView's entry and icon.
   syncDesktopName: true
-
-appImage:
-  # The architecture in every name, so the two downloads cannot be mixed up;
-  # the .deb keeps Debian's own tableview_<version>_<arch>.deb.
-  artifactName: ${productName}-${version}-${arch}.${ext}
+  # Named like the Windows files, the AppImages and the .debs alike, so the
+  # .deb is not Debian's usual tableview_<version>_<arch>.deb. Each format
+  # keeps its own word for the processor: x86_64 for an AppImage and amd64
+  # for a .deb (the same 64-bit PCs), arm64 for both.
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
 
 # The static AppImage runtime, which mounts with the FUSE 3 a desktop already
 # has. electron-builder's default runtime needs libfuse2, which Ubuntu stopped

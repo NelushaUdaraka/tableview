@@ -38,7 +38,8 @@
     "testenv:up": "scripts/test-env.sh up",
     "testenv:down": "scripts/test-env.sh down",
     "testenv:status": "scripts/test-env.sh status",
-    "test:e2e:ssm": "scripts/e2e.sh ssm-form"
+    "test:e2e:ssm": "scripts/e2e.sh ssm-form",
+    "readme:gifs": "node scripts/readme-gifs/record.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.9",

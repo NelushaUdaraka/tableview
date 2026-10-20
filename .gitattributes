@@ -12,5 +12,6 @@
 
 # Never touch binaries.
 *.png  binary
+*.gif  binary
 *.ico  binary
 *.icns binary

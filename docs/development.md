@@ -203,6 +203,37 @@ The suites:
 
 Screenshots land in `.tmp/`.
 
+## The README's animations
+
+The GIFs in the README, kept in `docs/images/`, are filmed from the real app rather than mocked up.
+`npm run readme:gifs` builds it, opens it on a virtual display of its own against the test
+environment's SQL Server, drives it with real mouse and keyboard input, and films each scene with
+ffmpeg. Record them again when a change alters what one of them shows.
+
+```bash
+apt-get install -y xvfb xdotool ffmpeg gifsicle   # gifsicle is optional: it makes the files smaller
+scripts/test-env.sh up
+npm run readme:gifs                               # every scene; or name some: npm run readme:gifs -- edit query
+```
+
+It needs the same libraries as the end-to-end suites. The scenes:
+
+| Scene | What it shows |
+| --- | --- |
+| `browse` | The connection list; connecting, opening `orders`, sorting it newest first, the row panel, and following `customer_id` to the customer |
+| `edit` | A raw `WHERE`, three statuses changed in the grid, and the change set applied |
+| `query` | A query typed with completion from the schema, and its results |
+| `read-only` | A read-only production connection refusing a `DELETE` |
+
+They run against `acme_coffee`, a made-up coffee roaster's database that
+`scripts/readme-gifs/demo-data.mjs` builds on the test server, with an `app` login for the
+production connection. It is dropped and built again before every scene, from a fixed seed, so a
+scene recorded on its own looks the same as one recorded with the rest. The scenes themselves are in
+`scripts/readme-gifs/record.mjs`. Three things there work around filming on a display with no
+window manager: the recorder gives the window the keyboard itself, or nothing typed reaches the page;
+applying edits does not ask first, since the system's confirmation box would land unstyled in a
+corner; and no scene opens a native `<select>`, whose list does not appear at all.
+
 ## Working on the UI
 
 The design tokens and shared controls live in `src/renderer/src/styles/index.css`.

@@ -126,3 +126,7 @@ and how `normalizeUiState` reads it back), start the view from `useUiStateStore(
   sets the interface and JetBrains Mono sets anything that is data or code; one SVG icon set
   replaces the typed glyphs that used to render differently on every platform. Menus, dialogs and
   toasts arrive with a short fade, and all of it stands still when the OS asks for reduced motion
+- **Text boxes show exactly what was typed**: they draw no ligatures or contextual forms, which the
+  SQL editor and the grid keep. Chromium reshapes only the part of a box's text that a keystroke
+  changed, which parts a ligature from the glyph it depends on, so a typed `>=` showed as a blank
+  and an `=`

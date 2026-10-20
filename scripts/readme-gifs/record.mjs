@@ -222,7 +222,6 @@ const SCENES = {
       await click(app, button('Raw WHERE'))
       await click(app, `document.querySelector('.filters__raw input')`)
       await moveTo(760, 420)
-      // `>` rather than `>=`: typed into a box, the mono font draws `>=` as `=`.
       await type("placed_at > '2026-10-15'")
       await pause(300)
       await press('Return')

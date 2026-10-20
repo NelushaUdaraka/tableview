@@ -378,14 +378,40 @@ steps.push({ step: 'cleared a draft', rows: await rowsLabel(), filterRows: await
 check(steps.at(-1).filterRows === 0, 'the drafted filter is still there')
 check(steps.at(-1).rows === '5 rows', 'clearing a drafted filter read the table again')
 
-// A raw WHERE clears the same way.
+// A raw WHERE clears the same way. It is typed a key at a time, as a person
+// would: Chromium reshapes only the part of a box's text a keystroke changed,
+// which drew a typed `>=` as a blank and an `=`. What is typed must look the
+// same as that text drawn afresh.
+const where = "status = 'done' AND id >= 2"
+// Only the stretch the text is drawn in: repainted after losing focus, the
+// box's rounded corners come back a shade off in a pixel or two.
+const rawBox = async () => {
+  await delay(300)
+  const clip = await ev(`(() => {
+    const input = document.querySelector('.filters__raw input')
+    const box = input.getBoundingClientRect()
+    const style = getComputedStyle(input)
+    const left = parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft)
+    const right = parseFloat(style.borderRightWidth) + parseFloat(style.paddingRight)
+    const top = parseFloat(style.borderTopWidth)
+    const bottom = parseFloat(style.borderBottomWidth)
+    return { x: box.left + left, y: box.top + top, width: box.width - left - right, height: box.height - top - bottom, scale: 1 }
+  })()`)
+  return (await send('Page.captureScreenshot', { format: 'png', clip })).data
+}
 await ev(`[...document.querySelectorAll('.filters__mode')].find(b => b.textContent.trim() === 'Raw WHERE').click()`)
+await ev(`document.querySelector('.filters__raw input').focus()`)
+for (const key of where) await send('Input.insertText', { text: key })
+await ev(`document.querySelector('.filters__raw input').blur()`)
+check((await ev(`document.querySelector('.filters__raw input').value`)) === where, 'the typed WHERE did not arrive')
+const typed = await rawBox()
 await ev(`(() => {
   const input = document.querySelector('.filters__raw input')
-  input.value = "status = 'done'"
-  input.dispatchEvent(new Event('input', { bubbles: true }))
+  input.value = ''
+  input.value = ${JSON.stringify(where)}
   return true
 })()`)
+check(typed === (await rawBox()), 'the typed WHERE is drawn differently from the same text drawn afresh')
 await applyFilters()
 await waitFor(`document.querySelector('.data__rows')?.textContent.includes('2 rows')`, 'the raw filter applied')
 await ev(`document.querySelector('.filters__clear').click()`)

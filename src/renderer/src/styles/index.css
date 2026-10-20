@@ -266,6 +266,14 @@ textarea {
 button {
   font-feature-settings: inherit;
 }
+/* A text box shows what was typed, character for character: no ligatures or
+   contextual forms. Chromium reshapes only the stretch of a box's text that a
+   keystroke changed, which parts a ligature from the glyph it hangs on: a
+   typed `>=` came out in JetBrains Mono as a blank and an `=`. */
+input,
+textarea {
+  font-variant-ligatures: none;
+}
 
 /* Keyboard focus is the accent ring, never the browser default. Drawn inside
    the box by default, because most of what takes focus here sits in a strip

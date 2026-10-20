@@ -157,7 +157,8 @@ The suites:
   copied row is the columns on show; takes the tab away and back, hides every column and puts them
   back from the empty grid. Then *Clear filters*: off with nothing to clear, back to every row
   after a builder filter and after a raw `WHERE`, and no read at all for a filter only drafted.
-  Last it narrows the window with an edit staged and checks the toolbar still fits
+  The raw `WHERE` is typed a key at a time, with a `>=` in it, and must look the same as that text
+  drawn afresh. Last it narrows the window with an edit staged and checks the toolbar still fits
 - **routines** — creates a procedure, opens it from the tree, edits three places in it and checks
   each is marked as what it is (changed, added, removed); opens a change and reads the stored line
   in it, reverts that change alone and takes the revert back with `Ctrl+Z`, steps between changes

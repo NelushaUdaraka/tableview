@@ -2,10 +2,15 @@
 # .debs, and publishes them as a GitHub release that installed copies of
 # TableView update themselves from.
 #
-# To release, bump the version and push the tag it makes:
+# Changes bump the version in package.json as they land, and add their lines to
+# CHANGELOG.md under it, so to release, tag main at the version it carries and
+# push the tag:
 #
-#   npm version 0.2.0          # or patch / minor / major
-#   git push --follow-tags
+#   git tag v0.2.0
+#   git push origin v0.2.0
+#
+# If nothing has bumped the version, `npm version patch` (or minor / major) sets
+# it and makes the tag; push both with `git push --follow-tags`.
 #
 # A tag with a pre-release part (v0.3.0-beta.1) is published as a pre-release,
 # which the stable app never updates to.
@@ -43,7 +48,7 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version. Make the tag with 'npm version', which sets both."
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version. Tag the commit that carries the version, or make the tag with 'npm version', which sets both."
             exit 1
           fi
 
@@ -66,15 +71,26 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'push'
+
+      # The notes open with what CHANGELOG.md says about this version, and the
+      # pull requests merged since the last release follow. A version with no
+      # section there gets the pull requests alone.
       - name: Draft the release
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v version="$version" '/^## / { if (found) exit; found = ($2 == version); next } found' \
+            CHANGELOG.md > "$RUNNER_TEMP/notes.md" 2>/dev/null || true
+          notes=()
+          if grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then notes=(--notes-file "$RUNNER_TEMP/notes.md"); fi
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
-            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --generate-notes \
-              --title "TableView ${GITHUB_REF_NAME#v}"
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --generate-notes "${notes[@]}" \
+              --title "TableView $version"
 
   windows:
     name: Windows build

@@ -1,0 +1,266 @@
+# Development
+
+Running TableView from source, building its packages, and testing it. Cutting a release has
+[a page of its own](releasing.md), and [Architecture](architecture.md) explains how the code is laid
+out.
+
+## Getting started
+
+```bash
+npm install
+npm run dev          # hot-reloading dev build
+```
+
+### If `npm run dev` says "Electron uninstall"
+
+Electron 44 has no postinstall hook — it exposes an `install-electron` bin and otherwise fetches its
+binary lazily on first launch. electron-vite reads `node_modules/electron/path.txt` directly, so it
+never triggers that lazy fetch and fails instead. The `postinstall` script in `package.json` runs the
+installer for you; if you installed with `--ignore-scripts`, or the download was blocked, run it by
+hand:
+
+```bash
+npx install-electron
+```
+
+That downloads roughly 100 MB from GitHub releases and writes `path.txt`. Behind a proxy or a
+mirror, point it somewhere reachable first:
+
+```bash
+# a mirror
+set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+npx install-electron
+
+# or an already-downloaded, unzipped build
+set ELECTRON_OVERRIDE_DIST_PATH=C:\path\to\electron-v44.1.1-win32-x64
+```
+
+## Build for Windows
+
+The whole production dependency tree is **pure JavaScript** — no native modules — so there is no
+node-gyp step and nothing to rebuild per platform.
+
+On a Windows machine:
+
+```bash
+npm install
+npm run build:win
+```
+
+That produces, in `release/<version>/`:
+
+| Artifact | What it is |
+| --- | --- |
+| `TableView-0.1.0-windows-x64-setup.exe` | NSIS installer (per-user, choosable install directory, shortcuts) — the copy that updates itself |
+| `TableView-0.1.0-windows-x64-portable.exe` | Single-file portable build |
+| `latest.yml`, `TableView-0.1.0-windows-x64-setup.exe.blockmap` | What an installed copy reads to update: the newest version and its checksum, and the block map that lets it download only what changed |
+
+Every file is named for the system it runs on, then the processor, so the Windows and Linux files
+of a release sit apart on its page. The names come from `artifactName` in `electron-builder.yml`.
+Installed copies find their update through `latest.yml`, not by name, so a rename does not stop them
+updating. It does cost the next Windows update its download of only what changed: that looks for the
+previous release's block map under the new name, finds none, and downloads the whole installer.
+
+Builds are unsigned by default. To sign, set `CSC_LINK` (path or base64 of a `.pfx`) and
+`CSC_KEY_PASSWORD` before running — electron-builder picks them up automatically.
+
+`npm run build:unpack` produces an unpacked directory instead, which is the quickest way to
+sanity-check packaging. No build script publishes anything: uploading takes `--publish`, which only
+the release workflow passes.
+
+## Build for Linux
+
+On a Linux machine:
+
+```bash
+npm install
+npm run build:linux
+```
+
+That produces, in `release/<version>/`, for both x64 and arm64 — one x64 machine builds both, since
+there is nothing native to compile:
+
+| Artifact | What it is |
+| --- | --- |
+| `TableView-0.1.0-linux-x86_64.AppImage`, `TableView-0.1.0-linux-arm64.AppImage` | Runs on most distributions without installing: mark it executable and open it. The copy that updates itself |
+| `TableView-0.1.0-linux-amd64.deb`, `TableView-0.1.0-linux-arm64.deb` | Installs into `/opt/TableView` with a menu entry, for Debian, Ubuntu and their relatives |
+| `latest-linux.yml`, `latest-linux-arm64.yml` | What an AppImage reads to update, and a .deb to say there is a newer one |
+
+`x86_64` and `amd64` are the AppImage's and Debian's names for the same 64-bit Intel and AMD
+processors — Windows calls them `x64`; `arm64` is for ARM machines.
+
+The AppImages use electron-builder's static AppImage runtime (`toolsets.appimage` in
+`electron-builder.yml`), which mounts with the FUSE 3 that desktop distributions already install.
+electron-builder's default runtime wants libfuse2, which Ubuntu stopped installing with 22.04, so an
+AppImage built with it does not even open on a fresh Ubuntu. Where FUSE is missing altogether — some
+containers and minimal installs — run the AppImage with `--appimage-extract-and-run`.
+
+## Testing
+
+Three layers, all runnable on Linux:
+
+| Command | What it covers |
+| --- | --- |
+| `npm test` | 1049 unit tests — SQL building, T-SQL lexing, the read-only check, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh, the columns a table shows, TablePlus URLs, when the app updates itself |
+| `npm run test:integration` | 72 tests against a **real SQL Server 2022** and a **real sshd** |
+| `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
+
+### Bringing up the test environment
+
+```bash
+scripts/test-env.sh up      # SQL Server on :11433, sshd on :2222
+npm run test:integration
+scripts/test-env.sh down
+```
+
+The script also generates the SSH keypairs the tunnel tests use (one plain, one passphrase-protected)
+and flips `AllowTcpForwarding` on, which the `linuxserver/openssh-server` image ships disabled.
+
+### End-to-end
+
+```bash
+scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | table-tools | routines | auto-refresh | unsaved | read-only | ssm-form
+```
+
+On a headless box it starts Xvfb itself. It needs Electron's usual Linux libraries:
+
+```bash
+apt-get install -y xvfb libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
+  libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
+  libasound2t64 libnss3 libnspr4 libgtk-3-0t64 libatspi2.0-0t64
+```
+
+The suites:
+- **smoke** — the window opens, the preload bridge exposes the API, settings load, IPC errors arrive
+  as real `Error`s, and a saved password never appears in renderer-visible data
+- **connections** — duplicates a saved connection from the list and from inside the form, checks
+  the copy opens ready to edit with the secrets carried over, that the original comes through
+  untouched either way, and that a copy of a copy is numbered rather than suffixed twice. Then
+  the TablePlus import: the ⋮ menu's *Import from TablePlus…* opens a new connection with its
+  steps showing and editing one shows no panel; a paste of anything but a SQL Server URL from
+  TablePlus leaves the form as it was, and the real one replaces every field — the password
+  masked, the colour and group mapped — and saves with the password stored but never handed back
+  to the window; the same URL again is called out and saved beside the first, which is
+  untouched, a URL with no password stores none, and a key tunnel asks for its file. Needs no
+  database: nothing in it connects.
+- **workspace** — connects to the container, loads the schema tree, opens a table, reads the grid,
+  checks the structure tab, types and runs a JOIN in the editor, provokes a SQL error, toggles theme
+- **editing** — edits a cell, stages an insert, applies the change set, verifies the rows in the
+  database, deletes through the context menu, and drives the filter builder
+- **table-ui** — opens the title bar's View menu, reads the selected row out of the row panel, edits
+  a field there and applies it to the database, follows a foreign key into the referenced table and
+  checks the filter and the row it lands on, opens the expanding cell editor, and hides the panel
+- **table-tools** — opens the columns picker and checks it hangs from its button with every column
+  ticked; hides a column and checks it goes at once without the table being read (a row written
+  from outside stays out); narrows the list with a search and hides what matches; hides a column
+  from the header menu, and checks the arrow keys step over it, the row panel leaves it out and a
+  copied row is the columns on show; takes the tab away and back, hides every column and puts them
+  back from the empty grid. Then *Clear filters*: off with nothing to clear, back to every row
+  after a builder filter and after a raw `WHERE`, and no read at all for a filter only drafted.
+  Last it narrows the window with an edit staged and checks the toolbar still fits
+- **routines** — creates a procedure, opens it from the tree, edits three places in it and checks
+  each is marked as what it is (changed, added, removed); opens a change and reads the stored line
+  in it, reverts that change alone and takes the revert back with `Ctrl+Z`, steps between changes
+  from the toolbar and the keyboard, reverts the rest, then runs the tab and checks the server has
+  the edit and the marks start again from it — and that a partial run moves nothing. Then closes
+  it with changes unsaved: Cancel keeps it, *Close all* from another tab still asks, Discard leaves
+  the server alone, an unchanged routine closes without asking, *Save and close* writes it, and a
+  save that fails keeps the tab and shows it
+- **unsaved** — disconnects with nothing unsaved and checks nothing is asked; then, with a row staged
+  in a table and a routine changed, checks disconnecting asks about both and says it is
+  disconnecting, and that Cancel keeps the connection; that switching the table to its structure
+  asks too; that the window's ✕ and File → Exit ask in
+  their own words and Cancel keeps the window and the app; and that once every question is answered
+  the window really does close and the app goes with it
+- **auto-refresh** — checks a table opens with it off and offers the fixed intervals in a menu lined
+  up under its button, with *Off* ticked and focused; turns it on and waits for a row written from
+  outside to turn up unprompted, stages an edit and checks it holds
+  (and says why) until the edit is discarded, takes the tab away and back, turns it off, and drops
+  the table under it to see a failed read switch it off with a word about it
+- **read-only** — saves a writable and a read-only connection to the container and checks the list
+  marks only the read-only one and its form keeps the setting; connects it and checks the status bar
+  and the query toolbar say so; runs a script that reads and then deletes and checks it is refused
+  whole, by line, and that a read on its own still runs; opens a table and checks nothing there can
+  be edited, and that *Truncate* and *Drop* are greyed in the tree's menu. Then it goes round the
+  window: staged edits, truncate, drop and a raw filter with a `DELETE` in it, sent straight to the
+  main process, are each refused, and the rows are counted to show none of it happened. Last it
+  switches it where it is used: the status bar's *Read-only* switch asks before turning it off, with
+  the focus on *Keep read-only* and Escape keeping it; once told, a delete goes through with no
+  reconnect, the switch still there and still labelled, and turned back on — without a question —
+  the next one is refused. *File → Toggle Read-only* asks the same; the padlock on a row of the
+  list, and the row's ⋮ menu, turn a connection on and, after the question, off without connecting
+  it; and in the form, unticking it asks over the form, Escape answers only the question, and
+  *Cancel* leaves the saved setting as it was
+- **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block
+  with *Paste from clipboard* (after checking that something else on the clipboard never reaches
+  the box), fetches the account's instances and picks the bastion from the list (including the
+  empty answer a wrong region gives), switches the connection to finding that bastion by its Name
+  tag and back, runs the prerequisite check in both its failing and passing states, saves, reopens
+  the connection to confirm the stored summary appears while the secret never reaches the renderer,
+  pastes a fresh block into the dialog a run-out one raises, and opens a second window.
+  `scripts/e2e.sh` writes stand-ins for `aws` and `session-manager-plugin` into `.tmp/bin`, so it
+  needs no AWS account.
+
+Screenshots land in `.tmp/`.
+
+## Working on the UI
+
+The design tokens and shared controls live in `src/renderer/src/styles/index.css`.
+`design-system/tableview/MASTER.md` writes the same system down — palette, type, spacing,
+components, motion, and what not to do — and is the first thing to read before changing how
+something looks.
+
+## Claude Code setup
+
+`.claude/` holds project skills and one hook. Claude Code picks them up in any session on this
+repository, local or in the cloud, with nothing to install.
+
+**UI UX Pro Max** ([nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill),
+MIT) lives in `.claude/skills/ui-ux-pro-max/`. Ask for it by name, or let a UI task trigger it. It
+searches a local database of styles, palettes, font pairings and UX guidelines with
+`python3 .claude/skills/ui-ux-pro-max/scripts/search.py` — Python 3 and the standard library, no
+network. Its instructions have Claude read `MASTER.md` before building a screen and leave it
+unchanged without your say-so, so new work follows the shipped system rather than a freshly
+generated one.
+
+It was installed from `ui-ux-pro-max-cli` 2.15.0. To move to a newer release:
+
+```bash
+npx ui-ux-pro-max-cli@latest init --ai claude --force
+# The installer also adds six companion skills (banners, brand, logos, slides,
+# design tokens, shadcn/Tailwind) that this project has no use for.
+rm -rf .claude/skills/{banner-design,brand,design,design-system,slides,ui-styling}
+```
+
+**Superpowers** ([obra/superpowers](https://github.com/obra/superpowers), MIT) is Jesse Vincent's
+library of working-method skills: brainstorming a design before building it, writing and executing
+plans, test-driven development, systematic debugging, verifying before calling something done,
+requesting and receiving code review, worktrees, subagent-driven development and finishing a branch.
+Its fifteen skills sit beside UI UX Pro Max in `.claude/skills/` (`brainstorming` through
+`writing-skills`), copied unmodified from the v7.0.0 release.
+
+What makes it more than a shelf of skills is its session-start hook, and that is wired up too:
+`.claude/settings.json` runs Superpowers' own script (`.claude/hooks/`, also unmodified) at the
+start of a session, after `/clear` and after compaction. It loads the `using-superpowers` skill into
+the conversation, which has Claude check for a skill that applies before it acts — brainstorming
+before building, systematic debugging before fixing — the way the plugin does. The command sets
+`CLAUDE_PLUGIN_ROOT` only because that is what makes the script answer in Claude Code's format;
+Claude Code sets it for plugins but not for project hooks. Instructions in `CLAUDE.md`, or given
+directly, still take precedence over the skills.
+
+- **To keep the skills but drop the always-on behaviour**, delete the `SessionStart` entry from
+  `.claude/settings.json`. The skills stay available when asked for by name.
+- **The skills refer to each other as `superpowers:<name>`**, the plugin's namespace. As project
+  skills they are named without it: `brainstorming`, not `superpowers:brainstorming`.
+- **Don't also install the Superpowers plugin** (`/plugin install superpowers@claude-plugins-official`)
+  for this repository, or every skill and the hook will be loaded twice.
+
+To move to a newer release, copy its skills and hook script over these, and delete any skill the
+release dropped:
+
+```bash
+TAG=v7.0.0   # the release to move to
+git clone --depth 1 --branch "$TAG" https://github.com/obra/superpowers /tmp/superpowers
+cp -R /tmp/superpowers/skills/. .claude/skills/
+cp /tmp/superpowers/hooks/run-hook.cmd /tmp/superpowers/hooks/session-start .claude/hooks/
+```

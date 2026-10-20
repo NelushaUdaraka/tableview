@@ -20,6 +20,8 @@ const ICON: Record<'info' | 'success' | 'error', IconName> = {
       class="toast"
       :class="`toast--${toast.kind}`"
       :role="toast.kind === 'error' ? 'alert' : 'status'"
+      @mouseenter="toasts.hold(toast.id)"
+      @mouseleave="toasts.release(toast.id)"
     >
       <AppIcon class="toast__icon" :name="ICON[toast.kind]" :size="16" />
       <div class="toast__body">

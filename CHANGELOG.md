@@ -14,6 +14,11 @@ not there yet is the next release, still being prepared.
   same queries with their text, the same tables, split panes and all. Results, staged edits and a
   procedure's unsaved changes are not brought back. Turn it off in Settings (*Reopen a connection's
   tabs when connecting to it again*), which also deletes the tabs already saved.
+- Connecting opens in the database you last switched to from the sidebar, instead of going back to
+  the connection's default one. If that database is gone or you can no longer open it, TableView
+  opens the default one instead.
+- Switching to a database the server refuses no longer leaves the connection broken: it stays in
+  the database it was in.
 - A narrow sidebar no longer pushes the Schema, History and Saved switch past its edge: the labels
   shorten to fit instead.
 - In a narrow window the connection list no longer hides the names of read-only connections: their

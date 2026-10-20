@@ -45,6 +45,22 @@ describe('connection', () => {
     await expect(bad.connect()).rejects.toThrow()
     await bad.disconnect()
   })
+  it('switches database, and stays where it was when the new one cannot be opened', async () => {
+    const other = new SqlServerClient(client.currentConfig)
+    await other.connect()
+    try {
+      await other.useDatabase('master')
+      expect(other.info!.currentDatabase).toBe('master')
+      await expect(other.useDatabase('tableview_no_such_database')).rejects.toThrow()
+      // Still connected, still in master: the refused switch replaced nothing.
+      expect(other.isConnected).toBe(true)
+      expect(other.currentConfig.database).toBe('master')
+      const [result] = await other.runScript('SELECT DB_NAME() AS db')
+      expect(result.resultSets[0].rows[0][0]).toBe('master')
+    } finally {
+      await other.disconnect()
+    }
+  })
 })
 
 describe('query execution', () => {

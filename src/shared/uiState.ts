@@ -28,6 +28,11 @@ export interface UiState {
   autoRefresh: Record<string, number>
   /** The tabs a window last had open, by saved connection id. */
   openTabs: Record<string, SavedTabs>
+  /**
+   * The database each connection was last switched to, by saved connection id,
+   * when it is not the one the connection's settings name.
+   */
+  databases: Record<string, string>
 }
 
 /**
@@ -80,7 +85,8 @@ export const DEFAULT_UI_STATE: UiState = {
   sidebarPanel: 'objects',
   queryEditorHeight: 336,
   autoRefresh: {},
-  openTabs: {}
+  openTabs: {},
+  databases: {}
 }
 
 /** Enough for every table anyone watches; past it, the longest-unset go first. */
@@ -188,6 +194,12 @@ export function normalizeUiState(raw: unknown): UiState {
       if (tabs) openTabs[id] = tabs
     }
   }
+  const databases: Record<string, string> = {}
+  if (value.databases && typeof value.databases === 'object') {
+    for (const [id, name] of Object.entries(value.databases as Record<string, unknown>)) {
+      if (text(name) && name) databases[id] = name
+    }
+  }
   return {
     sidebarWidth: positive(value.sidebarWidth)
       ? Math.round(value.sidebarWidth)
@@ -203,7 +215,8 @@ export function normalizeUiState(raw: unknown): UiState {
       ? Math.round(value.queryEditorHeight)
       : DEFAULT_UI_STATE.queryEditorHeight,
     autoRefresh,
-    openTabs
+    openTabs,
+    databases
   }
 }
 
@@ -213,15 +226,22 @@ export function normalizeUiState(raw: unknown): UiState {
  * The tables in a patch are merged one by one rather than replacing the map,
  * and an interval of 0 forgets the table. A table set again moves to the end,
  * so trimming to `MAX_REMEMBERED_TABLES` drops the ones set longest ago.
+ * Open tabs and databases merge per connection the same way: `null`, or an
+ * empty database name, forgets that connection's.
  */
 export function mergeUiState(current: UiState, patch: UiStatePatch): UiState {
-  const { autoRefresh: tables, openTabs: windows, ...fields } = patch
+  const { autoRefresh: tables, openTabs: windows, databases: switched, ...fields } = patch
   const next = normalizeUiState({ ...current, ...fields })
   const openTabs = { ...current.openTabs }
   for (const [id, saved] of Object.entries(windows ?? {})) {
     const tabs = normalizeSavedTabs(saved)
     if (tabs) openTabs[id] = tabs
     else delete openTabs[id]
+  }
+  const databases = { ...current.databases }
+  for (const [id, name] of Object.entries(switched ?? {})) {
+    if (text(name) && name) databases[id] = name
+    else delete databases[id]
   }
   const autoRefresh = { ...current.autoRefresh }
   for (const [key, ms] of Object.entries(tables ?? {})) {
@@ -232,7 +252,7 @@ export function mergeUiState(current: UiState, patch: UiStatePatch): UiState {
   for (const key of keys.slice(0, Math.max(0, keys.length - MAX_REMEMBERED_TABLES))) {
     delete autoRefresh[key]
   }
-  return { ...next, autoRefresh, openTabs }
+  return { ...next, autoRefresh, openTabs, databases }
 }
 
 /** Drops everything remembered about a connection, once it is deleted. */
@@ -243,5 +263,7 @@ export function forgetConnection(current: UiState, connectionId: string): UiStat
   )
   const openTabs = { ...current.openTabs }
   delete openTabs[connectionId]
-  return { ...current, autoRefresh, openTabs }
+  const databases = { ...current.databases }
+  delete databases[connectionId]
+  return { ...current, autoRefresh, openTabs, databases }
 }

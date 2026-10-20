@@ -42,7 +42,8 @@ describe('normalizeUiState', () => {
       sidebarPanel: 'saved',
       queryEditorHeight: DEFAULT_UI_STATE.queryEditorHeight,
       autoRefresh: { [orders]: 5000 },
-      openTabs: {}
+      openTabs: {},
+      databases: {}
     })
   })
 

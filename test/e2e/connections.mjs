@@ -5,9 +5,9 @@
  * change the one field that differs — so most of what this suite checks is
  * that the copy arrives ready to edit and that the original comes out of it
  * untouched. The rest is what a list of five then needs: an order the reader
- * chooses, which has to still be there after a restart, and a toast whose
- * dismiss button is where they last saw it. No database is needed: nothing
- * here connects.
+ * chooses, which has to still be there after a restart, and toasts whose
+ * dismiss buttons are where they last saw them and which stay while the
+ * pointer is on them. No database is needed: nothing here connects.
  */
 import { spawn } from 'node:child_process'
 import { writeFileSync, mkdirSync } from 'node:fs'
@@ -541,6 +541,30 @@ check('and each one is inside its own toast', toasts.every((t) => t.inside), tru
 // out the same length this proved nothing.
 check('the two messages were different lengths', new Set(toasts.map((t) => t.lines)).size > 1, true)
 await shot('07-toasts')
+
+// --- toasts stay while the pointer is on them ---------------------------------
+// They put themselves away, but not from under the pointer: resting it on one
+// holds them all, since any below it going would move it, and once the pointer
+// leaves they count down again from the start.
+const toastCount = () => ev(`document.querySelectorAll('.toast').length`)
+const pointerTo = (x, y) => send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
+const firstToast = await ev(`
+  (() => {
+    const box = document.querySelector('.toast').getBoundingClientRect()
+    return JSON.stringify({ x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) })
+  })()
+`).then(JSON.parse)
+const raised = await toastCount()
+await pointerTo(firstToast.x, firstToast.y)
+await delay(9000) // longer than any toast stays on its own
+const held = await toastCount()
+// The left margin of the list screen, where there is nothing to hover.
+await pointerTo(20, 450)
+const justLeft = await toastCount()
+steps.push({ step: 'toasts under the pointer', raised, held, justLeft })
+check('the toasts all stay while the pointer rests on one', held, raised)
+check('and do not go the moment it leaves', justLeft, raised)
+await waitFor(`document.querySelectorAll('.toast').length === 0`, 'the toasts going after the pointer left', 10000)
 
 // --- from TablePlus -----------------------------------------------------------
 // TablePlus hands a connection out as a URL (right-click → Copy as URL), and the

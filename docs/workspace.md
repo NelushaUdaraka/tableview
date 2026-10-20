@@ -50,6 +50,15 @@ tabs and schema tree; connections are namespaced per window, so two windows open
 connection get their own pool and tunnel rather than evicting one another. Closing a window closes
 what it opened — once anything unsaved in it has been asked about. Saved connections and settings are shared, since one process owns those files.
 
+## Toasts
+
+What the app has to say arrives as a toast in the bottom-right corner, and puts itself away: a
+notice after four seconds, an error after eight, since it usually has more to say. Resting the
+pointer on a toast holds them all — not just that one, since a toast below it going would move it
+out from under the pointer — and once the pointer leaves they count down again from the start. The
+two that offer something to do, an update to restart into or to download, stay until they are taken
+up or dismissed: a button that fades before it can be reached is no button at all.
+
 ## Themes, shortcuts and the look of it
 
 - Dark and light themes (and "follow the system"), window state persistence, full menu bar and

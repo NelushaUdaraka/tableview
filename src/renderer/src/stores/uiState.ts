@@ -4,6 +4,7 @@ import {
   DEFAULT_UI_STATE,
   mergeUiState,
   tableMemoryKey,
+  type SavedTabs,
   type UiState,
   type UiStatePatch
 } from '@shared/uiState'
@@ -43,11 +44,16 @@ export const useUiStateStore = defineStore('uiState', () => {
 
   function remember(patch: UiStatePatch): void {
     state.value = mergeUiState(state.value, patch)
+    // The maps are merged key by key on the way to disk, so they gather the
+    // same way here: a later table must not drop an earlier one unsent.
     pending = {
       ...pending,
       ...patch,
       ...(patch.autoRefresh || pending?.autoRefresh
         ? { autoRefresh: { ...pending?.autoRefresh, ...patch.autoRefresh } }
+        : {}),
+      ...(patch.openTabs || pending?.openTabs
+        ? { openTabs: { ...pending?.openTabs, ...patch.openTabs } }
         : {})
     }
     if (timer) clearTimeout(timer)
@@ -74,7 +80,35 @@ export const useUiStateStore = defineStore('uiState', () => {
     remember({ autoRefresh: { [tableMemoryKey(connectionId, database, schema, table)]: ms } })
   }
 
+  /**
+   * The tabs last open on a connection, read from disk rather than from what
+   * this window loaded: another window may have closed on it since.
+   */
+  async function savedTabsFor(connectionId: string): Promise<SavedTabs | null> {
+    flush()
+    try {
+      const stored = await api.getUiState()
+      return stored.openTabs[connectionId] ?? null
+    } catch {
+      return state.value.openTabs[connectionId] ?? null
+    }
+  }
+
+  /** Keeps a connection's open tabs; null forgets them. */
+  function rememberTabs(connectionId: string, tabs: SavedTabs | null): void {
+    remember({ openTabs: { [connectionId]: tabs } })
+  }
+
   globalThis.window?.addEventListener?.('beforeunload', flush)
 
-  return { state, load, remember, flush, autoRefreshFor, rememberAutoRefresh }
+  return {
+    state,
+    load,
+    remember,
+    flush,
+    autoRefreshFor,
+    rememberAutoRefresh,
+    savedTabsFor,
+    rememberTabs
+  }
 })

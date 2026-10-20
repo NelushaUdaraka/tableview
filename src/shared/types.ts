@@ -609,6 +609,11 @@ export interface AppSettings {
    * whoever asks for it: nothing is checked, downloaded or installed unasked.
    */
   autoUpdate: boolean
+  /**
+   * Reopen the tabs a connection had open when it is next connected to,
+   * restarts included. Off forgets the ones already kept.
+   */
+  restoreTabs: boolean
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -625,7 +630,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   formatterIndent: 2,
   connectionSort: 'created',
   connectionSortDirection: 'desc',
-  autoUpdate: true
+  autoUpdate: true,
+  restoreTabs: true
 }
 
 export const DEFAULT_SQLSERVER_OPTIONS: SqlServerOptions = {

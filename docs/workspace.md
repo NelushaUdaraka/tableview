@@ -63,7 +63,8 @@ up or dismissed: a button that fades before it can be reached is no button at al
 
 Where the workspace was left comes back after a restart: the sidebar's width, whether it was put
 away (`Ctrl+B`), which of *Schema*, *History* and *Saved* it shows, how tall the query editor is
-above its results, and each table's auto-refresh interval (see [tables](tables.md)). None of this is
+above its results, each table's auto-refresh interval (see [tables](tables.md)), and the tabs each
+connection had open (below). None of this is
 a setting — it is what the last drag or click left — so it lives in `ui-state.json` in the app's data
 folder rather than in `settings.json`, and the Settings dialog does not list it.
 
@@ -73,6 +74,28 @@ remembering different tables keep both; for a size both windows change, the last
 A window holding one dragged-out tab neither follows nor sets whether the sidebar is put away. The
 file is read forgivingly: a missing or hand-broken value falls back to its default rather than
 breaking the window, and the table intervals are capped at the 200 most recently set.
+
+### Open tabs
+
+Connecting to a connection reopens the tabs it had open the last time, restarts included: in the
+same panes (a split comes back split), in the same order, with the same tab showing in each and the
+same pane focused. A query tab comes back with its text and cursor, and is still tied to the saved
+query it was opened from; a table tab with its view (rows or structure), its hidden columns, and
+its auto-refresh interval. Nothing that was *read* comes back — results, pages of rows — and neither
+does anything the app said would be lost: staged table edits, and a routine's unsaved changes (the
+routine reopens at the definition it was last known to have). Closing every tab leaves nothing to
+reopen, so the next connect opens one blank query, as a first one does.
+
+Tabs are kept per saved connection, written as they change (with the same short pause), and only by
+a full window: a window holding one dragged-out tab does not count. Disconnecting does not forget
+them — that is exactly what the next connect brings back. Two full windows on the same connection
+keep whichever changed last. Tables reopen in the connection's own database, not one switched to
+from the sidebar. Deleting a connection forgets its tabs and table intervals.
+
+**Settings → Reopen a connection's tabs when connecting to it again** (on by default) switches this
+off: nothing is reopened, nothing more is saved, and the tabs already kept are deleted from
+`ui-state.json`. The main process enforces that, so a save already on its way when the box is
+cleared is dropped too.
 
 To remember something else, add a field to `UiState` in `src/shared/uiState.ts` (with its default
 and how `normalizeUiState` reads it back), start the view from `useUiStateStore().state` and call

@@ -153,6 +153,14 @@ const THEMES: { value: 'dark' | 'light' | 'system'; label: string; icon: IconNam
         />
         <span>Confirm before applying a change set</span>
       </label>
+      <label class="checkbox">
+        <input
+          type="checkbox"
+          :checked="settings.settings.restoreTabs"
+          @change="settings.update({ restoreTabs: ($event.target as HTMLInputElement).checked })"
+        />
+        <span>Reopen a connection’s tabs when connecting to it again</span>
+      </label>
 
       <hr class="rule" />
 

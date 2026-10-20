@@ -264,6 +264,11 @@ const shotError = await shot('06-error')
 // --- 8. light theme, driven the way a user would ----------------------------
 // Disconnect first: the theme toggle lives on the connection screen, and going
 // through the real control also exercises the settings store round-trip.
+const tabTitles = () =>
+  evaluate(`JSON.stringify([...document.querySelectorAll('.tab .tab__title')].map(t => t.textContent.trim()))`)
+const titlesBeforeDisconnect = await tabTitles()
+// What is open is remembered once it settles; give it the moment it waits.
+await delay(600)
 await evaluate(
   `[...document.querySelectorAll('.status__btn')].at(-1).click()`
 )
@@ -293,6 +298,12 @@ record('editor theme', {
 })
 const shotLightWorkspace = await shot('08-light-workspace')
 
+// Connecting again brings back the tabs the disconnect took away.
+const titlesAfterReconnect = await tabTitles()
+record('tabs restored', { before: titlesBeforeDisconnect, after: titlesAfterReconnect })
+if (titlesAfterReconnect !== titlesBeforeDisconnect) bail('reconnecting did not reopen the tabs that were open')
+const restoredTabs = JSON.parse(titlesAfterReconnect).length
+
 // --- 9. `+` sits after the last tab, and opens another query tab each time --
 const strip = () =>
   evaluate(`(() => {
@@ -312,10 +323,10 @@ const strip = () =>
     }
   })()`)
 
-// The workspace reconnected onto one blank query tab; two more beside it.
+// Two more beside the restored ones.
 await evaluate(`document.querySelector('.tabbar__new').click()`)
 await evaluate(`document.querySelector('.tabbar__new').click()`)
-await waitFor(`document.querySelectorAll('.tab').length === 3`, 'two more query tabs')
+await waitFor(`document.querySelectorAll('.tab').length === ${restoredTabs + 2}`, 'two more query tabs')
 const fewTabs = await strip()
 record('new query tabs', fewTabs)
 if (!fewTabs.lastActive) bail('the new query tab is not the one on screen')

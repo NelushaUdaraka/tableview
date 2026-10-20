@@ -31,6 +31,7 @@ import {
   type ImportSummary
 } from '../../shared/connectionTransfer'
 import {
+  forgetConnection,
   mergeUiState,
   normalizeUiState,
   type UiState,
@@ -281,6 +282,8 @@ export class AppData {
     const next = file.connections.filter((entry) => entry.id !== id)
     if (next.length === file.connections.length) return false
     this.connections.write({ ...file, connections: next })
+    // Its open tabs and table intervals name a connection that is gone.
+    this.uiState.write(forgetConnection(this.getUiState(), id))
     return true
   }
 
@@ -476,6 +479,10 @@ export class AppData {
   updateSettings(patch: Partial<AppSettings>): AppSettings {
     const next = { ...this.getSettings(), ...patch }
     this.settings.write(next)
+    // Not reopening tabs means not keeping them either: what was saved goes.
+    if (!next.restoreTabs && Object.keys(this.getUiState().openTabs).length > 0) {
+      this.uiState.write({ ...this.getUiState(), openTabs: {} })
+    }
     return next
   }
 
@@ -486,6 +493,12 @@ export class AppData {
   }
 
   updateUiState(patch: UiStatePatch): UiState {
+    // A write already on its way when the setting went off must not bring
+    // tabs back into the file.
+    if (patch.openTabs && !this.getSettings().restoreTabs) {
+      const { openTabs: _dropped, ...rest } = patch
+      patch = rest
+    }
     const next = mergeUiState(this.getUiState(), patch)
     this.uiState.write(next)
     return next

@@ -816,3 +816,19 @@ describe('settings', () => {
     expect(reopened.getSettings().autoUpdate).toBe(false)
   })
 })
+
+describe('the version that last ran', () => {
+  const reopen = (): AppData => new AppData(dir, new LocalKeyVault(path.join(dir, 'secret.key')))
+
+  it('says nothing on the first run, or when the same version runs again', () => {
+    expect(appData.noteRunningVersion('0.1.2')).toBeNull()
+    expect(reopen().noteRunningVersion('0.1.2')).toBeNull()
+  })
+
+  it('says which version is new once, after an update', () => {
+    appData.noteRunningVersion('0.1.2')
+    const updated = reopen()
+    expect(updated.noteRunningVersion('0.2.0')).toBe('0.2.0')
+    expect(reopen().noteRunningVersion('0.2.0')).toBeNull()
+  })
+})

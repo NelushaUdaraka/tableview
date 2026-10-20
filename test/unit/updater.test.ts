@@ -124,7 +124,7 @@ class FakeUpdater extends EventEmitter {
   }
 }
 
-function setup(options: { mode?: UpdateMode; enabled?: boolean } = {}): {
+function setup(options: { mode?: UpdateMode; enabled?: boolean; installed?: string } = {}): {
   updates: UpdateController
   fake: FakeUpdater
   changes: UpdateState[]
@@ -135,7 +135,8 @@ function setup(options: { mode?: UpdateMode; enabled?: boolean } = {}): {
     mode: options.mode ?? 'self',
     enabled: options.enabled ?? true,
     updater: () => fake,
-    onChange: (state) => changes.push(state)
+    onChange: (state) => changes.push(state),
+    installed: options.installed
   })
   return { updates, fake, changes }
 }
@@ -367,7 +368,7 @@ describe('the installed app', () => {
     expect(fake.downloads).toBe(1)
   })
 
-  it('restarts into the update silently, and only once there is one', async () => {
+  it('restarts into the update with the installer in view, and only once there is one', async () => {
     const { updates, fake } = setup()
     expect(updates.install()).toBe(false)
 
@@ -378,9 +379,39 @@ describe('the installed app', () => {
     await flush()
 
     expect(updates.install()).toBe(true)
-    // Silent, because the installer's own pages are for a first install; and
-    // run afterwards, because the restart should end in the app.
-    expect(fake.installs).toEqual([[true, true]])
+    // Not silent, so the installer shows how it is going; and run
+    // afterwards, because the restart should end in the app.
+    expect(fake.installs).toEqual([[false, true]])
+  })
+
+  it('says the update is going in before anything closes, and can take that back', async () => {
+    const { updates, fake, changes } = setup()
+    expect(updates.beginInstall()).toBe(false)
+
+    fake.latest = '0.2.0'
+    await updates.check()
+    fake.finishDownload()
+    await flush()
+
+    expect(updates.beginInstall()).toBe(true)
+    expect(changes.at(-1)).toEqual({ mode: 'self', status: 'installing', version: '0.2.0' })
+    expect(fake.installs).toEqual([])
+    // Nothing more to look for while it goes in.
+    expect(await updates.check()).toMatchObject({ status: 'installing' })
+    expect(fake.checks).toBe(1)
+
+    updates.cancelInstall()
+    expect(updates.state).toEqual({ mode: 'self', status: 'ready', version: '0.2.0' })
+
+    updates.beginInstall()
+    expect(updates.install()).toBe(true)
+    expect(fake.installs).toEqual([[false, true]])
+  })
+
+  it('hands out the version it was updated to once', () => {
+    const { updates } = setup({ installed: '0.2.0' })
+    expect(updates.takeInstalled()).toBe('0.2.0')
+    expect(updates.takeInstalled()).toBeNull()
   })
 
   it('says when the install fails on the spot, so nothing waits for a restart', async () => {

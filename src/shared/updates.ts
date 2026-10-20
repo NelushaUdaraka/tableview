@@ -29,6 +29,11 @@ export type UpdateStatus =
   | 'downloading'
   /** Fetched: it installs on restart, or on quit. */
   | 'ready'
+  /**
+   * Restarting into it: the app is about to close, and opens again once the
+   * update is in. Said first, so the window going is not taken for a crash.
+   */
+  | 'installing'
   | 'error'
 
 export interface UpdateState {

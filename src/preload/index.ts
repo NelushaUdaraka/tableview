@@ -107,6 +107,7 @@ const api: RendererApi = {
   getUpdateState: () => invoke(CHANNELS.updatesState),
   checkForUpdates: () => invoke(CHANNELS.updatesCheck),
   installUpdate: () => invoke(CHANNELS.updatesInstall),
+  takeInstalledUpdate: () => invoke(CHANNELS.updatesInstalled),
 
   exportToFile: (request: ExportRequest) => invoke(CHANNELS.exportToFile, request),
   copyToClipboard: (text) => invoke(CHANNELS.exportToClipboard, text),

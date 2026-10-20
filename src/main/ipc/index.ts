@@ -450,6 +450,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   handle(CHANNELS.updatesState, () => updates.state)
   handle(CHANNELS.updatesCheck, () => updates.check())
   handle(CHANNELS.updatesInstall, () => restartToUpdate())
+  handle(CHANNELS.updatesInstalled, () => updates.takeInstalled())
 
   // -- export & files -------------------------------------------------------
 

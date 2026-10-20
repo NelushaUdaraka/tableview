@@ -4,6 +4,13 @@ What changed in each release of TableView, newest first. The downloads are on th
 [Releases page](https://github.com/NelushaUdaraka/tableview/releases); a version at the top that is
 not there yet is the next release, still being prepared.
 
+## 0.1.3
+
+- Restarting to install an update no longer just makes TableView vanish: the window says it is
+  installing the new version, and on Windows the installer then opens in view with its progress
+  (click *Next* and *Finish*, and TableView starts again) instead of working silently. Once it is
+  back, a notice says which version it was updated to, with a link to what is new in it.
+
 ## 0.1.2
 
 - The sidebar opens wider, at 320px rather than 280px, so table names are cut short less often.

@@ -157,6 +157,8 @@ export interface UpdateControllerOptions {
   updater: () => Updater
   /** Told every time the state changes, to pass on to the windows. */
   onChange: (state: UpdateState) => void
+  /** The version this copy has been updated to since it last ran, if it has. */
+  installed?: string | null
 }
 
 export class UpdateController {
@@ -173,9 +175,12 @@ export class UpdateController {
    * switch says.
    */
   private asked = false
+  /** The update that went in since the last run, until a window has said so. */
+  private installed: string | null
 
   constructor(options: UpdateControllerOptions) {
     this.mode = options.mode
+    this.installed = options.installed ?? null
     this.enabled = options.enabled
     this.onChange = options.onChange
     this.current = { mode: options.mode, status: 'idle' }
@@ -250,8 +255,44 @@ export class UpdateController {
   }
 
   /**
-   * Restarts into the downloaded update: silently, since the installer's
-   * pages are for a first install, and running the app again afterwards.
+   * The version this copy has been updated to since it last ran, once: the
+   * first window to ask says so, and the rest have nothing to add.
+   */
+  takeInstalled(): string | null {
+    const installed = this.installed
+    this.installed = null
+    return installed
+  }
+
+  /**
+   * Tells the windows the downloaded update is about to go in, before
+   * anything closes. On Windows the installer runs out of sight and the app is
+   * gone until it has finished, which without a word first looks like a crash.
+   *
+   * False when there is nothing to install.
+   */
+  beginInstall(): boolean {
+    if (!this.updater || this.current.status !== 'ready') return false
+    this.set({ status: 'installing', version: this.current.version })
+    return true
+  }
+
+  /** The restart did not go ahead after all: the update waits, as before. */
+  cancelInstall(): void {
+    if (this.current.status === 'installing') {
+      this.set({ status: 'ready', version: this.current.version })
+    }
+  }
+
+  /**
+   * Restarts into the downloaded update, running the app again afterwards.
+   *
+   * The Windows installer is shown rather than run silently: a silent one
+   * leaves nothing on screen until the new version opens, which can be a
+   * minute. Run as an update it skips the folder page, keeps the install mode
+   * that is already there, and its last page starts TableView again. An
+   * update that installs on quit stays silent: whoever quit is done with the
+   * app.
    *
    * False when there is nothing to install, or when installing failed there
    * and then — an AppImage whose folder cannot be written to, say. Such a
@@ -259,9 +300,10 @@ export class UpdateController {
    * the app does not quit.
    */
   install(): boolean {
-    if (!this.updater || this.current.status !== 'ready') return false
-    this.updater.quitAndInstall(true, true)
-    return this.current.status === 'ready'
+    if (this.current.status === 'ready') this.beginInstall()
+    if (!this.updater || this.current.status !== 'installing') return false
+    this.updater.quitAndInstall(false, true)
+    return this.current.status === 'installing'
   }
 
   private async look(asked: boolean): Promise<void> {
@@ -297,7 +339,12 @@ export class UpdateController {
   /** An update has been found and is waiting on somebody. */
   private isWaiting(): boolean {
     const { status } = this.current
-    return status === 'available' || status === 'downloading' || status === 'ready'
+    return (
+      status === 'available' ||
+      status === 'downloading' ||
+      status === 'ready' ||
+      status === 'installing'
+    )
   }
 
   private schedule(delay: number): void {

@@ -104,6 +104,9 @@ const api: RendererApi = {
   getSettings: () => invoke(CHANNELS.settingsGet),
   updateSettings: (patch) => invoke(CHANNELS.settingsUpdate, patch),
 
+  getUiState: () => invoke(CHANNELS.uiStateGet),
+  updateUiState: (patch) => invoke(CHANNELS.uiStateUpdate, patch),
+
   getUpdateState: () => invoke(CHANNELS.updatesState),
   checkForUpdates: () => invoke(CHANNELS.updatesCheck),
   installUpdate: () => invoke(CHANNELS.updatesInstall),

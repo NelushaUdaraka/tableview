@@ -43,6 +43,7 @@ import { exportFileName, type ImportSummary } from '../../shared/connectionTrans
 import { MenuRole } from '../../shared/menu'
 import { EXPORT_EXTENSIONS, exportRows } from '../../shared/export'
 import { tablePlusUrlFromClipboard } from '../../shared/tableplus'
+import type { UiStatePatch } from '../../shared/uiState'
 import {
   credentialsFromClipboard,
   credentialsToEnv,
@@ -444,6 +445,11 @@ export function registerIpcHandlers(context: IpcContext): void {
     updates.setEnabled(settings.autoUpdate)
     return settings
   })
+
+  // -- the remembered layout -------------------------------------------------
+
+  handle(CHANNELS.uiStateGet, () => appData.getUiState())
+  handle(CHANNELS.uiStateUpdate, (_call, patch: UiStatePatch) => appData.updateUiState(patch))
 
   // -- updates --------------------------------------------------------------
 

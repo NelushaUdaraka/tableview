@@ -1,0 +1,110 @@
+/**
+ * The remembered layout: read back forgivingly, and merged so that two windows
+ * remembering different tables keep both.
+ */
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { AppData } from '../../src/main/storage/appData'
+import { LocalKeyVault } from '../../src/main/storage/crypto'
+import {
+  DEFAULT_UI_STATE,
+  MAX_REMEMBERED_TABLES,
+  mergeUiState,
+  normalizeUiState,
+  tableMemoryKey
+} from '../../src/shared/uiState'
+
+const orders = tableMemoryKey('c1', 'shop', 'dbo', 'Orders')
+const queue = tableMemoryKey('c1', 'shop', 'dbo', 'Queue')
+
+describe('normalizeUiState', () => {
+  it('defaults everything when there is nothing stored', () => {
+    expect(normalizeUiState(undefined)).toEqual(DEFAULT_UI_STATE)
+    expect(normalizeUiState('nonsense')).toEqual(DEFAULT_UI_STATE)
+  })
+
+  it('keeps valid values and replaces bad ones', () => {
+    const state = normalizeUiState({
+      sidebarWidth: 412.6,
+      sidebarCollapsed: 'yes',
+      sidebarPanel: 'saved',
+      queryEditorHeight: -5,
+      autoRefresh: { [orders]: 5000, [queue]: 'often', other: 0 }
+    })
+    expect(state).toEqual({
+      sidebarWidth: 413,
+      sidebarCollapsed: false,
+      sidebarPanel: 'saved',
+      queryEditorHeight: DEFAULT_UI_STATE.queryEditorHeight,
+      autoRefresh: { [orders]: 5000 }
+    })
+  })
+
+  it('refuses a panel that does not exist', () => {
+    expect(normalizeUiState({ sidebarPanel: 'tables' }).sidebarPanel).toBe('objects')
+  })
+})
+
+describe('tableMemoryKey', () => {
+  it('tells apart tables that only differ in where the dots would go', () => {
+    expect(tableMemoryKey('c', 'a.b', 'c', 'd')).not.toBe(tableMemoryKey('c', 'a', 'b.c', 'd'))
+  })
+})
+
+describe('mergeUiState', () => {
+  it('merges tables one by one and forgets one turned off', () => {
+    let state = mergeUiState(DEFAULT_UI_STATE, { autoRefresh: { [orders]: 5000 } })
+    state = mergeUiState(state, { autoRefresh: { [queue]: 60000 } })
+    expect(state.autoRefresh).toEqual({ [orders]: 5000, [queue]: 60000 })
+    state = mergeUiState(state, { autoRefresh: { [orders]: 0 } })
+    expect(state.autoRefresh).toEqual({ [queue]: 60000 })
+  })
+
+  it('changes only the fields a patch names', () => {
+    const state = mergeUiState(
+      { ...DEFAULT_UI_STATE, sidebarPanel: 'history', autoRefresh: { [orders]: 5000 } },
+      { sidebarWidth: 280 }
+    )
+    expect(state).toEqual({
+      ...DEFAULT_UI_STATE,
+      sidebarWidth: 280,
+      sidebarPanel: 'history',
+      autoRefresh: { [orders]: 5000 }
+    })
+  })
+
+  it('drops the tables set longest ago past the limit', () => {
+    let state = DEFAULT_UI_STATE
+    for (let i = 0; i < MAX_REMEMBERED_TABLES + 5; i += 1) {
+      state = mergeUiState(state, { autoRefresh: { [`t${i}`]: 5000 } })
+    }
+    // Setting an early one again keeps it: it is now the newest.
+    state = mergeUiState(state, { autoRefresh: { t5: 10000 } })
+    const keys = Object.keys(state.autoRefresh)
+    expect(keys).toHaveLength(MAX_REMEMBERED_TABLES)
+    expect(keys.at(-1)).toBe('t5')
+    expect(keys).not.toContain('t4')
+    expect(keys).toContain('t6')
+  })
+})
+
+describe('AppData ui state', () => {
+  let dir: string | null = null
+  afterEach(() => {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('survives a restart', () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bk-uistate-'))
+    const vault = new LocalKeyVault(path.join(dir, 'secret.key'))
+    new AppData(dir, vault).updateUiState({ sidebarWidth: 260, autoRefresh: { [orders]: 30000 } })
+    new AppData(dir, vault).updateUiState({ autoRefresh: { [queue]: 5000 } })
+    expect(new AppData(dir, vault).getUiState()).toEqual({
+      ...DEFAULT_UI_STATE,
+      sidebarWidth: 260,
+      autoRefresh: { [orders]: 30000, [queue]: 5000 }
+    })
+  })
+})

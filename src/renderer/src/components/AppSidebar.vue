@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { RoutineObject, SchemaObject } from '@shared/types'
+import type { SidebarPanel } from '@shared/uiState'
 import AppIcon from './AppIcon.vue'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
 import ObjectStructureTree from './ObjectStructureTree.vue'
@@ -9,6 +10,7 @@ import { useLibraryStore } from '../stores/library'
 import { useSchemaStore } from '../stores/schema'
 import { useTabStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
+import { useUiStateStore } from '../stores/uiState'
 import { api } from '../lib/api'
 import type { IconName } from '../lib/icons'
 
@@ -25,9 +27,11 @@ const schema = useSchemaStore()
 const library = useLibraryStore()
 const tabs = useTabStore()
 const toasts = useToastStore()
+const uiState = useUiStateStore()
 
-type Panel = 'objects' | 'history' | 'saved'
-const panel = ref<Panel>('objects')
+type Panel = SidebarPanel
+/** Opens on the panel the sidebar was last left on. */
+const panel = ref<Panel>(uiState.state.sidebarPanel)
 const filterInput = ref<HTMLInputElement | null>(null)
 
 const menu = ref<{
@@ -40,10 +44,15 @@ const menu = ref<{
 
 const connectionId = computed(() => connections.activeId)
 
-watch(panel, (next) => {
-  if (next === 'history') void library.loadHistory()
-  if (next === 'saved') void library.loadSavedQueries()
-})
+watch(
+  panel,
+  (next) => {
+    if (next === 'history') void library.loadHistory()
+    if (next === 'saved') void library.loadSavedQueries()
+  },
+  { immediate: true }
+)
+watch(panel, (next) => uiState.remember({ sidebarPanel: next }))
 
 // Reading the schema is the workspace's job, not this tree's: the editor's
 // autocomplete reads the same store, and a window showing one dragged-out tab

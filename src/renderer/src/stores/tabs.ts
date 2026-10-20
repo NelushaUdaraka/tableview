@@ -71,9 +71,10 @@ export interface TableTab {
   showRowPanel: boolean
   /**
    * How often the rows re-read themselves, in milliseconds; absent or 0 is
-   * never, which is how every table opens. Kept on the tab rather than in the
-   * view, so a table being watched is still being watched after a trip to
-   * another tab — or to its structure — and back.
+   * never, which is how a table opens unless it was left refreshing (the
+   * interval is remembered per table, see `stores/uiState.ts`). Kept on the
+   * tab rather than in the view, so a table being watched is still being
+   * watched after a trip to another tab — or to its structure — and back.
    */
   autoRefresh?: number
   /**

@@ -26,6 +26,7 @@ import {
 import type { ImportSummary } from './connectionTransfer'
 import type { MenuRole } from './menu'
 import type { UpdateState } from './updates'
+import type { UiState, UiStatePatch } from './uiState'
 
 /**
  * A tab being handed to a window of its own.
@@ -199,6 +200,9 @@ export const CHANNELS = {
   settingsGet: 'settings:get',
   settingsUpdate: 'settings:update',
 
+  uiStateGet: 'uiState:get',
+  uiStateUpdate: 'uiState:update',
+
   updatesState: 'updates:state',
   updatesCheck: 'updates:check',
   updatesInstall: 'updates:install',
@@ -342,6 +346,11 @@ export interface RendererApi {
 
   getSettings(): Promise<AppSettings>
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>
+
+  /** Sizes and choices the workspace was left with, for a window to open with. */
+  getUiState(): Promise<UiState>
+  /** Remembers what a window changed; tables in the patch merge one by one. */
+  updateUiState(patch: UiStatePatch): Promise<UiState>
 
   /** Where updating this copy of the app stands. */
   getUpdateState(): Promise<UpdateState>

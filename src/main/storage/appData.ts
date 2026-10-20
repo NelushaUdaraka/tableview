@@ -1,5 +1,6 @@
 /**
- * Persistence for saved connections, query history, saved queries and settings.
+ * Persistence for saved connections, query history, saved queries, settings
+ * and the remembered layout of the workspace.
  *
  * Secrets never reach the renderer: `listConnections` strips them and reports
  * only whether one is stored, and the connect path re-reads the plaintext here
@@ -29,6 +30,12 @@ import {
   type ConnectionExportFile,
   type ImportSummary
 } from '../../shared/connectionTransfer'
+import {
+  mergeUiState,
+  normalizeUiState,
+  type UiState,
+  type UiStatePatch
+} from '../../shared/uiState'
 import { JsonStore } from './store'
 import { SecretVault, isEncrypted } from './crypto'
 import {
@@ -85,6 +92,7 @@ export class AppData {
   private readonly queries: JsonStore<QueriesFile>
   private readonly settings: JsonStore<AppSettings>
   private readonly lastRun: JsonStore<LastRunFile>
+  private readonly uiState: JsonStore<UiState>
 
   constructor(
     userDataDir: string,
@@ -108,6 +116,9 @@ export class AppData {
     this.lastRun = new JsonStore(path.join(userDataDir, 'last-run.json'), () => ({
       appVersion: null
     }))
+    this.uiState = new JsonStore(path.join(userDataDir, 'ui-state.json'), () =>
+      normalizeUiState({})
+    )
     this.retireLegacyAppName()
   }
 
@@ -465,6 +476,18 @@ export class AppData {
   updateSettings(patch: Partial<AppSettings>): AppSettings {
     const next = { ...this.getSettings(), ...patch }
     this.settings.write(next)
+    return next
+  }
+
+  // -- the remembered layout -------------------------------------------------
+
+  getUiState(): UiState {
+    return normalizeUiState(this.uiState.read())
+  }
+
+  updateUiState(patch: UiStatePatch): UiState {
+    const next = mergeUiState(this.getUiState(), patch)
+    this.uiState.write(next)
     return next
   }
 

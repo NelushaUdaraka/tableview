@@ -66,6 +66,7 @@ import { useTabStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
 import { useConnectionStore } from '../stores/connections'
 import { useCredentialsStore } from '../stores/credentials'
+import { useUiStateStore } from '../stores/uiState'
 import type { LeaveReason, TableTab } from '../stores/tabs'
 import { api } from '../lib/api'
 
@@ -82,6 +83,7 @@ const tabs = useTabStore()
 const toasts = useToastStore()
 const connections = useConnectionStore()
 const credentials = useCredentialsStore()
+const uiState = useUiStateStore()
 
 /**
  * The page this tab had when it was last on screen.
@@ -521,6 +523,20 @@ const autoRefresher = createAutoRefresher({
   onFailure: () => tabs.update<TableTab>(props.tab.id, { autoRefresh: 0 })
 })
 
+/**
+ * The interval is remembered per table, so a table left refreshing is
+ * refreshing again when it is next opened, restarts included. A tab that has
+ * an interval of its own already (switched to and back, or moved) keeps it.
+ */
+function rememberedTable(): [string, string, string, string] {
+  const database = connections.statusFor(props.tab.connectionId).currentDatabase ?? ''
+  return [props.tab.connectionId, database, props.tab.schema, props.tab.table]
+}
+if (props.tab.autoRefresh === undefined) {
+  const remembered = uiState.autoRefreshFor(...rememberedTable())
+  if (remembered > 0) tabs.update<TableTab>(props.tab.id, { autoRefresh: remembered })
+}
+
 watch(autoRefresh, (ms) => autoRefresher.set(ms), { immediate: true })
 
 /** The intervals as the toolbar's menu lists them. */
@@ -535,6 +551,7 @@ const autoMenuOpen = ref(false)
 /** Picked in the toolbar. Turning it on reads straight away, so it starts out current. */
 function chooseAutoRefresh(ms: number): void {
   tabs.update<TableTab>(props.tab.id, { autoRefresh: ms })
+  uiState.rememberAutoRefresh(...rememberedTable(), ms)
   autoRefresher.set(ms, true)
 }
 

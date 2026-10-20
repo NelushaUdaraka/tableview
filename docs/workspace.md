@@ -59,6 +59,25 @@ out from under the pointer — and once the pointer leaves they count down again
 two that offer something to do, an update to restart into or to download, stay until they are taken
 up or dismissed: a button that fades before it can be reached is no button at all.
 
+## The layout, remembered
+
+Where the workspace was left comes back after a restart: the sidebar's width, whether it was put
+away (`Ctrl+B`), which of *Schema*, *History* and *Saved* it shows, how tall the query editor is
+above its results, and each table's auto-refresh interval (see [tables](tables.md)). None of this is
+a setting — it is what the last drag or click left — so it lives in `ui-state.json` in the app's data
+folder rather than in `settings.json`, and the Settings dialog does not list it.
+
+A window opens with what is stored and writes back only what it changes, once a drag comes to rest
+(and straight away as the window closes). The main process merges those writes, so two windows
+remembering different tables keep both; for a size both windows change, the last one changed wins.
+A window holding one dragged-out tab neither follows nor sets whether the sidebar is put away. The
+file is read forgivingly: a missing or hand-broken value falls back to its default rather than
+breaking the window, and the table intervals are capped at the 200 most recently set.
+
+To remember something else, add a field to `UiState` in `src/shared/uiState.ts` (with its default
+and how `normalizeUiState` reads it back), start the view from `useUiStateStore().state` and call
+`remember({ field })` when it changes. The row panel's width predates this and stays in the settings.
+
 ## Themes, shortcuts and the look of it
 
 - Dark and light themes (and "follow the system"), window state persistence, full menu bar and

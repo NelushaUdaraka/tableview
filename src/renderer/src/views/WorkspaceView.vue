@@ -30,6 +30,7 @@ import { useSchemaStore } from '../stores/schema'
 import { useSettingsStore } from '../stores/settings'
 import { useTabStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
+import { useUiStateStore } from '../stores/uiState'
 import { onMenuAction } from '../lib/menuBus'
 import { exportConnections, importConnections } from '../lib/connectionTransfer'
 import { detachedTabFrom, openTabFrom } from '../lib/detach'
@@ -51,6 +52,7 @@ const schema = useSchemaStore()
 const settings = useSettingsStore()
 const tabs = useTabStore()
 const toasts = useToastStore()
+const uiState = useUiStateStore()
 
 const sidebar = ref<InstanceType<typeof AppSidebar> | null>(null)
 
@@ -74,9 +76,10 @@ const mainArea = ref<HTMLElement | null>(null)
 /**
  * Width of the sidebar. In the default 1440px window, 320px still leaves a
  * table's toolbar room for its labels with edits staged; much wider and the
- * toolbar would lose them.
+ * toolbar would lose them. After that, it is whatever the last drag left.
  */
-const sidebarWidth = ref(320)
+const sidebarWidth = ref(uiState.state.sidebarWidth)
+watch(sidebarWidth, (width) => uiState.remember({ sidebarWidth: width }))
 /** Width of the second pane when the workspace is split. */
 const splitWidth = ref(640)
 
@@ -102,11 +105,15 @@ watch(
  * the way — and out of the document, since a tree nobody is looking at is a
  * few thousand nodes of nothing. `Ctrl+B` brings it in, and it stays from then
  * on: putting it away again should not rebuild it.
+ *
+ * A full window opens with the tree out or away as the last one was left; a
+ * one-tab window says nothing about that, so it neither follows nor sets it.
  */
-const sidebarCollapsed = ref(props.detached)
-const sidebarMounted = ref(!props.detached)
+const sidebarCollapsed = ref(props.detached || uiState.state.sidebarCollapsed)
+const sidebarMounted = ref(!sidebarCollapsed.value)
 watch(sidebarCollapsed, (collapsed) => {
   if (!collapsed) sidebarMounted.value = true
+  if (!props.detached) uiState.remember({ sidebarCollapsed: collapsed })
 })
 
 const showSettings = ref(false)

@@ -764,21 +764,25 @@ export class SqlServerClient implements DbClient {
     return rows.map((row) => ({ schema: row.schema, name: row.name, type: row.type }))
   }
 
-  /** Switches the active database by re-pointing the pool. */
+  /**
+   * Switches the active database by re-pointing the pool.
+   *
+   * The new pool is opened before the old one is let go, so a database the
+   * server refuses — dropped, or out of this login's reach — leaves the
+   * connection where it was instead of without a pool at all.
+   */
   async useDatabase(database: string): Promise<void> {
-    this.config = { ...this.config, database }
-    if (this.pool?.connected) {
-      await this.pool.close()
-      this.pool = null
-    }
-    const poolConfig = buildMssqlConfig(this.config, this.tunnelHandle)
-    const pool = new sql.ConnectionPool(poolConfig)
+    const config = { ...this.config, database }
+    const pool = new sql.ConnectionPool(buildMssqlConfig(config, this.tunnelHandle))
     pool.on('error', (error) => {
       // eslint-disable-next-line no-console
       console.error('[mssql] pool error:', error?.message ?? error)
     })
     await pool.connect()
+    const previous = this.pool
+    this.config = config
     this.pool = pool
+    await previous?.close().catch(() => undefined)
     this.serverInfo = await this.fetchServerInfo()
   }
 

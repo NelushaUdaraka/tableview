@@ -4,7 +4,10 @@ Finding a table in the schema tree, reading what is in it, and changing it.
 
 ## The schema tree
 
-- Database switcher (system databases hidden by default), schema/table/view/procedure/function tree
+- Database switcher (system databases hidden by default), schema/table/view/procedure/function tree.
+  The database switched to is remembered per connection: connecting again, restarts included,
+  opens in it rather than in the one the connection's settings name (see
+  [the workspace](workspace.md#the-database-you-left-it-in))
 - Row-count estimates, live filter box, pinned tables, per-schema collapse
 - **Tables open where they stand** into what is in them — `columns`, `keys`, `foreign keys`,
   `indexes`, each with its count — so "what was that column called" costs a twisty rather than a tab

@@ -50,6 +50,7 @@ import {
   parseAwsCredentials
 } from '../../shared/aws/credentials'
 import { ConnectionRegistry } from '../db/registry'
+import { enterRememberedDatabase } from '../db/lastDatabase'
 import { serializeError } from '../db/sqlserver/client'
 import { AppData } from '../storage/appData'
 import { runMenuRole } from '../menu'
@@ -309,7 +310,13 @@ export function registerIpcHandlers(context: IpcContext): void {
         password: password !== undefined && password !== '' ? password : stored.password
       }
 
-      const status = await registry.open(call.scope, config)
+      const opened = await registry.open(call.scope, config)
+      const remembered = appData.getUiState().databases[connectionId]
+      const { status, forget } = await enterRememberedDatabase(opened, remembered, async (name) => {
+        await registry.get(call.scope, connectionId).useDatabase(name)
+        return registry.status(call.scope, connectionId)
+      })
+      if (forget) appData.updateUiState({ databases: { [connectionId]: '' } })
       if (status.state === 'connected') appData.markConnectionUsed(connectionId)
       sendToWindow(call, CHANNELS.eventStatusChanged, status)
       return status
@@ -331,6 +338,10 @@ export function registerIpcHandlers(context: IpcContext): void {
   handle(CHANNELS.dbUseDatabase, async (call, connectionId: string, database: string) => {
     await registry.get(call.scope, connectionId).useDatabase(database)
     const status = registry.status(call.scope, connectionId)
+    // Connecting again opens here. Back in the connection's own database,
+    // there is nothing to remember: its settings already say so.
+    const own = appData.listConnections().find((entry) => entry.id === connectionId)?.database ?? ''
+    appData.updateUiState({ databases: { [connectionId]: database === own ? '' : database } })
     sendToWindow(call, CHANNELS.eventStatusChanged, status)
     return status
   })

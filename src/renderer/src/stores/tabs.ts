@@ -6,6 +6,7 @@ import type {
   SchemaObjectType,
   TableFilter
 } from '@shared/types'
+import type { SavedTab, SavedTabs } from '@shared/uiState'
 import type { TableCache } from '../lib/tableCache'
 import { splitLines } from '../lib/lineDiff'
 import { useSettingsStore } from './settings'
@@ -765,6 +766,114 @@ export const useTabStore = defineStore('tabs', () => {
     tabs.value = tabs.value.map((tab) => (tab.id === id ? ({ ...tab, ...patch } as Tab) : tab))
   }
 
+  // --- across restarts -------------------------------------------------------
+
+  function savedTabFrom(tab: Tab): SavedTab {
+    const common = { title: tab.title, showRowPanel: tab.showRowPanel }
+    if (tab.kind === 'table') {
+      return {
+        kind: 'table',
+        ...common,
+        schema: tab.schema,
+        table: tab.table,
+        objectType: tab.objectType,
+        view: tab.view,
+        ...(tab.hiddenColumns?.length ? { hiddenColumns: [...tab.hiddenColumns] } : {})
+      }
+    }
+    return {
+      kind: 'query',
+      ...common,
+      sql: tab.sql,
+      cursor: tab.cursor,
+      ...(tab.savedQueryId ? { savedQueryId: tab.savedQueryId } : {}),
+      ...(tab.dirty ? { dirty: true } : {}),
+      ...(tab.routine ? { routine: { ...tab.routine } } : {})
+    }
+  }
+
+  /**
+   * The window's tabs on one connection, as they would be reopened: in their
+   * panes and order, with the tab each pane was showing. Null when there are
+   * none, which is what a window whose tabs were all closed should reopen to.
+   */
+  function snapshot(connectionId: string): SavedTabs | null {
+    const saved = panes.value
+      .map((pane) => {
+        const ids = pane.tabIds.filter((id) => byId(id)?.connectionId === connectionId)
+        return {
+          tabs: ids.map((id) => savedTabFrom(byId(id)!)),
+          active: Math.max(0, ids.indexOf(pane.activeTabId ?? ''))
+        }
+      })
+      .filter((pane) => pane.tabs.length > 0)
+    if (saved.length === 0) return null
+    const focusedIndex = panes.value.findIndex((pane) => pane.id === focusedPaneId.value)
+    return { panes: saved, focused: Math.max(0, Math.min(focusedIndex, saved.length - 1)) }
+  }
+
+  function tabFromSaved(saved: SavedTab, connectionId: string): Tab {
+    const showRowPanel = saved.showRowPanel ?? openingDefaults().showRowPanel
+    if (saved.kind === 'table') {
+      return {
+        id: newId(),
+        kind: 'table',
+        title: saved.title,
+        connectionId,
+        schema: saved.schema!,
+        table: saved.table!,
+        objectType: saved.objectType ?? 'table',
+        view: saved.view ?? 'data',
+        pendingEdits: 0,
+        filterRevision: 0,
+        showRowPanel,
+        ...(saved.hiddenColumns?.length ? { hiddenColumns: [...saved.hiddenColumns] } : {})
+      }
+    }
+    // A routine reopens at its stored definition: closing the app asked about
+    // its unsaved changes, and anything said then to be lost stays lost.
+    const sql = saved.routine ? saved.routine.baseline : (saved.sql ?? '')
+    return {
+      id: newId(),
+      kind: 'query',
+      title: saved.title,
+      connectionId,
+      sql,
+      cursor: saved.routine ? 0 : Math.min(saved.cursor ?? sql.length, sql.length),
+      result: null,
+      running: false,
+      executionId: null,
+      activeResultIndex: 0,
+      dirty: !saved.routine && saved.dirty === true,
+      statementLine: null,
+      showRowPanel,
+      ...(saved.savedQueryId ? { savedQueryId: saved.savedQueryId } : {}),
+      ...(saved.routine ? { routine: { ...saved.routine }, changeCount: 0 } : {})
+    }
+  }
+
+  /**
+   * Reopens tabs saved by `snapshot`, panes and all. Only into a window with
+   * no tabs yet: it sets the layout outright, and nothing is mounted to ask.
+   */
+  function restore(connectionId: string, saved: SavedTabs): boolean {
+    if (tabs.value.length > 0 || saved.panes.length === 0) return false
+    const restored: Tab[] = []
+    const layout: TabPane[] = saved.panes.slice(0, 2).map((pane) => {
+      const opened = pane.tabs.map((entry) => tabFromSaved(entry, connectionId))
+      restored.push(...opened)
+      return {
+        id: newPaneId(),
+        tabIds: opened.map((tab) => tab.id),
+        activeTabId: opened[Math.min(pane.active, opened.length - 1)]?.id ?? null
+      }
+    })
+    tabs.value = restored
+    panes.value = layout
+    focusedPaneId.value = layout[Math.min(saved.focused, layout.length - 1)].id
+    return true
+  }
+
   return {
     tabs,
     panes,
@@ -801,6 +910,8 @@ export const useTabStore = defineStore('tabs', () => {
     update,
     setLeaveGuard,
     closePrompt,
-    answerClose
+    answerClose,
+    snapshot,
+    restore
   }
 })

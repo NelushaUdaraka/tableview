@@ -63,7 +63,8 @@ up or dismissed: a button that fades before it can be reached is no button at al
 
 Where the workspace was left comes back after a restart: the sidebar's width, whether it was put
 away (`Ctrl+B`), which of *Schema*, *History* and *Saved* it shows, how tall the query editor is
-above its results, and each table's auto-refresh interval (see [tables](tables.md)). None of this is
+above its results, each table's auto-refresh interval (see [tables](tables.md)), the tabs each
+connection had open, and the database each was left in (below). None of this is
 a setting — it is what the last drag or click left — so it lives in `ui-state.json` in the app's data
 folder rather than in `settings.json`, and the Settings dialog does not list it.
 
@@ -73,6 +74,44 @@ remembering different tables keep both; for a size both windows change, the last
 A window holding one dragged-out tab neither follows nor sets whether the sidebar is put away. The
 file is read forgivingly: a missing or hand-broken value falls back to its default rather than
 breaking the window, and the table intervals are capped at the 200 most recently set.
+
+### Open tabs
+
+Connecting to a connection reopens the tabs it had open the last time, restarts included: in the
+same panes (a split comes back split), in the same order, with the same tab showing in each and the
+same pane focused, in the database it was left in (below). A query tab comes back with its text and cursor, and is still tied to the saved
+query it was opened from; a table tab with its view (rows or structure), its hidden columns, and
+its auto-refresh interval. Nothing that was *read* comes back — results, pages of rows — and neither
+does anything the app said would be lost: staged table edits, and a routine's unsaved changes (the
+routine reopens at the definition it was last known to have). Closing every tab leaves nothing to
+reopen, so the next connect opens one blank query, as a first one does.
+
+Tabs are kept per saved connection, written as they change (with the same short pause), and only by
+a full window: a window holding one dragged-out tab does not count. Disconnecting does not forget
+them — that is exactly what the next connect brings back. Two full windows on the same connection
+keep whichever changed last. Deleting a connection forgets its tabs, table intervals and database.
+
+**Settings → Reopen a connection's tabs when connecting to it again** (on by default) switches this
+off: nothing is reopened, nothing more is saved, and the tabs already kept are deleted from
+`ui-state.json`. The main process enforces that, so a save already on its way when the box is
+cleared is dropped too.
+
+### The database you left it in
+
+Switching database from the sidebar is remembered per connection, so connecting again opens in that
+database — and its tabs reopen there — instead of in the one the connection's settings name.
+Switching back to the settings' own database forgets it, as does deleting the connection. It is
+not behind the *Reopen tabs* setting: it is where the connection is, not what was open in it.
+
+The main process applies it while connecting, before the window is told the connection is open,
+so the tree never reads the other database first. It connects as the settings say and then
+switches, rather than logging in to the remembered database directly: SQL Server answers a login
+to a database it will not open with "Login failed for user" — the driver keeps only the last of the
+server's errors — which is also what a wrong password gets, so a retry could not tell the two apart
+and would spend a second failed login on every mistyped password. Switching after the login has
+worked has no such doubt. A switch the server refuses (the database was dropped, or this login can
+no longer open it) leaves the connection where it was — the new pool is opened before the old one
+is let go — so it stays in its own database, and the other is forgotten.
 
 To remember something else, add a field to `UiState` in `src/shared/uiState.ts` (with its default
 and how `normalizeUiState` reads it back), start the view from `useUiStateStore().state` and call

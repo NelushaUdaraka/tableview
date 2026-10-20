@@ -289,7 +289,13 @@ function closeIfEmptied(): void {
 async function disconnect(): Promise<void> {
   const id = connections.activeId
   if (!id) return
-  if (!(await tabs.closeConnection(id))) return
+  // The tabs go because the connection does, not because they were closed:
+  // what was open is what connecting again should bring back.
+  keepingTabs = false
+  if (!(await tabs.closeConnection(id))) {
+    keepingTabs = true
+    return
+  }
   schema.reset()
   await connections.disconnect(id)
 }
@@ -453,11 +459,46 @@ watch(
   { immediate: true }
 )
 
-onMounted(() => {
+// --- open tabs, across restarts --------------------------------------------
+
+/**
+ * Whether this window's tabs are the ones to bring back next time.
+ *
+ * A one-tab window is not: it holds what was dragged out of another, whose
+ * own tabs are the session. Off while the window opens, so the restore is not
+ * written back over itself half-done, and while disconnecting.
+ */
+let keepingTabs = false
+
+const openTabs = computed(() =>
+  connectionId.value ? JSON.stringify(tabs.snapshot(connectionId.value)) : null
+)
+watch(openTabs, (saved) => {
+  if (!keepingTabs || props.detached || saved === null || !connectionId.value) return
+  if (!settings.settings.restoreTabs) return
+  uiState.rememberTabs(connectionId.value, JSON.parse(saved))
+})
+
+/** Opens the tabs this connection had last time, or a blank query. */
+async function openStartingTabs(): Promise<void> {
+  const id = connectionId.value
+  if (tabs.tabs.length > 0 || !id) return
+  if (!props.detached && settings.settings.restoreTabs) {
+    const saved = await uiState.savedTabsFor(id)
+    if (saved && tabs.tabs.length === 0 && tabs.restore(id, saved)) return
+  }
+  if (tabs.tabs.length === 0) newQueryTab()
+}
+
+onMounted(async () => {
   document.addEventListener('keydown', onKeydown)
   unsubscribeMenu = onMenuAction(handleAction)
   unsubscribeStatus = api.onStatusChanged(onStatusChanged)
-  if (tabs.tabs.length === 0) newQueryTab()
+  try {
+    await openStartingTabs()
+  } finally {
+    keepingTabs = true
+  }
 })
 
 onBeforeUnmount(() => {

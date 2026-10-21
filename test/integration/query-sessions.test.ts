@@ -33,6 +33,15 @@ beforeAll(async () => {
     CREATE TABLE dbo.session_items (id int PRIMARY KEY, name nvarchar(50));
     INSERT dbo.session_items VALUES (1, N'original'), (2, N'b');`)
   expect(seeded.error).toBeUndefined()
+  // Two more databases for the sidebar to switch between: an ordinary one,
+  // and one whose name only works quoted.
+  for (const create of [
+    "IF DB_ID(N'tv_sessions_other') IS NULL CREATE DATABASE tv_sessions_other;",
+    "IF DB_ID(N'tv sessions]odd') IS NULL CREATE DATABASE [tv sessions]]odd];"
+  ]) {
+    const [created] = await admin.runScript(create)
+    expect(created.error).toBeUndefined()
+  }
 }, 180000)
 
 afterAll(async () => {
@@ -235,5 +244,57 @@ describe("a tab's session", () => {
     expect(first(await client.runInSession('b', 'SELECT COUNT(*) FROM #b'))).toBe(0)
     expect(await scalar(client, 'SELECT 1')).toBe(1)
     expect(states).toEqual([])
+  })
+})
+
+describe('switching database', () => {
+  it('moves a following session with the sidebar, and tells the window', async () => {
+    const client = await tabClient()
+    const changes: SessionChange[] = []
+    client.onSessionChange((change) => changes.push(change))
+    await client.runInSession('a', 'SELECT 1')
+    await client.useDatabase('tv_sessions_other')
+    expect(changes).toContainEqual(
+      expect.objectContaining({
+        sessionId: 'a',
+        state: expect.objectContaining({ database: 'tv_sessions_other' })
+      })
+    )
+    expect(first(await client.runInSession('a', 'SELECT DB_NAME()'))).toBe('tv_sessions_other')
+  })
+
+  it('leaves a session in its own database, or in a transaction, where it is', async () => {
+    const client = await tabClient()
+    await client.runInSession('own', 'USE master')
+    await client.runInSession('txn', 'BEGIN TRAN')
+    await client.useDatabase('tv_sessions_other')
+    expect(first(await client.runInSession('own', 'SELECT DB_NAME()'))).toBe('master')
+    expect(first(await client.runInSession('txn', 'SELECT DB_NAME()'))).toBe(TEST_DATABASE)
+  })
+
+  it("keeps a routine's tab in the routine's database", async () => {
+    const client = await tabClient()
+    const pinned = { pinnedDatabase: TEST_DATABASE }
+    await client.useDatabase('tv_sessions_other')
+    expect(first(await client.runInSession('r', 'SELECT DB_NAME()', pinned))).toBe(TEST_DATABASE)
+    await client.useDatabase(TEST_DATABASE)
+    await client.useDatabase('tv_sessions_other')
+    expect(first(await client.runInSession('r', 'SELECT DB_NAME()', pinned))).toBe(TEST_DATABASE)
+  })
+
+  it('follows once a running query ends', async () => {
+    const client = await tabClient()
+    await client.runInSession('d', 'SELECT 1')
+    const running = client.runInSession('d', "WAITFOR DELAY '00:00:02'")
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    await client.useDatabase('tv_sessions_other')
+    expect((await running).session?.database).toBe('tv_sessions_other')
+  })
+
+  it('quotes a database name that needs it', async () => {
+    const client = await tabClient()
+    await client.runInSession('a', 'SELECT 1')
+    await client.useDatabase('tv sessions]odd')
+    expect(first(await client.runInSession('a', 'SELECT DB_NAME()'))).toBe('tv sessions]odd')
   })
 })

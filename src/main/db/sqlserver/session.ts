@@ -15,6 +15,7 @@
 import sql from 'mssql'
 import type { ConnectionConfig, SessionState } from '../../../shared/types'
 import { ROLLBACK_SQL, STATE_SQL, withTransactionSince } from '../../../shared/sessions'
+import { quoteIdent } from '../../../shared/sql/identifiers'
 import { buildSessionConfig, type TunnelEndpoint } from './config'
 
 /** Told once, when the session's connection ends without the tab ending it. */
@@ -42,6 +43,11 @@ export class QuerySession {
   lost: SessionState | null = null
   /** A run, a state read or a `USE` is in flight. */
   busy = false
+  /**
+   * The sidebar switched database while a run was going: once it ends, the
+   * session follows from `from` to `to` — if it is still where the sidebar was.
+   */
+  pendingFollow: { from: string; to: string } | null = null
 
   private current: sql.ConnectionPool | null = null
   /** The connection the session is, once it has one. */
@@ -146,6 +152,12 @@ export class QuerySession {
       now
     )
     return this.state
+  }
+
+  /** Moves the session to `database`, as the app's own `USE`, and reads where it is. */
+  async use(database: string): Promise<SessionState> {
+    await this.pool.request().batch(`USE ${quoteIdent(database)}`)
+    return this.readState()
   }
 
   /** The connection ended without the tab ending it. Said once. */

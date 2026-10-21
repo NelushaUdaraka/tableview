@@ -36,7 +36,13 @@ import {
   SESSION_LOST,
   SSM_CREDENTIALS_EXPIRED
 } from '../../../shared/types'
-import { lostSessionRefusal, refuseAfterLoss } from '../../../shared/sessions'
+import {
+  followDecision,
+  lostSessionRefusal,
+  refuseAfterLoss,
+  sameDatabase,
+  type SessionPlace
+} from '../../../shared/sessions'
 import { serializeRow, deserializeCell } from '../../../shared/serialize'
 import { qualify } from '../../../shared/sql/identifiers'
 import {
@@ -116,6 +122,16 @@ function readOnlyRefusal(sql: string, write: WriteStatement): StatementResult {
     messages: [{ kind: 'error', message, lineNumber: write.line }],
     durationMs: 0,
     error: { message, code: READ_ONLY_CONNECTION, lineNumber: write.line }
+  }
+}
+
+/** What the database rule needs to know about a session that has a state. */
+function placeOf(session: QuerySession): SessionPlace {
+  return {
+    database: session.state!.database,
+    transactionCount: session.state!.transactionCount,
+    pinned: Boolean(session.pinnedDatabase),
+    running: session.busy
   }
 }
 
@@ -828,6 +844,7 @@ export class SqlServerClient implements DbClient {
       // told where its session now stands. A read that fails has already
       // marked the session lost.
       if (!current.lost) await current.readState().catch(() => undefined)
+      await this.applyPendingFollow(sessionId, current)
     } finally {
       current.busy = false
     }
@@ -968,6 +985,7 @@ export class SqlServerClient implements DbClient {
    * connection where it was instead of without a pool at all.
    */
   async useDatabase(database: string): Promise<void> {
+    const from = this.windowDatabase
     const config = { ...this.config, database }
     const pool = new sql.ConnectionPool(buildMssqlConfig(config, this.tunnelHandle))
     pool.on('error', (error) => {
@@ -980,6 +998,55 @@ export class SqlServerClient implements DbClient {
     this.pool = pool
     await previous?.close().catch(() => undefined)
     this.serverInfo = await this.fetchServerInfo()
+    await this.moveSessions(from, database)
+  }
+
+  /**
+   * Takes the tabs' sessions along to the database the sidebar switched to —
+   * the ones still where the sidebar was, and not in a transaction or a
+   * routine's tab (see `followDecision`). One that is running goes when its
+   * run ends.
+   */
+  private async moveSessions(from: string, to: string): Promise<void> {
+    for (const [sessionId, session] of this.sessions) {
+      if (session.lost || !session.state) continue
+      // Switched again before an earlier move could happen: go to the latest.
+      if (session.pendingFollow && sameDatabase(session.pendingFollow.to, from)) {
+        session.pendingFollow = { from: session.pendingFollow.from, to }
+        continue
+      }
+      const decision = followDecision(placeOf(session), from)
+      if (decision === 'later') {
+        session.pendingFollow = { from, to }
+      } else if (decision === 'follow') {
+        session.busy = true
+        try {
+          await this.follow(sessionId, session, to)
+        } finally {
+          session.busy = false
+        }
+      }
+    }
+  }
+
+  /** The move a running session was waiting for, now its run has ended. */
+  private async applyPendingFollow(sessionId: string, session: QuerySession): Promise<void> {
+    const pending = session.pendingFollow
+    session.pendingFollow = null
+    if (!pending || session.lost || !session.state) return
+    if (followDecision({ ...placeOf(session), running: false }, pending.from) === 'follow') {
+      await this.follow(sessionId, session, pending.to)
+    }
+  }
+
+  private async follow(sessionId: string, session: QuerySession, database: string): Promise<void> {
+    try {
+      const state = await session.use(database)
+      this.emitSession({ sessionId, state })
+    } catch {
+      // A database this session cannot open leaves it where it was; a socket
+      // that went with it has reported the loss already.
+    }
   }
 
   async getObjectDefinition(schema: string, name: string): Promise<string | null> {

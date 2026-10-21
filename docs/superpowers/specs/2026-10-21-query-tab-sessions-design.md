@@ -1,7 +1,8 @@
 # Query tabs with sessions of their own
 
 **Date:** 2026-10-21
-**Status:** design agreed in conversation; builder check pending
+**Status:** design agreed in conversation; reviewed; waiting on the user's read-through before a
+plan is written
 **Issue:** [#31](https://github.com/NelushaUdaraka/tableview/issues/31)
 
 ## Why
@@ -52,7 +53,7 @@ transactions from the start, because a tab session that lasts makes an open tran
   disconnecting, quitting, or moving the tab to another window.
 - **Lost sessions are reported:** a session that is lost, because the connection dropped or the
   server closed it, is reported on its tab. The tab is never quietly handed a fresh session as if
-  nothing happened.
+  nothing happened, and a run that relied on what was lost is not sent.
 - **Database switching:** switching database from the sidebar moves the tabs along, except tabs
   that chose a database of their own or are in a transaction (see *Switching database from the
   sidebar* below).
@@ -137,7 +138,9 @@ transactions from the start, because a tab session that lasts makes an open tran
   statement, or a routine's *Save and close*. The first run opens it, so a tab that is only ever
   looked at costs nothing. Tabs reopened after a connect or a restart start the same way.
 - **Where it connects:** the session opens in the window's current database, the one the sidebar
-  shows. It connects the way the pool does: the same login, options and tunnel endpoint.
+  shows. The exception is a routine's tab, which opens in the routine's own database
+  (`routine.database`; see the database rule below). It connects the way the pool does: the same
+  login, options and tunnel endpoint.
 - **Runs:** every run in the tab, and every `GO` batch in it, goes to that session, one at a time.
   The read-only check runs on the script before it reaches the session, exactly as now.
 - **Closing:** the session closes when the tab closes, when the window disconnects or closes, and
@@ -145,9 +148,10 @@ transactions from the start, because a tab session that lasts makes an open tran
 
 ### What the tab knows about its session
 
-After every run, whether it succeeded, failed or was cancelled, the app reads four values on the
-same session: `@@SPID`, `@@TRANCOUNT`, `XACT_STATE()` and `DB_NAME()`. They drive everything the
-tab shows:
+After every run, whether it succeeded, failed or was cancelled, the app reads the session's state on
+the same session: `@@TRANCOUNT`, `XACT_STATE()` and `DB_NAME()`. It may also read `@@SPID` to show
+which server session the tab is, but never to tell two sessions apart, because SQL Server reuses
+SPIDs. This state drives everything the tab shows:
 
 - **Database:** when the session's database differs from the sidebar's, the query toolbar shows
   it. A tab that ran `USE master` says `master`. When they match, nothing is shown.
@@ -161,12 +165,7 @@ tab shows:
   a word on why.
 - **Commit and Rollback:** **Commit** commits every nesting level, as
   `WHILE @@TRANCOUNT > 0 COMMIT` does. **Rollback** runs `ROLLBACK`. Their outcome shows in the
-  results' messages like any run, and the four values are read again.
-- **A lost session:** a session counts as lost when `@@SPID` changes between runs, or when it is
-  known to have closed (the drop handling below, or a failed keepalive). The tab then says so once,
-  in its results area: *This tab's session was closed — temp tables and settings from earlier runs
-  are gone*. It adds *its open transaction was rolled back by the server* when the last known
-  `@@TRANCOUNT` was above 0. The next run opens a new session.
+  results' messages like any run, and the session's state is read again.
 
 ### Switching database from the sidebar
 
@@ -178,6 +177,11 @@ When the sidebar switches database (`useDatabase`), the app checks each tab that
   transaction open. It then shows its database, as above.
 - **It follows later** if its query is running when the switch happens: it follows once that run
   ends, as long as it still has no transaction open. *(my call)*
+- **A routine's tab never follows.** It is pinned to the routine's own database: its session opens
+  there and stays there, and its toolbar shows the database whenever it differs from the sidebar's.
+  Today, saving a routine's tab after a sidebar switch writes the routine into the other database,
+  where the same name can be a different routine or none at all. Pinning stops that. *(my call: a
+  routine's tab counts as a tab with a database of its own)*
 
 Tabs without a session have nothing to move; their first run opens in the new database. A switch
 the server refuses changes nothing, for the sidebar or for any tab.
@@ -202,6 +206,47 @@ The questions come in the existing order: staged table edits first, then routine
 then open transactions. A commit that fails keeps the tab, puts it on screen with the error, and
 stops whatever was closing.
 
+#### When the tab's query is still running
+
+While a run is going, the app can't know whether it has opened a transaction. Nothing can be sent
+on the session until the run stops, not even a commit. Today, closing a tab leaves its query
+running to the end on the pool, unseen, while disconnecting and quitting cancel it.
+
+- **No transaction open before the run:** closing the tab, moving it, disconnecting, closing the
+  window or quitting first stops the query, the way Cancel does. The app then reads the session's
+  state, and asks only if a transaction is open by then; the question says the run was stopped
+  part-way. Closing a tab therefore now stops what it is running. *(my call)*
+- **A transaction already open before the run:** the app asks before stopping anything: *Query 2
+  is running inside an open transaction*, with **Stop and roll back** and **Cancel**. Commit is not
+  offered until the query has stopped.
+- **Window close and quit:** these are held while any tab's query is running, as well as while a
+  transaction is open, so the steps above can happen. The window shows that it is stopping
+  queries. If a query has not stopped after 10 seconds, the window closes anyway; that ends the
+  session, and the server undoes its unfinished work. *(my call)*
+
+### When a session is lost
+
+A session is lost when its connection ends without the tab ending it: the server killed it, its
+socket closed, or the whole connection dropped.
+
+- **Never replaced behind the tab's back.** The session's connection is held so that nothing
+  reopens it on its own (see *Left to the builder*). When the connection ends, the driver reports
+  it and the tab is marked lost straight away. A socket that died without a word is found when
+  the next run fails to reach it, and then nothing has run.
+- **The tab says so once,** in its results area: *This tab's session was closed — temp tables and
+  settings from earlier runs are gone*. When a transaction was open, it adds *its open transaction
+  was rolled back by the server*.
+- **The next run depends on what the lost session had:**
+  - **Nothing is sent** if the session had a transaction open, or was in a database other than
+    the one a new session would open in (a tab that had run its own `USE`). The results say the
+    session was closed, what that undid, and that the next run starts a new session in that
+    database. A script written to carry on inside the transaction is never committed statement
+    by statement on a new session, and nothing runs in a database the tab didn't mean.
+  - **Otherwise,** the run opens a new session and goes ahead, with the note above its results.
+
+  *(my call: refusing every first run after a loss would put a new obstacle in front of people
+  who never use transactions every time a laptop wakes and the connection is reopened)*
+
 ### Drops, reconnects and keepalive
 
 - **Whole-connection drop:** when the connection drops (`handleDrop`), every session goes with the
@@ -212,10 +257,10 @@ stops whatever was closing.
   that session only. Today `noteTransportFailure` reopens the whole connection on any such failure.
   Instead, check the shared pool straight away: only if the pool fails too is the whole connection
   reopened.
-- **A killed session:** a session the server kills is not a transport failure. Its query gets
-  *Cannot continue the execution because the session is in the kill state* (checked against the
-  test container), and the SPID check reports the session lost on the next read. Either way, the
-  other tabs' sessions are untouched.
+- **A killed session:** a session the server kills is not a transport failure. Its running query
+  gets *Cannot continue the execution because the session is in the kill state* (checked against
+  the test container), and the session is lost as described above. Either way, the other tabs'
+  sessions are untouched.
 - **Keepalive:** idle sessions get the same keepalive as the pool (`keepAliveIntervalMs`), so a
   tunnel or firewall does not cut them off. The pool's heartbeat and each session's heartbeat each
   skip only while that pool, or that session, is busy. Today the pool's heartbeat skips whenever
@@ -231,12 +276,18 @@ stops whatever was closing.
 ## Calls I made (for the user to check)
 
 - Sessions sit outside the shared pool's `poolMax`, with no cap.
-- After every run the tab reads `@@SPID`, `@@TRANCOUNT`, `XACT_STATE()` and `DB_NAME()`, and a
-  changed SPID counts as a lost session.
+- After every run the tab reads `@@TRANCOUNT`, `XACT_STATE()` and `DB_NAME()` on its session.
 - Commit commits every nesting level; Rollback rolls all of it back.
 - The open-transaction marker shows how long the transaction has been open, and the status bar
   counts open transactions in the window.
 - A following tab whose query is running during a database switch follows when its run ends.
+- A routine's tab is pinned to the routine's database and never follows the sidebar.
+- After a lost session, the next run is refused only if the session had a transaction open or was
+  in a database of its own. Otherwise it runs on a new session, with a note.
+- Closing, moving or disconnecting a tab whose query is running stops the query first, and asks
+  only if that leaves a transaction open. A run inside a transaction that was already open asks
+  before stopping, offering *Stop and roll back* or *Cancel*.
+- Window close and quit wait up to 10 seconds for running queries to stop.
 - The question before ending a transaction gives Cancel the focus.
 - Moving a tab to another window asks only about an open transaction. Its temp tables and settings
   don't move and aren't asked about; the docs say so.
@@ -246,11 +297,19 @@ stops whatever was closing.
 
 ## Left to the builder
 
-- **Holding a session in `SqlServerClient`.** One way that keeps the request code as it is: a
-  `sql.ConnectionPool` of exactly one connection per session (`min: 1`, `max: 1`, no idle close).
-  `buildMssqlConfig` builds it with the session's database and the client's current tunnel
-  endpoint, and `executeOne` is told which pool to use. Whatever is chosen, a replaced connection
-  must be detectable; the SPID check catches it either way.
+- **Holding a session in `SqlServerClient`,** within one requirement: the connection is never
+  replaced without the tab knowing (see *When a session is lost*).
+  - **The shared pool's configuration won't do.** mssql 12.7 validates a connection before handing
+    it out (`validateConnection` defaults to on), and tarn swaps a dead or closed one for a new one,
+    which would run the next script on a fresh session.
+  - **Workable shapes:**
+    - a one-connection `sql.ConnectionPool` with `validateConnection: false` and no idle close.
+      Its tedious connection is caught in `beforeConnect`, so its `end` is seen before the next run
+      asks the pool for it, and it is replaced by a new pool only when the tab is to get a new
+      session. That keeps `executeOne` as it is, told which pool to use;
+    - a tedious `Connection` held directly.
+  - **Either way,** `buildMssqlConfig` builds it with the session's database and the client's
+    current tunnel endpoint. `@@SPID` is not the check, because SQL Server reuses SPIDs.
 - **The shape of the IPC.** For example:
   - `RunQueryRequest.sessionId`, set to the tab id. Tab ids are unique within a window, and the
     registry is scoped per window.
@@ -280,11 +339,17 @@ stops whatever was closing.
     transaction, or one that ran its own `USE`, where it was.
   - **One failing session:** killing one session's SPID loses that session only; the pool and the
     other sessions carry on.
+  - **No silent replacement:** after the server kills a session that had a transaction open, the
+    next run sends nothing. After it kills one with nothing open, the next run goes ahead on a new
+    session and says so.
+  - **Routines stay put:** a routine's tab saves into the routine's database after a sidebar
+    switch.
 - **Unit tests** for the pure logic:
-  - the follow-or-stay rule;
-  - the tab state derived from the four values read after a run;
+  - the follow-or-stay rule, including routine tabs;
+  - the tab state derived from what is read after a run;
+  - the refuse-or-run rule after a lost session;
   - the questions asked by `close`, `closeConnection`, `canCloseWindow` and moving a tab, with
-    transactions open.
+    transactions open, and with queries running.
 - **An e2e check**, beside `test/e2e/unsaved.mjs`: `BEGIN TRAN` in a tab shows the marker, closing
   the tab asks, and Cancel keeps it.
 

@@ -13,9 +13,16 @@ export const COMMIT_SQL = 'WHILE @@TRANCOUNT > 0 COMMIT TRANSACTION;'
 /** Rolls back whatever is open; with nothing open a bare `ROLLBACK` is an error. */
 export const ROLLBACK_SQL = 'IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;'
 
-/** What a tab is told after every run, read on its own session. */
+/**
+ * What a tab is told after every run, read on its own session.
+ *
+ * `XACT_STATE()` is read in a statement of its own: in the same `SELECT` as
+ * `DB_NAME()`, whose metadata lookup runs inside a transaction of its own, it
+ * reports 1 with nothing open.
+ */
 export const STATE_SQL =
-  'SELECT @@TRANCOUNT AS transactionCount, XACT_STATE() AS transactionState, DB_NAME() AS [database];'
+  'DECLARE @state smallint = XACT_STATE(); ' +
+  'SELECT @@TRANCOUNT AS transactionCount, @state AS transactionState, DB_NAME() AS [database];'
 
 /** Database names compare without case, as they do under the usual server collation. */
 export function sameDatabase(a: string | null | undefined, b: string | null | undefined): boolean {

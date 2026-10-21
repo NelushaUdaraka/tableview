@@ -48,6 +48,8 @@ export class QuerySession {
    * session follows from `from` to `to` — if it is still where the sidebar was.
    */
   pendingFollow: { from: string; to: string } | null = null
+  /** When a heartbeat last went down the session's connection, as `Date.now()`. */
+  lastHeartbeatAt: number | null = null
 
   private current: sql.ConnectionPool | null = null
   /** The connection the session is, once it has one. */
@@ -158,6 +160,32 @@ export class QuerySession {
   async use(database: string): Promise<SessionState> {
     await this.pool.request().batch(`USE ${quoteIdent(database)}`)
     return this.readState()
+  }
+
+  /**
+   * Sends one row down an idle session, so a tunnel or a firewall does not
+   * cut it off for want of traffic. A session that cannot answer is lost.
+   */
+  async heartbeat(): Promise<void> {
+    if (this.busy || this.lost || this.closing || !this.current) return
+    try {
+      await this.current.request().query('SELECT 1')
+      this.lastHeartbeatAt = Date.now()
+    } catch {
+      this.markLost()
+    }
+  }
+
+  /**
+   * Lets go of a session whose connection has gone with the rest of the
+   * transport: there is nothing to send a `ROLLBACK` down, and the loss has
+   * been reported already.
+   */
+  async abandon(): Promise<void> {
+    this.closing = true
+    const pool = this.current
+    this.current = null
+    await pool?.close().catch(() => undefined)
   }
 
   /** The connection ended without the tab ending it. Said once. */

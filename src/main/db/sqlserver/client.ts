@@ -386,7 +386,10 @@ export class SqlServerClient implements DbClient {
     this.stopKeepAlive()
     const interval = this.keepAliveIntervalMs
     if (interval <= 0) return
-    this.keepAliveTimer = setInterval(() => void this.probe(), interval)
+    this.keepAliveTimer = setInterval(() => {
+      void this.probe()
+      void this.heartbeatSessions()
+    }, interval)
     // A heartbeat is no reason to hold the process open at quit.
     this.keepAliveTimer.unref?.()
   }
@@ -399,13 +402,15 @@ export class SqlServerClient implements DbClient {
   /**
    * Sends one row down the connection to prove it is still there.
    *
-   * Skipped whenever something else is already talking to the server: a
-   * connection carrying a query needs no help staying up, and a heartbeat
-   * queued behind a long-running statement proves nothing about the socket.
+   * Skipped whenever something else is already talking to the server on the
+   * shared pool: a pool carrying a query needs no help staying up, and a
+   * heartbeat queued behind a long-running statement proves nothing about the
+   * socket. A query running in a tab's session is on a connection of its own,
+   * and says nothing about the pool's.
    */
   private async probe(): Promise<void> {
     if (this.closed || this.recovering || this.probing) return
-    if (this.activeRequests.size > 0) return
+    if (this.sharedRequests > 0) return
 
     const pool = this.pool
     if (!pool?.connected) {
@@ -436,8 +441,28 @@ export class SqlServerClient implements DbClient {
     this.reconnectAttempt = 0
     this.stopKeepAlive()
     this.announce({ state: 'reconnecting', error })
+    this.loseSessions()
     await this.teardown()
     void this.attemptReconnect()
+  }
+
+  /**
+   * The transport is gone and every tab's session with it: each says what it
+   * had, and stays on record so its tab's next run is told too. Reopening the
+   * connection does not bring them back — a tab gets a new session when it
+   * next runs, on whatever port the new tunnel listens on.
+   */
+  private loseSessions(): void {
+    for (const session of this.sessions.values()) {
+      session.markLost()
+      void session.abandon()
+    }
+  }
+
+  /** Pokes each idle session; one that cannot answer is lost, and says so. */
+  private async heartbeatSessions(): Promise<void> {
+    if (this.closed || this.recovering) return
+    await Promise.all([...this.sessions.values()].map((session) => session.heartbeat()))
   }
 
   private async attemptReconnect(): Promise<void> {
@@ -499,6 +524,11 @@ export class SqlServerClient implements DbClient {
       }
     }
     this.activeRequests.clear()
+
+    // The window is going, and has asked about anything open already.
+    const sessions = [...this.sessions.values()]
+    this.sessions.clear()
+    await Promise.all(sessions.map((session) => session.close()))
 
     await this.teardown()
     this.serverInfo = null

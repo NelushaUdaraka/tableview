@@ -298,3 +298,63 @@ describe('switching database', () => {
     expect(first(await client.runInSession('a', 'SELECT DB_NAME()'))).toBe('tv sessions]odd')
   })
 })
+
+describe('drops, disconnects and keepalive', () => {
+  it('reports every session lost when the connection drops, and holds them to the rule once it is back', async () => {
+    const client = await tabClient()
+    const changes: SessionChange[] = []
+    client.onSessionChange((change) => changes.push(change))
+    const back = new Promise<void>((resolve) =>
+      client.onStateChange((event) => {
+        if (event.state === 'connected') resolve()
+      })
+    )
+    await client.runInSession('txn', 'BEGIN TRAN')
+    await client.runInSession('plain', 'SELECT 1')
+    // The drop the heartbeat would report, driven through the client's own handling.
+    await (client as unknown as { handleDrop(error: unknown): Promise<void> }).handleDrop(
+      new Error('socket hang up')
+    )
+    await back
+    expect(
+      changes
+        .filter((change) => change.lost)
+        .map((change) => [change.sessionId, change.lost!.transactionCount])
+        .sort()
+    ).toEqual([
+      ['plain', 0],
+      ['txn', 1]
+    ])
+    expect((await client.runInSession('txn', 'SELECT 1')).statements[0].error?.code).toBe(SESSION_LOST)
+    expect((await client.runInSession('plain', 'SELECT 1')).lost?.refused).toBe(false)
+  })
+
+  it('closes every session on disconnect', async () => {
+    const client = await tabClient({
+      options: { ...makeConfig().options, applicationName: 'tv-sessions-disconnect' }
+    })
+    await client.runInSession('a', 'SELECT 1')
+    await client.runInSession('b', 'SELECT 1')
+    await client.disconnect()
+    expect(
+      await scalar(
+        admin,
+        "SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE program_name = 'tv-sessions-disconnect'"
+      )
+    ).toBe(0)
+  })
+
+  it('heartbeats an idle session, and leaves a busy one alone', async () => {
+    const client = await tabClient({ options: { ...makeConfig().options, keepAliveIntervalMs: 200 } })
+    await client.runInSession('a', 'SELECT 1')
+    const session = (client as unknown as { sessions: Map<string, QuerySession> }).sessions.get('a')!
+    await until(() => typeof session.lastHeartbeatAt === 'number', 2000)
+    const running = client.runInSession('a', "WAITFOR DELAY '00:00:01.500'")
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    const during = session.lastHeartbeatAt
+    expect(typeof during).toBe('number')
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    expect(session.lastHeartbeatAt).toBe(during)
+    await running
+  })
+})

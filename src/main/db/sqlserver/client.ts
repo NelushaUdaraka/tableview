@@ -19,6 +19,8 @@ import {
   SchemaObject,
   SerializedError,
   ServerMessage,
+  SessionLoss,
+  SessionState,
   StatementResult,
   TableChangeSet,
   TableColumn,
@@ -31,8 +33,10 @@ import {
   TableTrigger,
   DEFAULT_SQLSERVER_OPTIONS,
   READ_ONLY_CONNECTION,
+  SESSION_LOST,
   SSM_CREDENTIALS_EXPIRED
 } from '../../../shared/types'
+import { lostSessionRefusal, refuseAfterLoss } from '../../../shared/sessions'
 import { serializeRow, deserializeCell } from '../../../shared/serialize'
 import { qualify } from '../../../shared/sql/identifiers'
 import {
@@ -51,8 +55,18 @@ import { SsmTunnel } from '../../tunnel/ssm'
 import { credentialsToEnv, expiresAt, isExpired } from '../../../shared/aws/credentials'
 import type { Tunnel, TunnelHandle } from '../../tunnel/types'
 import { buildMssqlConfig } from './config'
+import { QuerySession } from './session'
 import { planReconnect } from '../reconnect'
-import type { ClientStateListener, DbClient, ExecuteOptions, ServerInfo } from '../types'
+import type {
+  ClientStateListener,
+  DbClient,
+  ExecuteOptions,
+  ServerInfo,
+  SessionChange,
+  SessionChangeListener,
+  SessionRun,
+  SessionRunOptions
+} from '../types'
 import * as Q from './queries'
 import { DriverColumn, declarationOf, isReadOnlyType, jsKindOf, renderDriverType } from './types'
 
@@ -102,6 +116,36 @@ function readOnlyRefusal(sql: string, write: WriteStatement): StatementResult {
     messages: [{ kind: 'error', message, lineNumber: write.line }],
     durationMs: 0,
     error: { message, code: READ_ONLY_CONNECTION, lineNumber: write.line }
+  }
+}
+
+/**
+ * What a tab's run answers with when its session was lost holding something
+ * the run may have counted on: the whole script, unsent, as a failed
+ * statement that says what went and where the next run starts.
+ */
+function sessionLostRefusal(sql: string, had: SessionState, nextDatabase: string): StatementResult {
+  const message = lostSessionRefusal(had, nextDatabase)
+  return {
+    sql,
+    resultSets: [],
+    rowsAffected: [],
+    messages: [{ kind: 'error', message }],
+    durationMs: 0,
+    error: { message, code: SESSION_LOST }
+  }
+}
+
+/** A batch that could not be sent at all, as the results show a failed one. */
+function unsentStatement(sql: string, error: unknown): StatementResult {
+  const serialized = serializeError(error)
+  return {
+    sql,
+    resultSets: [],
+    rowsAffected: [],
+    messages: [{ kind: 'error', message: serialized.message }],
+    durationMs: 0,
+    error: serialized
   }
 }
 
@@ -171,11 +215,39 @@ export class SqlServerClient implements DbClient {
   private probing = false
   /** Set by `disconnect`, so nothing reopens a connection the user closed. */
   private closed = false
+  /**
+   * Each query tab's own session, by tab id. A lost one stays here until the
+   * tab's next run has been told what it lost.
+   */
+  private readonly sessions = new Map<string, QuerySession>()
+  private sessionListener: SessionChangeListener | null = null
+  /**
+   * Requests in flight on the shared pool. Tabs' sessions are counted apart:
+   * a long query in a tab is no reason to skip the pool's own heartbeat.
+   */
+  private sharedRequests = 0
 
   constructor(private config: ConnectionConfig) {}
 
   onStateChange(listener: ClientStateListener | null): void {
     this.stateListener = listener
+  }
+
+  onSessionChange(listener: SessionChangeListener | null): void {
+    this.sessionListener = listener
+  }
+
+  private emitSession(change: SessionChange): void {
+    try {
+      this.sessionListener?.(change)
+    } catch {
+      // A listener that throws must not take the session down with it.
+    }
+  }
+
+  /** Where the sidebar is: the shared pool's database, which a new session opens in. */
+  private get windowDatabase(): string {
+    return this.serverInfo?.currentDatabase || this.config.database || ''
   }
 
   setReadOnly(readOnly: boolean): void {
@@ -558,13 +630,16 @@ export class SqlServerClient implements DbClient {
   /**
    * Executes one statement, streaming rows so a large result never has to be
    * materialised twice and can be capped or cancelled part-way through.
+   *
+   * On a tab's `session` when given one; otherwise on the shared pool.
    */
   private async executeOne(
     text: string,
     params: SqlParam[],
-    options: ExecuteOptions
+    options: ExecuteOptions,
+    session?: QuerySession
   ): Promise<StatementResult> {
-    const pool = this.requirePool()
+    const pool = session ? session.pool : this.requirePool()
     const request = pool.request()
     const maxRows = options.maxRows ?? DEFAULT_MAX_ROWS
     const started = Date.now()
@@ -618,6 +693,7 @@ export class SqlServerClient implements DbClient {
 
     const executionId = options.executionId
     if (executionId) this.activeRequests.set(executionId, request)
+    if (!session) this.sharedRequests += 1
 
     try {
       // batch() allows statements that must start a batch (CREATE PROCEDURE,
@@ -629,9 +705,11 @@ export class SqlServerClient implements DbClient {
       }
     } catch (error) {
       errors.push(this.explainTransportFailure(error))
-      this.noteTransportFailure(error)
+      if (session) this.onSessionFailure(session, error)
+      else this.noteTransportFailure(error)
     } finally {
       if (executionId) this.activeRequests.delete(executionId)
+      if (!session) this.sharedRequests -= 1
       request.removeAllListeners()
     }
 
@@ -672,13 +750,8 @@ export class SqlServerClient implements DbClient {
 
     if (statements.length === 0) return []
 
-    // The whole script is checked before any of it runs: a script refused
-    // halfway through has done the first half, which is harder to reason
-    // about than a script that has done nothing.
-    if (this.config.readOnly) {
-      const write = options.asSingleBatch ? findWrite(text) : findWriteInScript(text)
-      if (write) return [readOnlyRefusal(text, write)]
-    }
+    const refusal = this.refusalFor(text, options)
+    if (refusal) return [refusal]
 
     const results: StatementResult[] = []
     for (const statement of statements) {
@@ -687,6 +760,129 @@ export class SqlServerClient implements DbClient {
       if (result.error) break
     }
     return results
+  }
+
+  /**
+   * What a read-only connection answers instead of running `text`, if it
+   * writes. The whole script is checked before any of it runs: a script
+   * refused halfway through has done the first half, which is harder to
+   * reason about than a script that has done nothing.
+   */
+  private refusalFor(text: string, options: ExecuteOptions): StatementResult | null {
+    if (!this.config.readOnly) return null
+    const write = options.asSingleBatch ? findWrite(text) : findWriteInScript(text)
+    return write ? readOnlyRefusal(text, write) : null
+  }
+
+  async runInSession(
+    sessionId: string,
+    text: string,
+    options: SessionRunOptions = {}
+  ): Promise<SessionRun> {
+    const statements = options.asSingleBatch
+      ? [{ text, start: 0, end: text.length, startLine: 1 }]
+      : splitBatches(text)
+    let session = this.sessions.get(sessionId)
+    const live = (): SessionState | null => (session && !session.lost ? session.state : null)
+
+    if (statements.length === 0) return { statements: [], session: live() }
+    const refusal = this.refusalFor(text, options)
+    if (refusal) return { statements: [refusal], session: live() }
+
+    // A session lost since the last run is told about now, once. What it held
+    // decides whether this run may go ahead on a new one.
+    let lost: SessionLoss | undefined
+    if (session?.lost) {
+      const had = session.lost
+      this.sessions.delete(sessionId)
+      session = undefined
+      const next = options.pinnedDatabase ?? this.windowDatabase
+      if (refuseAfterLoss(had, next)) {
+        return {
+          statements: [sessionLostRefusal(text, had, next)],
+          session: null,
+          lost: { had, refused: true }
+        }
+      }
+      lost = { had, refused: false }
+    }
+
+    if (!session) session = await this.openSession(sessionId, options.pinnedDatabase)
+    const current = session
+
+    const results: StatementResult[] = []
+    current.busy = true
+    try {
+      for (const statement of statements) {
+        let result: StatementResult
+        try {
+          result = await this.executeOne(statement.text, [], options, current)
+        } catch (error) {
+          // The session went between batches: nothing of this one was sent.
+          result = unsentStatement(statement.text, error)
+        }
+        results.push(result)
+        if (result.error) break
+      }
+      // Whatever the run came to — finished, failed, cancelled — the tab is
+      // told where its session now stands. A read that fails has already
+      // marked the session lost.
+      if (!current.lost) await current.readState().catch(() => undefined)
+    } finally {
+      current.busy = false
+    }
+
+    return { statements: results, session: current.lost ? null : current.state, lost }
+  }
+
+  /** Opens a tab's session in its routine's database, or where the sidebar is. */
+  private async openSession(sessionId: string, pinnedDatabase?: string): Promise<QuerySession> {
+    // Not connected, or being reconnected: the same words as any other query.
+    this.requirePool()
+    const session = await QuerySession.open(
+      this.config,
+      this.tunnelHandle,
+      pinnedDatabase ?? this.windowDatabase,
+      {
+        pinnedDatabase,
+        onLost: (had) => this.emitSession({ sessionId, state: null, lost: had })
+      }
+    )
+    this.sessions.set(sessionId, session)
+    return session
+  }
+
+  async closeSession(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    this.sessions.delete(sessionId)
+    await session.close()
+  }
+
+  /**
+   * A tab's session lost its socket. That ends the session, and says nothing
+   * yet about the connection: the shared pool is checked straight away, and
+   * only a pool that fails too means the connection has gone.
+   */
+  private onSessionFailure(session: QuerySession, error: unknown): void {
+    if (this.closed || !isTransportFailure(error)) return
+    session.markLost()
+    void this.checkSharedPool()
+  }
+
+  /** The heartbeat, now rather than on its schedule, and whatever else is running. */
+  private async checkSharedPool(): Promise<void> {
+    if (this.closed || this.recovering) return
+    const pool = this.pool
+    if (!pool?.connected) {
+      void this.handleDrop(new Error('The connection pool closed'))
+      return
+    }
+    try {
+      await pool.request().query('SELECT 1')
+    } catch (error) {
+      void this.handleDrop(this.explainTransportFailure(error))
+    }
   }
 
   cancel(executionId: string): boolean {

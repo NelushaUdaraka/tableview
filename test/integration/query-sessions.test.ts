@@ -10,7 +10,15 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { SqlServerClient } from '../../src/main/db/sqlserver/client'
 import { QuerySession } from '../../src/main/db/sqlserver/session'
-import type { ConnectionConfig, SessionState } from '../../src/shared/types'
+import type { SessionChange, SessionRun } from '../../src/main/db/types'
+import { COMMIT_SQL } from '../../src/shared/sessions'
+import {
+  READ_ONLY_CONNECTION,
+  SESSION_LOST,
+  type ConnectionConfig,
+  type SessionState,
+  type TableDataRequest
+} from '../../src/shared/types'
 import { TEST_DATABASE, connectedClient, createTestDatabase, makeConfig } from './helpers'
 
 let admin: SqlServerClient
@@ -47,6 +55,29 @@ async function until(check: () => boolean, ms = 5000): Promise<void> {
     if (Date.now() > end) throw new Error(`gave up waiting after ${ms}ms`)
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
+}
+
+/** A connected client whose tabs the tests run on; disconnected after the suite. */
+async function tabClient(overrides: Partial<ConnectionConfig> = {}): Promise<SqlServerClient> {
+  const client = await connectedClient(overrides)
+  clients.push(client)
+  return client
+}
+
+/** The first cell of the last result set a tab's run produced. */
+function first(run: SessionRun): unknown {
+  return run.statements.at(-1)?.resultSets.at(-1)?.rows[0]?.[0]
+}
+
+const ITEMS: TableDataRequest = {
+  connectionId: 'x',
+  schema: 'dbo',
+  table: 'session_items',
+  offset: 0,
+  limit: 10,
+  sorts: [],
+  filters: [],
+  filterMode: 'builder'
 }
 
 async function openSession(
@@ -99,5 +130,110 @@ describe('QuerySession', () => {
     expect(reported).toHaveLength(1)
     expect(reported[0].transactionCount).toBe(1)
     expect(() => session.pool).toThrow("This tab's session was closed.")
+  })
+})
+
+describe("a tab's session", () => {
+  it('keeps a temp table from one run to the next, with shared reads between, past the idle timeout', async () => {
+    const client = await tabClient({ options: { ...makeConfig().options, poolIdleTimeoutMs: 1000 } })
+    expect((await client.runInSession('a', 'CREATE TABLE #t (id int)')).statements[0].error).toBeUndefined()
+    await Promise.all([
+      client.listObjects(),
+      client.listRoutines(),
+      client.getAutocompleteSchema(),
+      client.fetchTableData(ITEMS)
+    ])
+    expect(first(await client.runInSession('a', 'SELECT COUNT(*) FROM #t'))).toBe(0)
+    await new Promise((resolve) => setTimeout(resolve, 2500))
+    expect(first(await client.runInSession('a', 'SELECT COUNT(*) FROM #t'))).toBe(0)
+  })
+
+  it('keeps USE inside the session', async () => {
+    const client = await tabClient()
+    expect((await client.runInSession('a', 'USE master')).session?.database).toBe('master')
+    const page = await client.fetchTableData(ITEMS)
+    expect(page.rows).toHaveLength(2)
+    expect((await client.listObjects()).some((o) => o.name === 'session_items')).toBe(true)
+  })
+
+  it('keeps an open transaction inside the session, and closing it rolls it back', async () => {
+    const client = await tabClient()
+    const run = await client.runInSession(
+      'a',
+      "BEGIN TRAN; UPDATE dbo.session_items SET name = N'changed' WHERE id = 1;"
+    )
+    expect(run.session).toMatchObject({ transactionCount: 1, transactionState: 1 })
+    const [blocked] = await client.runScript(
+      'SET LOCK_TIMEOUT 500; SELECT name FROM dbo.session_items WHERE id = 1;'
+    )
+    expect(blocked.error?.message).toMatch(/lock request time out/i)
+    await client.closeSession('a')
+    expect(await scalar(client, 'SELECT name FROM dbo.session_items WHERE id = 1')).toBe('original')
+  })
+
+  it('reports the transaction a cancelled run left open', async () => {
+    const client = await tabClient()
+    const running = client.runInSession('a', "BEGIN TRAN; WAITFOR DELAY '00:00:05';", {
+      executionId: 'slow'
+    })
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(client.cancel('slow')).toBe(true)
+    expect((await running).session?.transactionCount).toBe(1)
+  })
+
+  it("opens in the window's database when the connection names none", async () => {
+    const client = await tabClient({ database: '' })
+    expect((await client.runInSession('a', 'SELECT 1')).session?.database).toBe(
+      client.info?.currentDatabase
+    )
+  })
+
+  it('refuses a write on a read-only connection before the session is touched, and lets transactions through', async () => {
+    const client = await tabClient({ readOnly: true })
+    const refused = await client.runInSession('a', 'DELETE FROM dbo.session_items')
+    expect(refused.statements[0].error?.code).toBe(READ_ONLY_CONNECTION)
+    expect((await client.runInSession('a', 'BEGIN TRAN; SELECT 1;')).session?.transactionCount).toBe(1)
+    expect((await client.runInSession('a', COMMIT_SQL)).session?.transactionCount).toBe(0)
+  })
+
+  it('refuses the next run after losing a session that had a transaction open', async () => {
+    const client = await tabClient()
+    const changes: SessionChange[] = []
+    client.onSessionChange((change) => changes.push(change))
+    const spid = first(await client.runInSession('a', 'BEGIN TRAN; SELECT @@SPID;'))
+    await admin.runScript(`KILL ${spid}`)
+    await until(() => changes.some((change) => change.lost))
+    const refused = await client.runInSession('a', 'SELECT 1')
+    expect(refused.statements[0].error?.code).toBe(SESSION_LOST)
+    expect(refused.lost).toMatchObject({ refused: true, had: { transactionCount: 1 } })
+    expect(refused.session).toBeNull()
+    const next = await client.runInSession('a', 'SELECT 1')
+    expect(next.statements[0].error).toBeUndefined()
+    expect(next.lost).toBeUndefined()
+  })
+
+  it('runs on a new session, saying so, after losing one that had nothing open', async () => {
+    const client = await tabClient()
+    const changes: SessionChange[] = []
+    client.onSessionChange((change) => changes.push(change))
+    const spid = first(await client.runInSession('a', 'SELECT @@SPID'))
+    await admin.runScript(`KILL ${spid}`)
+    await until(() => changes.some((change) => change.lost))
+    const run = await client.runInSession('a', 'SELECT 1')
+    expect(run.statements[0].error).toBeUndefined()
+    expect(run.lost).toMatchObject({ refused: false, had: { transactionCount: 0 } })
+  })
+
+  it('loses only the session that was killed', async () => {
+    const client = await tabClient()
+    const states: string[] = []
+    client.onStateChange((event) => states.push(event.state))
+    const spid = first(await client.runInSession('a', 'SELECT @@SPID'))
+    await client.runInSession('b', 'CREATE TABLE #b (id int)')
+    await admin.runScript(`KILL ${spid}`)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(first(await client.runInSession('b', 'SELECT COUNT(*) FROM #b'))).toBe(0)
+    expect(await scalar(client, 'SELECT 1')).toBe(1)
+    expect(states).toEqual([])
   })
 })

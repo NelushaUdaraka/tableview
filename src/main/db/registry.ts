@@ -6,7 +6,7 @@
  * of silently evicting one another.
  */
 import { ConnectionConfig, ConnectionStatus, SerializedError } from '../../shared/types'
-import type { ClientStateEvent, DbClient } from './types'
+import type { ClientStateEvent, DbClient, SessionChange } from './types'
 import { SqlServerClient, serializeError } from './sqlserver/client'
 
 /**
@@ -16,6 +16,12 @@ import { SqlServerClient, serializeError } from './sqlserver/client'
  * back into one and delivers the status there.
  */
 export type StatusListener = (scope: string, status: ConnectionStatus) => void
+
+/**
+ * Told about a query tab's session that changed on its own — moved by the
+ * sidebar's database switch, or lost — and which window's connection it is on.
+ */
+export type SessionListener = (scope: string, connectionId: string, change: SessionChange) => void
 
 /** Separator that cannot appear in a window scope or a connection uuid. */
 const KEY_SEPARATOR = '::'
@@ -32,6 +38,7 @@ export class ConnectionRegistry {
   /** Connections that dropped and are being reopened without being asked. */
   private readonly recovering = new Set<string>()
   private readonly statusListeners = new Set<StatusListener>()
+  private readonly sessionListeners = new Set<SessionListener>()
   /**
    * The last read-only switch for each connection, numbered in order.
    *
@@ -46,6 +53,12 @@ export class ConnectionRegistry {
   onStatusChange(listener: StatusListener): () => void {
     this.statusListeners.add(listener)
     return () => this.statusListeners.delete(listener)
+  }
+
+  /** Registered once by the IPC layer; returns a function that unregisters. */
+  onSessionChange(listener: SessionListener): () => void {
+    this.sessionListeners.add(listener)
+    return () => this.sessionListeners.delete(listener)
   }
 
   /** Constructs the driver for a connection's engine. */
@@ -79,6 +92,13 @@ export class ConnectionRegistry {
       this.recovering.delete(key)
       // From here the client can report a drop nobody asked about.
       client.onStateChange((event) => this.onClientState(scope, config.id, event))
+      // …and a tab's session that moved or was lost.
+      const opened = client
+      client.onSessionChange((change) => {
+        // Only the client in the slot speaks for its window's tabs.
+        if (this.clients.get(key) !== opened) return
+        for (const listener of this.sessionListeners) listener(scope, config.id, change)
+      })
       return {
         connectionId: config.id,
         state: 'connected',
@@ -224,6 +244,7 @@ export class ConnectionRegistry {
     this.errors.delete(key)
     this.recovering.delete(key)
     client.onStateChange(null)
+    client.onSessionChange(null)
     await client.disconnect().catch(() => undefined)
   }
 
@@ -256,6 +277,7 @@ export class ConnectionRegistry {
     this.errors.delete(key)
     this.recovering.delete(key)
     client?.onStateChange(null)
+    client?.onSessionChange(null)
     await client?.disconnect().catch(() => undefined)
   }
 

@@ -8,7 +8,12 @@
  * connection had dropped when it had merely been replaced.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ClientStateEvent, ClientStateListener } from '../../src/main/db/types'
+import type {
+  ClientStateEvent,
+  ClientStateListener,
+  SessionChange,
+  SessionChangeListener
+} from '../../src/main/db/types'
 import {
   DEFAULT_SQLSERVER_OPTIONS,
   DEFAULT_SSH_CONFIG,
@@ -25,6 +30,7 @@ let connectGate: Promise<void> | null = null
 
 class FakeClient {
   listener: ClientStateListener | null = null
+  sessionListener: SessionChangeListener | null = null
   connected = false
   readonly tunnelPort = 14330
   readonly info = {
@@ -67,6 +73,15 @@ class FakeClient {
   /** Stands in for the heartbeat or a failed query reporting a drop. */
   report(event: ClientStateEvent): void {
     this.listener?.(event)
+  }
+
+  onSessionChange(listener: SessionChangeListener | null): void {
+    this.sessionListener = listener
+  }
+
+  /** Stands in for a tab's session moving with the sidebar, or being lost. */
+  reportSession(change: SessionChange): void {
+    this.sessionListener?.(change)
   }
 }
 
@@ -329,5 +344,35 @@ describe('switching read-only on an open connection', () => {
 
     // Read afresh for this open, so the config is the later word.
     expect(await registry.open('win1', config())).toMatchObject({ readOnly: false })
+  })
+})
+
+/**
+ * A tab's session can change with no call to answer: the sidebar's database
+ * switch moves it, or its connection is lost. The registry passes that on to
+ * the window that owns the connection, and stops listening once it has closed
+ * the client — a replaced client's sessions are not this window's any more.
+ */
+describe('a session that changes on its own', () => {
+  it('reaches the window that owns it', async () => {
+    const { registry, client } = await openOne()
+    const seen: [string, string, SessionChange][] = []
+    registry.onSessionChange((scope, connectionId, change) => seen.push([scope, connectionId, change]))
+    const change: SessionChange = {
+      sessionId: 'tab-3',
+      state: null,
+      lost: { transactionCount: 1, transactionState: 1, database: 'sales' }
+    }
+    client.reportSession(change)
+    expect(seen).toEqual([['win1', 'c1', change]])
+  })
+
+  it('is not heard from a client that has been closed', async () => {
+    const { registry, client } = await openOne()
+    const seen: unknown[] = []
+    registry.onSessionChange((...args) => seen.push(args))
+    await registry.close('win1', 'c1')
+    client.reportSession({ sessionId: 'tab-3', state: null })
+    expect(seen).toEqual([])
   })
 })

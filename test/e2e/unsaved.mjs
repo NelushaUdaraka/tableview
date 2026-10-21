@@ -149,6 +149,36 @@ check(!(await ev(`!!document.querySelector('.modal')`)), 'disconnecting with not
 steps.push({ step: 'disconnected with nothing unsaved' })
 await connect()
 
+// --- 1b. a query tab keeps its session, and asks before ending a transaction --
+const typeAndRun = async (sql) => {
+  await ev(`document.querySelector('.cm-content').focus()`)
+  await key('a', 'KeyA', 65, 2) // Ctrl+A: replace what is there
+  await send('Input.insertText', { text: sql })
+  await ev(`document.querySelector('.query__toolbar .btn--primary').click()`)
+  await waitFor(`!document.querySelector('.tab .tab__spinner')`, 'the run to end')
+}
+await typeAndRun('CREATE TABLE #e2e_session (id int);')
+await typeAndRun('SELECT COUNT(*) AS n FROM #e2e_session;')
+await waitFor(`document.querySelector('.results__body .grid__row .grid__cell')?.textContent.trim() === '0'`, 'the temp table, still there on the next run')
+await typeAndRun('BEGIN TRAN; SELECT 1 AS one;')
+await waitFor(`document.querySelector('.query__transaction')?.textContent.includes('Transaction open')`, 'the transaction badge')
+check(await ev(`!!document.querySelector('.tab__txn')`), 'the tab does not carry the transaction mark')
+check((await ev(`document.querySelector('.status__txn')?.textContent ?? ''`)).includes('1 open transaction'), 'the status bar does not count it')
+await shot('00-transaction-open')
+await ev(`document.querySelector('.tab .tab__close').click()`)
+await promptFor('This tab has a transaction open')
+steps.push({ step: 'close tab: transaction', ...(await modal()) })
+check(['Cancel', 'Roll back and close', 'Commit and close'].every((b) => steps.at(-1).buttons.includes(b)), 'the prompt does not offer what it should')
+await press('Cancel')
+await promptGone()
+check(await ev(`!!document.querySelector('.query__transaction')`), 'Cancel ended the transaction')
+await ev(`document.querySelector('.tab .tab__close').click()`)
+await promptFor('This tab has a transaction open')
+await press('Roll back and close')
+await promptGone()
+check(!(await ev(`!!document.querySelector('.status__txn')`)), 'the transaction is still counted after it was rolled back')
+steps.push({ step: 'transaction rolled back, tab closed' })
+
 // --- 2. work in two places: a routine changed, a table with a staged row ----
 check(
   (await runSql(`CREATE OR ALTER PROCEDURE dbo.usp_e2e_unsaved

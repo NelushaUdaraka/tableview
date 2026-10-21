@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { transactionOpen } from '@shared/sessions'
 import AppIcon from './AppIcon.vue'
 import { useConnectionStore } from '../stores/connections'
 import { useReadOnlyStore } from '../stores/readOnly'
@@ -17,6 +18,11 @@ const connections = useConnectionStore()
 const readOnly = useReadOnlyStore()
 const schema = useSchemaStore()
 const tabs = useTabStore()
+
+/** How many of this window's tabs have a transaction open in their sessions. */
+const openTransactions = computed(
+  () => tabs.tabs.filter((tab) => tab.kind === 'query' && transactionOpen(tab.session)).length
+)
 
 const status = computed(() => connections.activeStatus)
 const stateLabel = computed(() => {
@@ -132,6 +138,17 @@ const version = computed(() => {
 
     <div class="status__spacer"></div>
 
+    <!-- Open transactions hold their locks for as long as they stay open, so
+         the window keeps count of them wherever the tab holding one is. -->
+    <div
+      v-if="openTransactions > 0"
+      class="status__seg status__txn"
+      title="Tabs with a transaction open: commit or roll back from each tab's toolbar"
+    >
+      <AppIcon name="clock" :size="12" />
+      {{ openTransactions }} open {{ openTransactions === 1 ? 'transaction' : 'transactions' }}
+    </div>
+
     <div v-if="statementLine !== null" class="status__seg">
       Statement at line {{ statementLine }}
     </div>
@@ -181,6 +198,9 @@ const version = computed(() => {
   flex: 0 0 auto;
   white-space: nowrap;
   overflow: hidden;
+}
+.status__seg.status__txn {
+  color: var(--warning);
 }
 .status__seg {
   display: flex;

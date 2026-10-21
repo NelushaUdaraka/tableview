@@ -98,6 +98,42 @@ export function buildMssqlConfig(
   return base as unknown as MssqlConfig
 }
 
+/**
+ * Never closed for idling: the largest delay a Node timer takes, about 24.8
+ * days. A tab's session lasts as long as the tab, however long it sits.
+ */
+export const SESSION_IDLE_MS = 2_147_483_647
+
+/**
+ * The config for a query tab's session: one connection, held for the life of
+ * the tab, in `database`.
+ *
+ * It is still an mssql pool — that is what the request code speaks — but one
+ * that holds a single connection and never swaps it. mssql checks a pooled
+ * connection before handing it out and, finding it dead, quietly makes a new
+ * one; for a session that would run the next script with no temp tables, no
+ * settings and none of the transaction the script was written to continue.
+ * So validation is off, and `beforeConnect` sees every connection the pool
+ * makes, which is how the session refuses a replacement.
+ */
+export function buildSessionConfig(
+  connection: ConnectionConfig,
+  tunnel: TunnelEndpoint | null | undefined,
+  database: string,
+  beforeConnect: (connection: unknown) => void
+): MssqlConfig {
+  const base = buildMssqlConfig({ ...connection, database }, tunnel) as unknown as Record<
+    string,
+    unknown
+  >
+  return {
+    ...base,
+    pool: { min: 0, max: 1, idleTimeoutMillis: SESSION_IDLE_MS },
+    validateConnection: false,
+    beforeConnect
+  } as unknown as MssqlConfig
+}
+
 /** A stable label for logs and the window title. */
 export function describeConnection(connection: ConnectionConfig): string {
   const instance = connection.options.instanceName ? `\\${connection.options.instanceName}` : ''

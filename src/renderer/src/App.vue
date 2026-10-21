@@ -133,6 +133,7 @@ let unsubscribeMenu: (() => void) | null = null
 let unsubscribeAttach: (() => void) | null = null
 let unsubscribeClose: (() => void) | null = null
 let unsubscribeUpdateCheck: (() => void) | null = null
+let unsubscribeSession: (() => void) | null = null
 
 onMounted(async () => {
   // Actions from the native menu join the ones the title bar raises, so views
@@ -141,6 +142,8 @@ onMounted(async () => {
   // Tabs can arrive at any moment: another window is only ever a drag away.
   unsubscribeAttach = api.onAttachTab((incoming) => void adoptTab(incoming))
   unsubscribeClose = api.onCloseRequested((reason) => void answerCloseRequest(reason))
+  // A tab's session can move with the sidebar, or be lost, between its runs.
+  unsubscribeSession = api.onSessionChanged((event) => tabs.applySessionEvent(event))
   // Answered here rather than in a view: the connection screen and the
   // workspace both have the Help menu, and either may be showing.
   unsubscribeUpdateCheck = onMenuAction((action) => {
@@ -166,6 +169,7 @@ onBeforeUnmount(() => {
   unsubscribeAttach?.()
   unsubscribeClose?.()
   unsubscribeUpdateCheck?.()
+  unsubscribeSession?.()
 })
 </script>
 

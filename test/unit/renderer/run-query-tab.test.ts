@@ -64,6 +64,55 @@ beforeEach(() => {
 })
 
 describe('runQueryTab', () => {
+  it("runs on the tab's own session, pinned to a routine's database", async () => {
+    const tabs = useTabStore()
+    await tabs.openRoutine('c1', {
+      schema: 'dbo',
+      name: 'usp_orders',
+      baseline: STORED,
+      database: 'sales'
+    })
+    runQuery.mockResolvedValue(answer())
+    await runQueryTab(tabs.activeId!)
+    expect(runQuery.mock.calls[0][0]).toMatchObject({
+      sessionId: tabs.activeId,
+      pinnedDatabase: 'sales'
+    })
+  })
+
+  it('keeps what the session said, and what a lost one had', async () => {
+    const { tabs, id } = await routineTab()
+    const session = {
+      transactionCount: 1,
+      transactionState: 1 as const,
+      database: 'sales',
+      transactionSince: 'x'
+    }
+    runQuery.mockResolvedValue({ ...answer(), session })
+    await runQueryTab(id)
+    expect(tab(tabs, id).session).toEqual(session)
+
+    const had = { transactionCount: 1, transactionState: 1 as const, database: 'sales' }
+    runQuery.mockResolvedValue({ ...answer({ error: 'closed' }), sessionLost: { had, refused: true } })
+    await runQueryTab(id)
+    expect(tab(tabs, id).session).toBeUndefined()
+    expect(tab(tabs, id).sessionLost).toEqual(had)
+  })
+
+  it('clears an old loss when the next run starts', async () => {
+    const { tabs, id } = await routineTab()
+    tabs.update<QueryTab>(id, {
+      sessionLost: { transactionCount: 0, transactionState: 0, database: 'sales' }
+    })
+    let during: unknown = 'unset'
+    runQuery.mockImplementation(async () => {
+      during = tab(tabs, id).sessionLost
+      return answer()
+    })
+    await runQueryTab(id)
+    expect(during).toBeUndefined()
+  })
+
   it('saves a routine run in full without an error, and measures from what ran', async () => {
     const { tabs, id } = await routineTab()
     runQuery.mockResolvedValue(answer())

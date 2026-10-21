@@ -4,11 +4,14 @@ import type {
   QueryExecutionResult,
   RoutineSource,
   SchemaObjectType,
+  SessionEvent,
+  SessionState,
   TableFilter
 } from '@shared/types'
 import type { SavedTab, SavedTabs } from '@shared/uiState'
 import type { TableCache } from '../lib/tableCache'
 import { splitLines } from '../lib/lineDiff'
+import { endSession } from '../lib/tabSessions'
 import { useSettingsStore } from './settings'
 
 export interface QueryTab {
@@ -48,6 +51,16 @@ export interface QueryTab {
    * differs from the server, and reverting every change answers "no" again.
    */
   changeCount?: number
+  /**
+   * The tab's own session as the main process last reported it: absent before
+   * the tab first runs anything, and once the session is closed or lost.
+   */
+  session?: SessionState
+  /**
+   * What a lost session had, said once above the results; the next run
+   * clears it.
+   */
+  sessionLost?: SessionState
 }
 
 export interface TableTab {
@@ -504,6 +517,10 @@ export const useTabStore = defineStore('tabs', () => {
 
   function removeTab(id: string): void {
     const pane = paneFor(id)
+    const leaving = byId(id)
+    // A query tab takes its session with it; whatever was open in it has
+    // been asked about by now.
+    if (leaving?.kind === 'query' && leaving.session) void endSession(leaving)
     guards.delete(id)
     tabs.value = tabs.value.filter((tab) => tab.id !== id)
     if (!pane) return
@@ -677,7 +694,10 @@ export const useTabStore = defineStore('tabs', () => {
         running: false,
         executionId: null,
         savedQueryId: tab.savedQueryId,
-        dirty: tab.dirty
+        dirty: tab.dirty,
+        // A session belongs to one tab: the copy opens its own when it runs.
+        session: undefined,
+        sessionLost: undefined
       }
     }
     return {
@@ -756,6 +776,20 @@ export const useTabStore = defineStore('tabs', () => {
    * itself indefinitely, which production builds have no recursion guard to
    * stop. Comparing first makes a no-op cost nothing.
    */
+  /**
+   * A tab's session moved with the sidebar's database, or was lost, with no
+   * run of the tab's to say so. Meant for one tab on one connection.
+   */
+  function applySessionEvent(event: SessionEvent): void {
+    const tab = byId(event.sessionId)
+    if (tab?.kind !== 'query' || tab.connectionId !== event.connectionId) return
+    if (event.state) {
+      update<QueryTab>(tab.id, { session: event.state })
+    } else {
+      update<QueryTab>(tab.id, { session: undefined, sessionLost: event.lost ?? tab.sessionLost })
+    }
+  }
+
   function update<T extends Tab>(id: string, patch: Partial<T>): void {
     const current = tabs.value.find((tab) => tab.id === id) as T | undefined
     if (!current) return
@@ -908,6 +942,7 @@ export const useTabStore = defineStore('tabs', () => {
     splitTab,
     closeSplit,
     update,
+    applySessionEvent,
     setLeaveGuard,
     closePrompt,
     answerClose,

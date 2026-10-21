@@ -7,7 +7,9 @@
  * borrowed from the same pool. Each tab now holds a session of its own; these
  * are the behaviours that make that true.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import net from 'node:net'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { ConnectionRegistry } from '../../src/main/db/registry'
 import { SqlServerClient } from '../../src/main/db/sqlserver/client'
 import { QuerySession } from '../../src/main/db/sqlserver/session'
 import type { SessionChange, SessionRun } from '../../src/main/db/types'
@@ -19,7 +21,14 @@ import {
   type SessionState,
   type TableDataRequest
 } from '../../src/shared/types'
-import { TEST_DATABASE, connectedClient, createTestDatabase, makeConfig } from './helpers'
+import {
+  TEST_DATABASE,
+  TEST_HOST,
+  TEST_PORT,
+  connectedClient,
+  createTestDatabase,
+  makeConfig
+} from './helpers'
 
 let admin: SqlServerClient
 const clients: SqlServerClient[] = []
@@ -64,6 +73,23 @@ async function until(check: () => boolean, ms = 5000): Promise<void> {
     if (Date.now() > end) throw new Error(`gave up waiting after ${ms}ms`)
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
+}
+
+/**
+ * How many sessions the server lists for an application name, once it has
+ * caught up: a connection closed a moment ago can still be listed while the
+ * server notices it went.
+ */
+async function serverSessions(program: string, expected = 0, ms = 3000): Promise<unknown> {
+  const count = (): Promise<unknown> =>
+    scalar(admin, `SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE program_name = '${program}'`)
+  const end = Date.now() + ms
+  let seen = await count()
+  while (seen !== expected && Date.now() < end) {
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    seen = await count()
+  }
+  return seen
 }
 
 /** A connected client whose tabs the tests run on; disconnected after the suite. */
@@ -247,6 +273,61 @@ describe("a tab's session", () => {
   })
 })
 
+describe('options under which nothing is run', () => {
+  // SQL Server compiles what it is sent under these, and runs none of it — the
+  // app's own read of where the session stands included. The session is still
+  // there, and so is whatever it has open.
+  const OPTIONS = ['SHOWPLAN_XML', 'SHOWPLAN_TEXT', 'SHOWPLAN_ALL', 'NOEXEC', 'PARSEONLY']
+
+  it.each(OPTIONS)('keeps the session under SET %s, and runs nothing it is sent', async (option) => {
+    const client = await tabClient()
+    const changes: SessionChange[] = []
+    client.onSessionChange((change) => changes.push(change))
+    try {
+      const on = await client.runInSession('a', `SET ${option} ON`)
+      expect(on.statements[0].error).toBeUndefined()
+      expect(on.session).toMatchObject({ transactionCount: 0, database: TEST_DATABASE })
+      const update = await client.runInSession(
+        'a',
+        "UPDATE dbo.session_items SET name = N'executed' WHERE id = 1"
+      )
+      expect(update.lost).toBeUndefined()
+      expect(update.session).toMatchObject({ transactionCount: 0, database: TEST_DATABASE })
+      expect(await scalar(admin, 'SELECT name FROM dbo.session_items WHERE id = 1')).toBe('original')
+      expect((await client.runInSession('a', `SET ${option} OFF`)).statements[0].error).toBeUndefined()
+      expect(first(await client.runInSession('a', 'SELECT 1'))).toBe(1)
+      expect(changes.filter((change) => change.lost)).toEqual([])
+    } finally {
+      await client.closeSession('a')
+    }
+  })
+
+  it.each(OPTIONS)('keeps an open transaction open under SET %s', async (option) => {
+    const client = await tabClient()
+    const changes: SessionChange[] = []
+    client.onSessionChange((change) => changes.push(change))
+    try {
+      await client.runInSession(
+        'a',
+        "BEGIN TRAN; UPDATE dbo.session_items SET name = N'changed' WHERE id = 1;"
+      )
+      const on = await client.runInSession('a', `SET ${option} ON`)
+      expect(on.session).toMatchObject({ transactionCount: 1, transactionState: 1 })
+      const under = await client.runInSession('a', 'SELECT 1')
+      expect(under.lost).toBeUndefined()
+      expect(under.session).toMatchObject({ transactionCount: 1, transactionState: 1 })
+      await client.runInSession('a', `SET ${option} OFF`)
+      const after = await client.runInSession('a', 'SELECT name FROM dbo.session_items WHERE id = 1')
+      expect(first(after)).toBe('changed')
+      expect(after.session?.transactionCount).toBe(1)
+      expect(changes.filter((change) => change.lost)).toEqual([])
+    } finally {
+      await client.closeSession('a')
+    }
+    expect(await scalar(admin, 'SELECT name FROM dbo.session_items WHERE id = 1')).toBe('original')
+  })
+})
+
 describe('switching database', () => {
   it('moves a following session with the sidebar, and tells the window', async () => {
     const client = await tabClient()
@@ -254,11 +335,10 @@ describe('switching database', () => {
     client.onSessionChange((change) => changes.push(change))
     await client.runInSession('a', 'SELECT 1')
     await client.useDatabase('tv_sessions_other')
-    expect(changes).toContainEqual(
-      expect.objectContaining({
-        sessionId: 'a',
-        state: expect.objectContaining({ database: 'tv_sessions_other' })
-      })
+    await until(() =>
+      changes.some(
+        (change) => change.sessionId === 'a' && change.state?.database === 'tv_sessions_other'
+      )
     )
     expect(first(await client.runInSession('a', 'SELECT DB_NAME()'))).toBe('tv_sessions_other')
   })
@@ -284,11 +364,79 @@ describe('switching database', () => {
 
   it('follows once a running query ends', async () => {
     const client = await tabClient()
+    const changes: SessionChange[] = []
+    client.onSessionChange((change) => changes.push(change))
     await client.runInSession('d', 'SELECT 1')
     const running = client.runInSession('d', "WAITFOR DELAY '00:00:02'")
     await new Promise((resolve) => setTimeout(resolve, 300))
     await client.useDatabase('tv_sessions_other')
-    expect((await running).session?.database).toBe('tv_sessions_other')
+    // It ran where it was; the move comes after, and says so.
+    expect((await running).session?.database).toBe(TEST_DATABASE)
+    await until(() => changes.some((change) => change.state?.database === 'tv_sessions_other'))
+    expect(first(await client.runInSession('d', 'SELECT DB_NAME()'))).toBe('tv_sessions_other')
+  })
+
+  it('answers the switch before its sessions have moved, and moves them side by side', async () => {
+    const client = await tabClient()
+    const changes: SessionChange[] = []
+    client.onSessionChange((change) => changes.push(change))
+    for (const id of ['a', 'b', 'c']) await client.runInSession(id, 'SELECT 1')
+    const use = QuerySession.prototype.use
+    const slow = vi
+      .spyOn(QuerySession.prototype, 'use')
+      .mockImplementation(async function (this: QuerySession, database: string) {
+        // Each move as slow as a round trip down a slow tunnel.
+        await new Promise((resolve) => setTimeout(resolve, 500))
+        return use.call(this, database)
+      })
+    try {
+      const started = Date.now()
+      await client.useDatabase('tv_sessions_other')
+      expect(Date.now() - started).toBeLessThan(500)
+      const moved = (): number =>
+        changes.filter((change) => change.state?.database === 'tv_sessions_other').length
+      await until(() => moved() === 3, 1200)
+    } finally {
+      slow.mockRestore()
+    }
+  })
+
+  it('runs a query started during a move after it, in the database moved to', async () => {
+    const client = await tabClient()
+    const changes: SessionChange[] = []
+    client.onSessionChange((change) => changes.push(change))
+    await client.runInSession('a', 'SELECT 1')
+    let moving!: () => void
+    const moveStarted = new Promise<void>((resolve) => (moving = resolve))
+    const use = QuerySession.prototype.use
+    const slow = vi
+      .spyOn(QuerySession.prototype, 'use')
+      .mockImplementation(async function (this: QuerySession, database: string) {
+        moving()
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        return use.call(this, database)
+      })
+    try {
+      const started = Date.now()
+      let answeredAfter = Infinity
+      const switching = client.useDatabase('tv_sessions_other').then(() => {
+        answeredAfter = Date.now() - started
+      })
+      await moveStarted
+      const run = await client.runInSession(
+        'a',
+        "BEGIN TRAN; SELECT DB_NAME(); WAITFOR DELAY '00:00:01';"
+      )
+      await switching
+      expect(answeredAfter).toBeLessThan(500)
+      expect(first(run)).toBe('tv_sessions_other')
+      expect(run.lost).toBeUndefined()
+      expect(run.session).toMatchObject({ database: 'tv_sessions_other', transactionCount: 1 })
+      expect(changes.filter((change) => change.lost)).toEqual([])
+    } finally {
+      slow.mockRestore()
+      await client.closeSession('a')
+    }
   })
 
   it('quotes a database name that needs it', async () => {
@@ -336,12 +484,7 @@ describe('drops, disconnects and keepalive', () => {
     await client.runInSession('a', 'SELECT 1')
     await client.runInSession('b', 'SELECT 1')
     await client.disconnect()
-    expect(
-      await scalar(
-        admin,
-        "SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE program_name = 'tv-sessions-disconnect'"
-      )
-    ).toBe(0)
+    expect(await serverSessions('tv-sessions-disconnect')).toBe(0)
   })
 
   it('heartbeats an idle session, and leaves a busy one alone', async () => {
@@ -356,5 +499,193 @@ describe('drops, disconnects and keepalive', () => {
     await new Promise((resolve) => setTimeout(resolve, 900))
     expect(session.lastHeartbeatAt).toBe(during)
     await running
+  })
+})
+
+describe('a session still opening', () => {
+  // A session can take a second or more to open through a tunnel, and the tab
+  // can be cancelled, closed or disconnected meanwhile.
+  const UPDATE =
+    "BEGIN TRAN; UPDATE dbo.session_items SET name = N'opening' WHERE id = 1; WAITFOR DELAY '00:00:01';"
+
+  /** Makes every session take `ms` longer to open; returns the undo. */
+  function slowOpens(ms: number): () => void {
+    const open = QuerySession.open
+    const spy = vi.spyOn(QuerySession, 'open').mockImplementation(async (...args) => {
+      await new Promise((resolve) => setTimeout(resolve, ms))
+      return open.apply(QuerySession, args)
+    })
+    return () => spy.mockRestore()
+  }
+
+  /** Row 1 as committed — failing rather than waiting if a transaction holds it. */
+  function committedName(): Promise<unknown> {
+    return scalar(admin, 'SET LOCK_TIMEOUT 1000; SELECT name FROM dbo.session_items WHERE id = 1;')
+  }
+
+  it('can be cancelled, and then runs nothing', async () => {
+    const client = await tabClient()
+    const restore = slowOpens(500)
+    const running = client.runInSession('a', UPDATE, { executionId: 'early' })
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(client.cancel('early')).toBe(true)
+      const run = await running
+      expect(run.statements).toHaveLength(1)
+      expect(run.statements[0].error?.message).toMatch(/cancel/i)
+      expect(run.session).toMatchObject({ transactionCount: 0 })
+      expect(await committedName()).toBe('original')
+    } finally {
+      restore()
+      await running.catch(() => undefined)
+      await client.closeSession('a')
+    }
+  })
+
+  it('is closed once it opens when its tab closed meanwhile, and runs nothing', async () => {
+    const client = await tabClient()
+    const restore = slowOpens(500)
+    const running = client.runInSession('a', UPDATE)
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      await client.closeSession('a')
+      const run = await running
+      expect(run.statements[0].error).toBeDefined()
+      expect(run.session).toBeNull()
+      expect((client as unknown as { sessions: Map<string, QuerySession> }).sessions.has('a')).toBe(
+        false
+      )
+      expect(await committedName()).toBe('original')
+    } finally {
+      restore()
+      await running.catch(() => undefined)
+      await client.closeSession('a')
+    }
+  })
+
+  it('is closed once it opens when the connection closed meanwhile, and runs nothing', async () => {
+    const program = 'tv-sessions-opening-disconnect'
+    const client = await tabClient({ options: { ...makeConfig().options, applicationName: program } })
+    const restore = slowOpens(500)
+    const running = client.runInSession('a', UPDATE).catch(() => undefined)
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      await client.disconnect()
+      await running
+      expect(await serverSessions(program)).toBe(0)
+      expect(await committedName()).toBe('original')
+    } finally {
+      restore()
+      await running
+      await client.disconnect()
+    }
+  })
+})
+
+describe('reconnecting by hand', () => {
+  // The Reconnect button opens the connection again with a new client, after
+  // the old one gave up on a drop or while it still holds the tabs' sessions.
+
+  /** Row 1 as committed — failing rather than waiting if a transaction holds it. */
+  function committedName(): Promise<unknown> {
+    return scalar(admin, 'SET LOCK_TIMEOUT 1000; SELECT name FROM dbo.session_items WHERE id = 1;')
+  }
+
+  const UPDATE = "UPDATE dbo.session_items SET name = N'autocommitted' WHERE id = 1"
+
+  it('refuses the next run of a tab whose session was lost holding a transaction', async () => {
+    const registry = new ConnectionRegistry()
+    const config = makeConfig()
+    const changes: SessionChange[] = []
+    registry.onSessionChange((_scope, _id, change) => changes.push(change))
+    try {
+      expect((await registry.open('w', config)).state).toBe('connected')
+      const spid = first(
+        await registry.get('w', config.id).runInSession('t', 'BEGIN TRAN; SELECT @@SPID;')
+      )
+      await admin.runScript(`KILL ${spid}`)
+      await until(() => changes.some((change) => change.lost))
+      expect((await registry.open('w', config)).state).toBe('connected')
+      const refused = await registry.get('w', config.id).runInSession('t', UPDATE)
+      expect(refused.statements[0].error?.code).toBe(SESSION_LOST)
+      expect(refused.lost).toMatchObject({ refused: true, had: { transactionCount: 1 } })
+      expect(await committedName()).toBe('original')
+      const next = await registry.get('w', config.id).runInSession('t', 'SELECT 1')
+      expect(next.statements[0].error).toBeUndefined()
+      expect(next.lost).toBeUndefined()
+    } finally {
+      await registry.closeAll()
+    }
+  })
+
+  it('ends the sessions it replaces, saying so, and refuses the next run of a tab that had a transaction', async () => {
+    const registry = new ConnectionRegistry()
+    const config = makeConfig()
+    const changes: SessionChange[] = []
+    registry.onSessionChange((_scope, _id, change) => changes.push(change))
+    try {
+      await registry.open('w', config)
+      await registry
+        .get('w', config.id)
+        .runInSession('t', "BEGIN TRAN; UPDATE dbo.session_items SET name = N'lost' WHERE id = 1;")
+      await registry.open('w', config)
+      expect(changes).toContainEqual(
+        expect.objectContaining({
+          sessionId: 't',
+          state: null,
+          lost: expect.objectContaining({ transactionCount: 1 })
+        })
+      )
+      const refused = await registry.get('w', config.id).runInSession('t', UPDATE)
+      expect(refused.statements[0].error?.code).toBe(SESSION_LOST)
+      expect(await committedName()).toBe('original')
+    } finally {
+      await registry.closeAll()
+    }
+  })
+})
+
+describe('a network gone quiet', () => {
+  // A laptop that slept, a VPN that dropped: the sockets stay open and nothing
+  // comes back. Closing must not wait out the request timeout.
+  it('closes a session, and disconnects, within seconds', async () => {
+    let quiet = false
+    const sockets = new Set<net.Socket>()
+    const proxy = net.createServer((inbound) => {
+      const outbound = net.connect(TEST_PORT, TEST_HOST)
+      for (const socket of [inbound, outbound]) {
+        sockets.add(socket)
+        socket.on('error', () => undefined)
+      }
+      inbound.on('data', (data) => {
+        if (!quiet) outbound.write(data)
+      })
+      outbound.on('data', (data) => {
+        if (!quiet) inbound.write(data)
+      })
+      inbound.on('close', () => outbound.destroy())
+      outbound.on('close', () => inbound.destroy())
+    })
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve))
+    const { port } = proxy.address() as net.AddressInfo
+    try {
+      const client = await tabClient({
+        host: '127.0.0.1',
+        port,
+        options: { ...makeConfig().options, requestTimeoutMs: 8000, keepAliveIntervalMs: 0 }
+      })
+      await client.runInSession('a', 'BEGIN TRAN; SELECT 1;')
+      await client.runInSession('b', 'SELECT 1')
+      quiet = true
+      let started = Date.now()
+      await client.closeSession('a')
+      expect(Date.now() - started).toBeLessThan(5000)
+      started = Date.now()
+      await client.disconnect()
+      expect(Date.now() - started).toBeLessThan(5000)
+    } finally {
+      for (const socket of sockets) socket.destroy()
+      proxy.close()
+    }
   })
 })

@@ -21,12 +21,16 @@ first run opens it, and it stays the tab's until the tab closes. What a script s
 there for the next run, however long that is in coming — a `#temp` table, a `SET` option
 (`SET STATISTICS IO ON` keeps reporting), a `USE`, a transaction — and none of it reaches anything
 else: not the other tabs, and not the table tabs, the schema tree or completion, which read
-through the window's own shared connections.
+through the window's own shared connections. Under `SET SHOWPLAN_XML`, `NOEXEC` or `PARSEONLY` the
+server compiles what the tab sends without running any of it until the option is turned off, and
+the tab keeps its session, transaction and all, as SSMS does.
 
 **Where a tab runs.** A new tab's session opens in the database the sidebar shows. Switching
 database from the sidebar takes the tabs along, each with a `USE` the app sends for it — except a
 tab that has gone somewhere of its own with a `USE`, and a tab with a transaction open, which stay
-where they are. A tab whose query is running when the switch happens follows once the run ends.
+where they are. The sidebar does not wait for the tabs: each moves in its turn, so a tab whose
+query is running when the switch happens follows once the run ends, and a run started while its
+tab is moving waits for the move.
 A routine's tab never follows: it belongs to the database its routine lives in, so saving it after
 a switch writes the routine back where it came from rather than into the database the sidebar
 moved to. Whenever a tab's database is not the sidebar's, its toolbar says which it is.
@@ -57,7 +61,9 @@ tables and settings, and an open transaction, which the server rolls back. A ses
 quietly replaced. If the lost one had a transaction open, or was in a database of its own, the
 next run sends nothing and says why — a script written to carry on inside the transaction would
 otherwise be committed statement by statement — and the run after that starts a new session. With
-nothing of the kind to lose, the next run starts the new session and goes ahead.
+nothing of the kind to lose, the next run starts the new session and goes ahead. Pressing
+*Reconnect* after a drop the app gave up on is no different: the tabs' sessions do not come back
+with the connection, and each tab's next run is held to the same rule.
 
 ## Editing a stored procedure
 

@@ -5,7 +5,12 @@
  * opening the same saved connection each get their own pool and tunnel instead
  * of silently evicting one another.
  */
-import { ConnectionConfig, ConnectionStatus, SerializedError } from '../../shared/types'
+import {
+  ConnectionConfig,
+  ConnectionStatus,
+  SerializedError,
+  type SessionState
+} from '../../shared/types'
 import type { ClientStateEvent, DbClient, SessionChange } from './types'
 import { SqlServerClient, serializeError } from './sqlserver/client'
 
@@ -48,6 +53,13 @@ export class ConnectionRegistry {
    */
   private readonly switches = new Map<string, { readOnly: boolean; order: number }>()
   private switchCount = 0
+  /**
+   * What the tabs' sessions had when their client was replaced by a reconnect,
+   * by slot, until a client in that slot is open to take it — so a tab whose
+   * transaction went is still refused its next run, rather than having it
+   * committed on a new session.
+   */
+  private readonly lostSessions = new Map<string, Map<string, SessionState>>()
 
   /** Registered once by the IPC layer; returns a function that unregisters. */
   onStatusChange(listener: StatusListener): () => void {
@@ -74,7 +86,14 @@ export class ConnectionRegistry {
   async open(scope: string, config: ConnectionConfig): Promise<ConnectionStatus> {
     const key = entryKey(scope, config.id)
     const started = this.switchCount
-    await this.close(scope, config.id)
+    // Opening again ends the tabs' sessions on the client in the slot: what
+    // they had goes on to the client that replaces it.
+    const previous = this.clients.get(key)
+    if (previous) {
+      const lost = new Map([...(this.lostSessions.get(key) ?? []), ...previous.retireSessions()])
+      if (lost.size > 0) this.lostSessions.set(key, lost)
+    }
+    await this.closeClient(key)
 
     this.connecting.add(key)
     this.errors.delete(key)
@@ -90,6 +109,9 @@ export class ConnectionRegistry {
       if (switched && switched.order > started) client.setReadOnly(switched.readOnly)
       this.clients.set(key, client)
       this.recovering.delete(key)
+      const lost = this.lostSessions.get(key)
+      this.lostSessions.delete(key)
+      if (lost) client.adoptLostSessions(lost)
       // From here the client can report a drop nobody asked about.
       client.onStateChange((event) => this.onClientState(scope, config.id, event))
       // …and a tab's session that moved or was lost.
@@ -238,6 +260,13 @@ export class ConnectionRegistry {
 
   async close(scope: string, connectionId: string): Promise<void> {
     const key = entryKey(scope, connectionId)
+    // Closed on purpose: its tabs closed first, and what they lost with them.
+    this.lostSessions.delete(key)
+    await this.closeClient(key)
+  }
+
+  /** Takes the slot's client out and disconnects it. */
+  private async closeClient(key: string): Promise<void> {
     const client = this.clients.get(key)
     if (!client) return
     this.clients.delete(key)
@@ -265,9 +294,13 @@ export class ConnectionRegistry {
     for (const key of [...this.recovering]) {
       if (key.startsWith(prefix)) this.recovering.delete(key)
     }
+    for (const key of [...this.lostSessions.keys()]) {
+      if (key.startsWith(prefix)) this.lostSessions.delete(key)
+    }
   }
 
   async closeAll(): Promise<void> {
+    this.lostSessions.clear()
     await Promise.all([...this.clients.keys()].map((key) => this.closeKey(key)))
   }
 

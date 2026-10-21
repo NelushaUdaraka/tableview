@@ -40,7 +40,6 @@ describe('followDecision', () => {
     database: 'sales',
     transactionCount: 0,
     pinned: false,
-    running: false,
     ...over
   })
 
@@ -58,14 +57,6 @@ describe('followDecision', () => {
 
   it('stays pinned to a routine', () => {
     expect(followDecision(place({ pinned: true }), 'sales')).toBe('stay')
-  })
-
-  it('follows later when its query is running', () => {
-    expect(followDecision(place({ running: true }), 'sales')).toBe('later')
-  })
-
-  it('stays, running or not, when a transaction was already open', () => {
-    expect(followDecision(place({ running: true, transactionCount: 1 }), 'sales')).toBe('stay')
   })
 })
 

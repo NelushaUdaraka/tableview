@@ -119,6 +119,17 @@ export interface DbClient {
   closeSession(sessionId: string): Promise<void>
   /** Registered by the registry so a session that moves or is lost reaches its window. */
   onSessionChange(listener: SessionChangeListener | null): void
+  /**
+   * For a client about to be replaced by a reconnect: ends every tab's
+   * session as lost, telling the window, and gives back what each lost
+   * session had that its tab's next run has not yet been told of, by tab id.
+   */
+  retireSessions(): Map<string, SessionState>
+  /**
+   * What the client this one replaced gave back from `retireSessions`: each
+   * tab's next run is held to it as if the session had been lost here.
+   */
+  adoptLostSessions(lost: Map<string, SessionState>): void
   cancel(executionId: string): boolean
 
   listDatabases(): Promise<DatabaseSummary[]>

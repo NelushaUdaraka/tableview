@@ -1067,6 +1067,18 @@ describe("a query tab's session", () => {
     await tabs.close(id)
     expect(endSession).toHaveBeenCalledWith(expect.objectContaining({ id, connectionId: 'c1' }))
   })
+
+  it('ends the session of a tab that closes while its first run is still opening one', async () => {
+    const tabs = useTabStore()
+    await tabs.openQuery('c1', 'SELECT 1')
+    const id = tabs.activeId!
+    tabs.update<QueryTab>(id, { running: true, executionId: 'exec-1' })
+    // The session takes longer to open than a close waits for the run to stop.
+    vi.mocked(stopRun).mockResolvedValueOnce(false)
+    vi.mocked(endSession).mockClear()
+    await tabs.close(id)
+    expect(endSession).toHaveBeenCalledWith(expect.objectContaining({ id, connectionId: 'c1' }))
+  })
 })
 
 /**

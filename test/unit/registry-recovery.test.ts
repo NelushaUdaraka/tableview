@@ -19,7 +19,8 @@ import {
   DEFAULT_SSH_CONFIG,
   DEFAULT_SSM_CONFIG,
   type ConnectionConfig,
-  type ConnectionStatus
+  type ConnectionStatus,
+  type SessionState
 } from '../../src/shared/types'
 
 /** Every fake client built during a test, newest last. */
@@ -27,6 +28,9 @@ const built: FakeClient[] = []
 
 /** While set, a fake client's connect waits on it — a tunnel still coming up. */
 let connectGate: Promise<void> | null = null
+
+/** While set, the next fake client's connect fails with it. */
+let connectFailure: Error | null = null
 
 class FakeClient {
   listener: ClientStateListener | null = null
@@ -58,6 +62,9 @@ class FakeClient {
 
   async connect(): Promise<FakeClient['info']> {
     if (connectGate) await connectGate
+    const failure = connectFailure
+    connectFailure = null
+    if (failure) throw failure
     this.connected = true
     return this.info
   }
@@ -82,6 +89,19 @@ class FakeClient {
   /** Stands in for a tab's session moving with the sidebar, or being lost. */
   reportSession(change: SessionChange): void {
     this.sessionListener?.(change)
+  }
+
+  /** What the client hands on when it is replaced; set by a test. */
+  retiring = new Map<string, SessionState>()
+  /** What it was handed by the client it replaced. */
+  adopted: Map<string, SessionState> | null = null
+
+  retireSessions(): Map<string, SessionState> {
+    return this.retiring
+  }
+
+  adoptLostSessions(lost: Map<string, SessionState>): void {
+    this.adopted = lost
   }
 }
 
@@ -127,6 +147,7 @@ async function openOne(): Promise<{
 beforeEach(() => {
   built.length = 0
   connectGate = null
+  connectFailure = null
 })
 
 describe('a connection that drops on its own', () => {
@@ -374,5 +395,39 @@ describe('a session that changes on its own', () => {
     await registry.close('win1', 'c1')
     client.reportSession({ sessionId: 'tab-3', state: null })
     expect(seen).toEqual([])
+  })
+})
+
+/**
+ * Reconnecting by hand — after the client gave up on a drop, say — replaces
+ * the client. The tabs' sessions do not come back with it, and what they had
+ * goes on to the new client, so a tab's next run is held to the same rule as
+ * if its session had been lost on the new one.
+ */
+describe('reconnecting by hand', () => {
+  const had: SessionState = { transactionCount: 1, transactionState: 1, database: 'sales' }
+
+  it('hands what the replaced client lost to the client that replaces it', async () => {
+    const { registry, client } = await openOne()
+    client.retiring = new Map([['tab-3', had]])
+    await registry.open('win1', config())
+    expect(built.at(-1)!.adopted).toEqual(new Map([['tab-3', had]]))
+  })
+
+  it('keeps it through a reopen that fails, for the one after', async () => {
+    const { registry, client } = await openOne()
+    client.retiring = new Map([['tab-3', had]])
+    connectFailure = new Error('Login failed')
+    expect((await registry.open('win1', config())).state).toBe('error')
+    await registry.open('win1', config())
+    expect(built.at(-1)!.adopted).toEqual(new Map([['tab-3', had]]))
+  })
+
+  it('lets it go when the connection is closed on purpose', async () => {
+    const { registry, client } = await openOne()
+    client.retiring = new Map([['tab-3', had]])
+    await registry.close('win1', 'c1')
+    await registry.open('win1', config())
+    expect(built.at(-1)!.adopted).toBeNull()
   })
 })

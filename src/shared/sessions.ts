@@ -36,25 +36,22 @@ export interface SessionPlace {
   transactionCount: number
   /** A routine's tab, which belongs to the routine's database. */
   pinned: boolean
-  /** A run is in flight on it, so nothing else can be sent until it ends. */
-  running: boolean
 }
 
-export type FollowDecision = 'follow' | 'stay' | 'later'
+export type FollowDecision = 'follow' | 'stay'
 
 /**
  * What a session does when the sidebar switches away from `fromDatabase`.
  *
  * A tab is moved along only while it is where the sidebar was: one that ran a
  * `USE` of its own chose its database, a routine's tab belongs to its
- * routine's, and one in a transaction is not moved under it. A running tab
- * cannot be sent anything until its run ends, so it is asked again then.
+ * routine's, and one in a transaction is not moved under it. A running tab is
+ * asked once its run has ended, as it is then.
  */
 export function followDecision(session: SessionPlace, fromDatabase: string): FollowDecision {
   if (session.pinned) return 'stay'
   if (session.transactionCount > 0) return 'stay'
   if (!sameDatabase(session.database, fromDatabase)) return 'stay'
-  if (session.running) return 'later'
   return 'follow'
 }
 

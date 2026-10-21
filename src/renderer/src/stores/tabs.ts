@@ -617,9 +617,9 @@ export const useTabStore = defineStore('tabs', () => {
   function removeTab(id: string): void {
     const pane = paneFor(id)
     const leaving = byId(id)
-    // A query tab takes its session with it; whatever was open in it has
-    // been asked about by now.
-    if (leaving?.kind === 'query' && leaving.session) void endSession(leaving)
+    // A query tab takes its session with it — one still opening for its
+    // first run too; whatever was open in it has been asked about by now.
+    if (leaving?.kind === 'query') void endSession(leaving)
     guards.delete(id)
     tabs.value = tabs.value.filter((tab) => tab.id !== id)
     if (!pane) return

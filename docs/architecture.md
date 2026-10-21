@@ -102,7 +102,17 @@ next script with none of what the last one set up — or commit, statement by st
 was meant to stay inside a transaction. So the session's pool has validation off, sees every
 connection it makes through `beforeConnect`, closes any after the first, and reports the session
 lost; whether the tab's next run may go ahead on a new session is decided knowing what the old one
-held.
+held. A session is lost only when its connection ends or fails at the socket — never because a
+statement was refused — and a client replaced by a reconnect hands what its sessions held to the
+next (`retireSessions`, `adoptLostSessions`).
+
+One thing at a time goes down a session: its runs, the moves the sidebar's database switch asks
+for, and its heartbeats take turns (`QuerySession.exclusive`), each a request and a state read that
+must not have another let in between. A move is decided when its turn comes, from where the session
+is then, and the switch answers without waiting for any of them. The state read after each run
+(`STATE_SQL`) comes back empty under options that compile without running, such as `SET
+SHOWPLAN_XML` or `NOEXEC`; the transaction and the database then come from the server's own
+notices, which tedious keeps.
 
 **Cell values are tagged across IPC.** Dates, binary and bigints do not survive structured clone
 with their identity intact, so they cross as `{ t: 'date' | 'bytes' | 'bigint' | 'json', v: … }` and

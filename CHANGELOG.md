@@ -4,6 +4,22 @@ What changed in each release of TableView, newest first. The downloads are on th
 [Releases page](https://github.com/NelushaUdaraka/tableview/releases); a version at the top that is
 not there yet is the next release, still being prepared.
 
+## 0.3.0
+
+- Each query tab now keeps its own session with the server, as an SSMS query window does. A temp
+  table, a `SET` option or a `USE` from one run is still there for the tab's next run, however long
+  you wait between them, and stays in that tab.
+- A transaction left open is shown: the tab carries a clock, its toolbar says *Transaction open*
+  and for how long, with *Commit* and *Rollback* beside it, and the status bar counts them. Closing
+  the tab, moving it to another window, disconnecting, closing the window or quitting asks first
+  whether to commit it or roll it back. Before, an open transaction was quietly rolled back about
+  thirty seconds later.
+- A `USE` in a query tab no longer sends the table tabs and the schema tree to another database.
+- A procedure's or function's tab stays in the database it was opened from, so saving it after
+  switching database in the sidebar no longer writes it into the other database.
+- If a tab's session is lost — the connection dropped, or the server ended it — the tab says what
+  went with it, and a run written to carry on inside an open transaction is not sent on a new one.
+
 ## 0.2.1
 
 - Typing `>=` or `<=` into a text box, such as the filter's raw `WHERE` or a field in the row panel,

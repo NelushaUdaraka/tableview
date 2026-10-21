@@ -13,8 +13,11 @@ DELETE changes data — this connection is read-only, so nothing was run.
 ```
 
 Reads go on as before: `SELECT`, CTEs, variables, `SET` options, cursors, transactions, `PRINT`,
-`WAITFOR`, `USE`. The connection list marks a read-only connection before it is opened, and once it
-is, the status bar and the query and table toolbars carry a lock.
+`WAITFOR`, `USE`. A `USE` changes the database of the query tab it ran in and nothing else — each
+tab has a session of its own (see [the query editor](query-editor.md#each-tab-has-a-session-of-its-own)),
+so the sidebar, the table tabs and the other tabs stay where they are. The connection list marks a
+read-only connection before it is opened, and once it is, the status bar and the query and table
+toolbars carry a lock.
 
 ## Switching it
 

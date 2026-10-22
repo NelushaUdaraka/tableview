@@ -50,6 +50,8 @@ the connections where a mistake would hurt. It is built with Electron, Vue 3 and
   history
 - Stored procedures and functions open as `CREATE OR ALTER`, with every change from the stored
   version marked, and each one revertible on its own
+- Each tab keeps its own session, as an SSMS window does: temp tables, `USE` and transactions carry
+  from one run to the next, and an open transaction is shown, and asked about before anything ends it
 
 ![Typing a query that joins orders to customers, picking table names from the completion list, and running it to get revenue by country](docs/images/query.gif)
 

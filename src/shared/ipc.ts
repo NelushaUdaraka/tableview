@@ -15,6 +15,7 @@ import {
   SavedQuery,
   SchemaObject,
   SerializedError,
+  SessionEvent,
   TableChangeSet,
   TableDataRequest,
   TableDataResponse,
@@ -189,6 +190,7 @@ export const CHANNELS = {
 
   queryRun: 'query:run',
   queryCancel: 'query:cancel',
+  queryCloseSession: 'query:closeSession',
 
   historyList: 'history:list',
   historyClear: 'history:clear',
@@ -223,7 +225,8 @@ export const CHANNELS = {
   eventWindowChrome: 'event:windowChrome',
   eventAttachTab: 'event:attachTab',
   eventCloseRequested: 'event:closeRequested',
-  eventUpdateState: 'event:updateState'
+  eventUpdateState: 'event:updateState',
+  eventSessionChanged: 'event:sessionChanged'
 } as const
 
 /**
@@ -336,6 +339,11 @@ export interface RendererApi {
 
   runQuery(request: RunQueryRequest): Promise<QueryExecutionResult>
   cancelQuery(connectionId: string, executionId: string): Promise<boolean>
+  /**
+   * Ends a query tab's session, rolling back anything still open in it. The
+   * window asks about an open transaction first; this does not.
+   */
+  closeSession(connectionId: string, sessionId: string): Promise<void>
 
   listHistory(search?: string): Promise<QueryHistoryEntry[]>
   clearHistory(): Promise<void>
@@ -394,6 +402,8 @@ export interface RendererApi {
   onCloseRequested(handler: (reason: WindowCloseReason) => void): () => void
   /** Updating has moved on: a check, a download, a failure. Sent to every window. */
   onUpdateState(handler: (state: UpdateState) => void): () => void
+  /** A query tab's session moved with the sidebar's database, or was lost. */
+  onSessionChanged(handler: (event: SessionEvent) => void): () => void
 }
 
 declare global {

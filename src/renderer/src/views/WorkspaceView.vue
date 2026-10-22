@@ -23,6 +23,7 @@ import ExportDialog from '../components/ExportDialog.vue'
 import SettingsDialog from '../components/SettingsDialog.vue'
 import ShortcutsDialog from '../components/ShortcutsDialog.vue'
 import UnsavedRoutineDialog from '../components/UnsavedRoutineDialog.vue'
+import OpenTransactionDialog from '../components/OpenTransactionDialog.vue'
 import TabPaneView from './TabPaneView.vue'
 import { useConnectionStore } from '../stores/connections'
 import { useReadOnlyStore } from '../stores/readOnly'
@@ -596,6 +597,8 @@ onBeforeUnmount(() => {
     <ShortcutsDialog v-if="showShortcuts" @close="showShortcuts = false" />
     <!-- Raised by the tab store from wherever a routine's tab is closed. -->
     <UnsavedRoutineDialog v-if="tabs.closePrompt" />
+    <!-- …and from wherever a query tab's session would end with a transaction open. -->
+    <OpenTransactionDialog v-if="tabs.transactionPrompt" />
   </div>
 </template>
 

@@ -53,7 +53,8 @@ export async function runQueryTab(tabId: string, text?: string): Promise<boolean
   }
 
   const executionId = `exec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  tabs.update<QueryTab>(tabId, { running: true, executionId })
+  // A loss said after the last run has been read; this run says its own.
+  tabs.update<QueryTab>(tabId, { running: true, executionId, sessionLost: undefined })
   // The bar under the title bar carries the wait for the whole window, so a
   // query running in a pane that is not on screen is still visible as work.
   busy.begin()
@@ -68,11 +69,21 @@ export async function runQueryTab(tabId: string, text?: string): Promise<boolean
       connectionId: tab.connectionId,
       sql: body,
       maxRows: settings.settings.maxResultRows,
-      executionId
+      executionId,
+      // The tab's own session, kept from one run to the next; a routine's
+      // stays in the database the routine lives in.
+      sessionId: tab.id,
+      pinnedDatabase: tab.routine?.database
     })
     // markRaw keeps the (potentially huge) result set out of the reactivity
     // graph; it is only ever replaced, never mutated field by field.
-    tabs.update<QueryTab>(tabId, { result: markRaw(result), running: false, executionId: null })
+    tabs.update<QueryTab>(tabId, {
+      result: markRaw(result),
+      running: false,
+      executionId: null,
+      session: result.session,
+      sessionLost: result.sessionLost?.had
+    })
 
     const failed = result.statements.find((statement) => statement.error)
     const ranInFull = whole && !failed && !result.cancelled && result.statements.length > 0

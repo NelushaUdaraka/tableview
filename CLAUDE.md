@@ -129,6 +129,11 @@ Invariants that span multiple files:
   background; `lib/tableCache.ts` decides whether the result actually differs before touching the grid.
   Loads carry a token so only the latest request's answer is applied.
 - One connection per window: the schema store is keyed to a single connection.
+- **Query tabs run on sessions of their own.** A query tab's runs go to its `QuerySession`
+  (`main/db/sqlserver/session.ts`): one connection, opened on the tab's first run, closed with the
+  tab, never replaced behind its back. The shared pool is for the app's own reads (the tree, table
+  tabs, completion, keepalive). Anything that would end a session with a transaction open asks
+  first (`canEndSessions` in `stores/tabs.ts`).
 - **Releases are found in one place, named twice:** the `publish` section of `electron-builder.yml`
   (written into the app as `app-update.yml`) and `RELEASES_URL` in `shared/updates.ts` must name the
   same GitHub repository.

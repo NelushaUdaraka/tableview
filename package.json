@@ -2,7 +2,7 @@
   "name": "tableview",
   "productName": "TableView",
   "desktopName": "tableview.desktop",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "A cross-platform SQL client for Microsoft SQL Server, built with Electron and Vue 3.",
   "main": "./out/main/index.js",
   "author": "TableView",

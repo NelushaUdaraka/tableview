@@ -19,6 +19,8 @@ import {
   SchemaObject,
   SerializedError,
   ServerMessage,
+  SessionLoss,
+  SessionState,
   StatementResult,
   TableChangeSet,
   TableColumn,
@@ -31,8 +33,15 @@ import {
   TableTrigger,
   DEFAULT_SQLSERVER_OPTIONS,
   READ_ONLY_CONNECTION,
+  SESSION_LOST,
   SSM_CREDENTIALS_EXPIRED
 } from '../../../shared/types'
+import {
+  followDecision,
+  lostSessionRefusal,
+  refuseAfterLoss,
+  type SessionPlace
+} from '../../../shared/sessions'
 import { serializeRow, deserializeCell } from '../../../shared/serialize'
 import { qualify } from '../../../shared/sql/identifiers'
 import {
@@ -51,8 +60,19 @@ import { SsmTunnel } from '../../tunnel/ssm'
 import { credentialsToEnv, expiresAt, isExpired } from '../../../shared/aws/credentials'
 import type { Tunnel, TunnelHandle } from '../../tunnel/types'
 import { buildMssqlConfig } from './config'
+import { isTransportFailure } from './errors'
+import { QuerySession } from './session'
 import { planReconnect } from '../reconnect'
-import type { ClientStateListener, DbClient, ExecuteOptions, ServerInfo } from '../types'
+import type {
+  ClientStateListener,
+  DbClient,
+  ExecuteOptions,
+  ServerInfo,
+  SessionChange,
+  SessionChangeListener,
+  SessionRun,
+  SessionRunOptions
+} from '../types'
 import * as Q from './queries'
 import { DriverColumn, declarationOf, isReadOnlyType, jsKindOf, renderDriverType } from './types'
 
@@ -72,19 +92,9 @@ const FORWARD_ERROR_GRACE_MS = 1500
 /** Used for connections saved before the option existed. */
 const DEFAULT_KEEPALIVE_MS = DEFAULT_SQLSERVER_OPTIONS.keepAliveIntervalMs
 
-/**
- * Driver errors that mean the socket went away rather than the server refusing
- * something. Only these may be reinterpreted as a tunnel failure — a login
- * rejection travels the same path and must reach the user unchanged.
- */
 /** Attaches a code so the renderer can offer the fix rather than a toast. */
 function codedError(message: string, code: string): Error {
   return Object.assign(new Error(message), { code })
-}
-
-function isTransportFailure(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error)
-  return /socket hang up|connection lost|econnreset|epipe|read econnreset/i.test(message)
 }
 
 /**
@@ -102,6 +112,53 @@ function readOnlyRefusal(sql: string, write: WriteStatement): StatementResult {
     messages: [{ kind: 'error', message, lineNumber: write.line }],
     durationMs: 0,
     error: { message, code: READ_ONLY_CONNECTION, lineNumber: write.line }
+  }
+}
+
+/** What the database rule needs to know about a session that has a state. */
+function placeOf(session: QuerySession): SessionPlace {
+  return {
+    database: session.state!.database,
+    transactionCount: session.state!.transactionCount,
+    pinned: Boolean(session.pinnedDatabase)
+  }
+}
+
+/**
+ * What a tab's run answers with when its session was lost holding something
+ * the run may have counted on: the whole script, unsent, as a failed
+ * statement that says what went and where the next run starts.
+ */
+function sessionLostRefusal(sql: string, had: SessionState, nextDatabase: string): StatementResult {
+  const message = lostSessionRefusal(had, nextDatabase)
+  return {
+    sql,
+    resultSets: [],
+    rowsAffected: [],
+    messages: [{ kind: 'error', message }],
+    durationMs: 0,
+    error: { message, code: SESSION_LOST }
+  }
+}
+
+/** What a run answers when its tab, or its connection, closed while its session opened. */
+const CLOSED_WHILE_OPENING = "This tab's session was closed before anything was run."
+
+/** The error a batch cancelled before it was sent carries, as one cancelled while running does. */
+function cancelledBeforeSending(): Error {
+  return Object.assign(new Error('Canceled.'), { code: 'ECANCEL' })
+}
+
+/** A batch that could not be sent at all, as the results show a failed one. */
+function unsentStatement(sql: string, error: unknown): StatementResult {
+  const serialized = serializeError(error)
+  return {
+    sql,
+    resultSets: [],
+    rowsAffected: [],
+    messages: [{ kind: 'error', message: serialized.message }],
+    durationMs: 0,
+    error: serialized
   }
 }
 
@@ -171,11 +228,50 @@ export class SqlServerClient implements DbClient {
   private probing = false
   /** Set by `disconnect`, so nothing reopens a connection the user closed. */
   private closed = false
+  /**
+   * Each query tab's own session, by tab id. A lost one stays here until the
+   * tab's next run has been told what it lost.
+   */
+  private readonly sessions = new Map<string, QuerySession>()
+  /** Sessions being opened, by tab id: a second run waits for the same one. */
+  private readonly opening = new Map<string, Promise<QuerySession | null>>()
+  /** Tabs closed while their session was opening; it is closed once it is open. */
+  private readonly closedWhileOpening = new Set<string>()
+  /** Each tab's run from its start to its end, by execution id, for `cancel`. */
+  private readonly sessionRuns = new Map<string, { cancelled: boolean }>()
+  /**
+   * Sessions lost by the client this one replaced, by tab id — what each had,
+   * for its tab's next run, as a lost session of this client's own would be.
+   */
+  private readonly handedOver = new Map<string, SessionState>()
+  private sessionListener: SessionChangeListener | null = null
+  /**
+   * Requests in flight on the shared pool. Tabs' sessions are counted apart:
+   * a long query in a tab is no reason to skip the pool's own heartbeat.
+   */
+  private sharedRequests = 0
 
   constructor(private config: ConnectionConfig) {}
 
   onStateChange(listener: ClientStateListener | null): void {
     this.stateListener = listener
+  }
+
+  onSessionChange(listener: SessionChangeListener | null): void {
+    this.sessionListener = listener
+  }
+
+  private emitSession(change: SessionChange): void {
+    try {
+      this.sessionListener?.(change)
+    } catch {
+      // A listener that throws must not take the session down with it.
+    }
+  }
+
+  /** Where the sidebar is: the shared pool's database, which a new session opens in. */
+  private get windowDatabase(): string {
+    return this.serverInfo?.currentDatabase || this.config.database || ''
   }
 
   setReadOnly(readOnly: boolean): void {
@@ -298,7 +394,10 @@ export class SqlServerClient implements DbClient {
     this.stopKeepAlive()
     const interval = this.keepAliveIntervalMs
     if (interval <= 0) return
-    this.keepAliveTimer = setInterval(() => void this.probe(), interval)
+    this.keepAliveTimer = setInterval(() => {
+      void this.probe()
+      void this.heartbeatSessions()
+    }, interval)
     // A heartbeat is no reason to hold the process open at quit.
     this.keepAliveTimer.unref?.()
   }
@@ -311,13 +410,15 @@ export class SqlServerClient implements DbClient {
   /**
    * Sends one row down the connection to prove it is still there.
    *
-   * Skipped whenever something else is already talking to the server: a
-   * connection carrying a query needs no help staying up, and a heartbeat
-   * queued behind a long-running statement proves nothing about the socket.
+   * Skipped whenever something else is already talking to the server on the
+   * shared pool: a pool carrying a query needs no help staying up, and a
+   * heartbeat queued behind a long-running statement proves nothing about the
+   * socket. A query running in a tab's session is on a connection of its own,
+   * and says nothing about the pool's.
    */
   private async probe(): Promise<void> {
     if (this.closed || this.recovering || this.probing) return
-    if (this.activeRequests.size > 0) return
+    if (this.sharedRequests > 0) return
 
     const pool = this.pool
     if (!pool?.connected) {
@@ -348,8 +449,28 @@ export class SqlServerClient implements DbClient {
     this.reconnectAttempt = 0
     this.stopKeepAlive()
     this.announce({ state: 'reconnecting', error })
+    this.loseSessions()
     await this.teardown()
     void this.attemptReconnect()
+  }
+
+  /**
+   * The transport is gone and every tab's session with it: each says what it
+   * had, and stays on record so its tab's next run is told too. Reopening the
+   * connection does not bring them back — a tab gets a new session when it
+   * next runs, on whatever port the new tunnel listens on.
+   */
+  private loseSessions(): void {
+    for (const session of this.sessions.values()) {
+      session.markLost()
+      void session.abandon()
+    }
+  }
+
+  /** Pokes each idle session; one that cannot answer is lost, and says so. */
+  private async heartbeatSessions(): Promise<void> {
+    if (this.closed || this.recovering) return
+    await Promise.all([...this.sessions.values()].map((session) => session.heartbeat()))
   }
 
   private async attemptReconnect(): Promise<void> {
@@ -411,6 +532,12 @@ export class SqlServerClient implements DbClient {
       }
     }
     this.activeRequests.clear()
+
+    // The window is going, and has asked about anything open already.
+    const sessions = [...this.sessions.values()]
+    this.sessions.clear()
+    this.handedOver.clear()
+    await Promise.all(sessions.map((session) => session.close()))
 
     await this.teardown()
     this.serverInfo = null
@@ -558,13 +685,16 @@ export class SqlServerClient implements DbClient {
   /**
    * Executes one statement, streaming rows so a large result never has to be
    * materialised twice and can be capped or cancelled part-way through.
+   *
+   * On a tab's `session` when given one; otherwise on the shared pool.
    */
   private async executeOne(
     text: string,
     params: SqlParam[],
-    options: ExecuteOptions
+    options: ExecuteOptions,
+    session?: QuerySession
   ): Promise<StatementResult> {
-    const pool = this.requirePool()
+    const pool = session ? session.pool : this.requirePool()
     const request = pool.request()
     const maxRows = options.maxRows ?? DEFAULT_MAX_ROWS
     const started = Date.now()
@@ -618,6 +748,7 @@ export class SqlServerClient implements DbClient {
 
     const executionId = options.executionId
     if (executionId) this.activeRequests.set(executionId, request)
+    if (!session) this.sharedRequests += 1
 
     try {
       // batch() allows statements that must start a batch (CREATE PROCEDURE,
@@ -629,9 +760,11 @@ export class SqlServerClient implements DbClient {
       }
     } catch (error) {
       errors.push(this.explainTransportFailure(error))
-      this.noteTransportFailure(error)
+      if (session) this.onSessionFailure(session, error)
+      else this.noteTransportFailure(error)
     } finally {
       if (executionId) this.activeRequests.delete(executionId)
+      if (!session) this.sharedRequests -= 1
       request.removeAllListeners()
     }
 
@@ -672,13 +805,8 @@ export class SqlServerClient implements DbClient {
 
     if (statements.length === 0) return []
 
-    // The whole script is checked before any of it runs: a script refused
-    // halfway through has done the first half, which is harder to reason
-    // about than a script that has done nothing.
-    if (this.config.readOnly) {
-      const write = options.asSingleBatch ? findWrite(text) : findWriteInScript(text)
-      if (write) return [readOnlyRefusal(text, write)]
-    }
+    const refusal = this.refusalFor(text, options)
+    if (refusal) return [refusal]
 
     const results: StatementResult[] = []
     for (const statement of statements) {
@@ -689,14 +817,233 @@ export class SqlServerClient implements DbClient {
     return results
   }
 
+  /**
+   * What a read-only connection answers instead of running `text`, if it
+   * writes. The whole script is checked before any of it runs: a script
+   * refused halfway through has done the first half, which is harder to
+   * reason about than a script that has done nothing.
+   */
+  private refusalFor(text: string, options: ExecuteOptions): StatementResult | null {
+    if (!this.config.readOnly) return null
+    const write = options.asSingleBatch ? findWrite(text) : findWriteInScript(text)
+    return write ? readOnlyRefusal(text, write) : null
+  }
+
+  async runInSession(
+    sessionId: string,
+    text: string,
+    options: SessionRunOptions = {}
+  ): Promise<SessionRun> {
+    const statements = options.asSingleBatch
+      ? [{ text, start: 0, end: text.length, startLine: 1 }]
+      : splitBatches(text)
+    const known = this.sessions.get(sessionId)
+    const live = known && !known.lost ? known.state : null
+
+    if (statements.length === 0) return { statements: [], session: live }
+    const refusal = this.refusalFor(text, options)
+    if (refusal) return { statements: [refusal], session: live }
+
+    // A cancel reaches the run from the start — while its session opens, or
+    // while it waits for a move — and not only once a batch is on the wire.
+    const executionId = options.executionId
+    const run = { cancelled: false }
+    if (executionId) this.sessionRuns.set(executionId, run)
+    try {
+      return await this.runOnSession(sessionId, text, statements, options, run)
+    } finally {
+      if (executionId) this.sessionRuns.delete(executionId)
+    }
+  }
+
+  private async runOnSession(
+    sessionId: string,
+    text: string,
+    statements: Array<{ text: string }>,
+    options: SessionRunOptions,
+    run: { cancelled: boolean }
+  ): Promise<SessionRun> {
+    let session = this.sessions.get(sessionId)
+
+    // A session lost since the last run — here, or on the client this one
+    // replaced — is told about now, once. What it held decides whether this
+    // run may go ahead on a new one.
+    let lost: SessionLoss | undefined
+    let had: SessionState | undefined
+    if (session?.lost) {
+      had = session.lost
+      this.sessions.delete(sessionId)
+      session = undefined
+    } else if (!session) {
+      had = this.handedOver.get(sessionId)
+      this.handedOver.delete(sessionId)
+    }
+    if (had) {
+      const next = options.pinnedDatabase ?? this.windowDatabase
+      if (refuseAfterLoss(had, next)) {
+        return {
+          statements: [sessionLostRefusal(text, had, next)],
+          session: null,
+          lost: { had, refused: true }
+        }
+      }
+      lost = { had, refused: false }
+    }
+
+    if (!session) {
+      const opened = await this.openSession(sessionId, options.pinnedDatabase)
+      if (!opened) {
+        return {
+          statements: [unsentStatement(statements[0].text, new Error(CLOSED_WHILE_OPENING))],
+          session: null,
+          lost
+        }
+      }
+      session = opened
+    }
+    const current = session
+
+    // In its turn: after a move the sidebar asked for first, say.
+    return current.exclusive(async () => {
+      if (current.lost) {
+        // Lost while it waited: told now, as if it had been lost before —
+        // unless its tab has closed since, and with it the session.
+        if (this.sessions.get(sessionId) === current) {
+          return this.runOnSession(sessionId, text, statements, options, run)
+        }
+        return { statements: [], session: null }
+      }
+
+      const results: StatementResult[] = []
+      for (const statement of statements) {
+        let result: StatementResult
+        if (run.cancelled) {
+          // Cancelled before this batch was sent: it never is.
+          result = unsentStatement(statement.text, cancelledBeforeSending())
+        } else {
+          try {
+            result = await this.executeOne(statement.text, [], options, current)
+          } catch (error) {
+            // The session went between batches: nothing of this one was sent.
+            result = unsentStatement(statement.text, error)
+          }
+        }
+        results.push(result)
+        if (result.error) break
+      }
+      // Whatever the run came to — finished, failed, cancelled — the tab is
+      // told where its session now stands. A read that fails because the
+      // connection went has marked the session lost.
+      if (!current.lost) await current.readState().catch(() => undefined)
+      return { statements: results, session: current.lost ? null : current.state, lost }
+    })
+  }
+
+  /**
+   * The tab's session, opened in its routine's database or where the sidebar
+   * is — once, however many runs ask while it opens. Null when the tab closed,
+   * or the connection did, before it was open: it has been closed again,
+   * having carried nothing.
+   */
+  private openSession(sessionId: string, pinnedDatabase?: string): Promise<QuerySession | null> {
+    let opening = this.opening.get(sessionId)
+    if (!opening) {
+      opening = this.startSession(sessionId, pinnedDatabase).finally(() =>
+        this.opening.delete(sessionId)
+      )
+      this.opening.set(sessionId, opening)
+    }
+    return opening
+  }
+
+  private async startSession(
+    sessionId: string,
+    pinnedDatabase?: string
+  ): Promise<QuerySession | null> {
+    // Not connected, or being reconnected: the same words as any other query.
+    this.requirePool()
+    const session = await QuerySession.open(
+      this.config,
+      this.tunnelHandle,
+      pinnedDatabase ?? this.windowDatabase,
+      {
+        pinnedDatabase,
+        onLost: (had) => this.emitSession({ sessionId, state: null, lost: had })
+      }
+    )
+    if (this.closed || this.closedWhileOpening.delete(sessionId)) {
+      await session.close()
+      return null
+    }
+    this.sessions.set(sessionId, session)
+    return session
+  }
+
+  async closeSession(sessionId: string): Promise<void> {
+    this.handedOver.delete(sessionId)
+    const opening = this.opening.get(sessionId)
+    if (opening) {
+      // Closed the moment it is open; see `startSession`.
+      this.closedWhileOpening.add(sessionId)
+      await opening.catch(() => null)
+      this.closedWhileOpening.delete(sessionId)
+    }
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    this.sessions.delete(sessionId)
+    await session.close()
+  }
+
+  retireSessions(): Map<string, SessionState> {
+    const lost = new Map(this.handedOver)
+    for (const [sessionId, session] of this.sessions) {
+      session.markLost()
+      if (session.lost) lost.set(sessionId, session.lost)
+    }
+    return lost
+  }
+
+  adoptLostSessions(lost: Map<string, SessionState>): void {
+    for (const [sessionId, had] of lost) this.handedOver.set(sessionId, had)
+  }
+
+  /**
+   * A tab's session lost its socket. That ends the session, and says nothing
+   * yet about the connection: the shared pool is checked straight away, and
+   * only a pool that fails too means the connection has gone.
+   */
+  private onSessionFailure(session: QuerySession, error: unknown): void {
+    if (this.closed || !isTransportFailure(error)) return
+    session.markLost()
+    void this.checkSharedPool()
+  }
+
+  /** The heartbeat, now rather than on its schedule, and whatever else is running. */
+  private async checkSharedPool(): Promise<void> {
+    if (this.closed || this.recovering) return
+    const pool = this.pool
+    if (!pool?.connected) {
+      void this.handleDrop(new Error('The connection pool closed'))
+      return
+    }
+    try {
+      await pool.request().query('SELECT 1')
+    } catch (error) {
+      void this.handleDrop(this.explainTransportFailure(error))
+    }
+  }
+
   cancel(executionId: string): boolean {
+    // A tab's run stops before its next batch, whether or not one is running.
+    const run = this.sessionRuns.get(executionId)
+    if (run) run.cancelled = true
     const request = this.activeRequests.get(executionId)
-    if (!request) return false
+    if (!request) return Boolean(run)
     try {
       request.cancel()
       return true
     } catch {
-      return false
+      return Boolean(run)
     }
   }
 
@@ -772,6 +1119,7 @@ export class SqlServerClient implements DbClient {
    * connection where it was instead of without a pool at all.
    */
   async useDatabase(database: string): Promise<void> {
+    const from = this.windowDatabase
     const config = { ...this.config, database }
     const pool = new sql.ConnectionPool(buildMssqlConfig(config, this.tunnelHandle))
     pool.on('error', (error) => {
@@ -784,6 +1132,42 @@ export class SqlServerClient implements DbClient {
     this.pool = pool
     await previous?.close().catch(() => undefined)
     this.serverInfo = await this.fetchServerInfo()
+    // The sidebar has switched; the tabs follow in their own time, side by
+    // side, and each says so when it has.
+    this.moveSessions(from, database)
+  }
+
+  /**
+   * Takes the tabs' sessions along to the database the sidebar switched to,
+   * each in its turn: a running one once its run ends.
+   */
+  private moveSessions(from: string, to: string): void {
+    for (const [sessionId, session] of this.sessions) {
+      if (session.lost) continue
+      void session.exclusive(() => this.follow(sessionId, session, from, to))
+    }
+  }
+
+  /**
+   * Moves a session from `from` to `to` if, now that it is its turn, it is
+   * still where the sidebar was, and not in a transaction or a routine's tab
+   * (see `followDecision`). Switching twice in a row moves it twice.
+   */
+  private async follow(
+    sessionId: string,
+    session: QuerySession,
+    from: string,
+    to: string
+  ): Promise<void> {
+    if (session.lost || !session.state) return
+    if (followDecision(placeOf(session), from) !== 'follow') return
+    try {
+      const state = await session.use(to)
+      this.emitSession({ sessionId, state })
+    } catch {
+      // A database this session cannot open leaves it where it was; a socket
+      // that went with it has reported the loss already.
+    }
   }
 
   async getObjectDefinition(schema: string, name: string): Promise<string | null> {

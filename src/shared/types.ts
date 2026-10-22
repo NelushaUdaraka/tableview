@@ -233,6 +233,13 @@ export const SSM_CREDENTIALS_EXPIRED = 'SSM_CREDENTIALS_EXPIRED'
 /** Marks something a read-only connection refused to send, so it can be said as such. */
 export const READ_ONLY_CONNECTION = 'READ_ONLY_CONNECTION'
 
+/**
+ * Marks a run that was not sent because the tab's session had been lost with
+ * something in it the run may have counted on — an open transaction, or a
+ * database of its own.
+ */
+export const SESSION_LOST = 'SESSION_LOST'
+
 export interface SerializedError {
   message: string
   code?: string | number
@@ -263,11 +270,54 @@ export interface ServerMessage {
   lineNumber?: number
 }
 
+/**
+ * A query tab's session as last read on it, after a run or a move.
+ *
+ * Read rather than inferred from the script: a transaction can be opened by a
+ * procedure, closed by a trigger's error, or left open by a cancel, and only
+ * the server knows which happened.
+ */
+export interface SessionState {
+  /** `@@TRANCOUNT`: 0 when no transaction is open. */
+  transactionCount: number
+  /** `XACT_STATE()`: 1 can commit, 0 none, -1 can only be rolled back. */
+  transactionState: -1 | 0 | 1
+  /** `DB_NAME()`: where the tab's next statement runs. */
+  database: string
+  /** When the open transaction was first seen, as an ISO time; absent with none open. */
+  transactionSince?: string
+}
+
+/** A session the tab had lost, as the next run found it. */
+export interface SessionLoss {
+  /** What it had when it went. */
+  had: SessionState
+  /** Whether this run was turned down because of it. */
+  refused: boolean
+}
+
+/**
+ * A tab's session changed without a run: the sidebar's database switch moved
+ * it, or it was lost. `state` is null once there is no session.
+ */
+export interface SessionEvent {
+  connectionId: string
+  /** The query tab's id, which is what names its session. */
+  sessionId: string
+  state: SessionState | null
+  /** What a lost session had. */
+  lost?: SessionState
+}
+
 export interface QueryExecutionResult {
   executionId: string
   statements: StatementResult[]
   totalDurationMs: number
   cancelled: boolean
+  /** The tab's session after the run; absent for a run that used none. */
+  session?: SessionState
+  /** Set when the tab's previous session had been lost before this run. */
+  sessionLost?: SessionLoss
 }
 
 export interface RunQueryRequest {
@@ -278,6 +328,13 @@ export interface RunQueryRequest {
   maxRows?: number
   /** Caller-supplied id so the execution can be cancelled. */
   executionId?: string
+  /**
+   * The query tab running it: the run goes to that tab's own session, opened
+   * on first use. Absent, it runs on the window's shared pool, as it always did.
+   */
+  sessionId?: string
+  /** A routine's tab: the database its session is pinned to. */
+  pinnedDatabase?: string
 }
 
 // ---------------------------------------------------------------------------

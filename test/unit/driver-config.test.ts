@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   ConnectionConfigError,
+  SESSION_IDLE_MS,
   buildMssqlConfig,
+  buildSessionConfig,
   describeConnection
 } from '../../src/main/db/sqlserver/config'
 import {
@@ -144,6 +146,30 @@ describe('buildMssqlConfig', () => {
 
   it('omits an empty database rather than sending a blank name', () => {
     expect(built(config({ database: '' })).database).toBeUndefined()
+  })
+})
+
+/**
+ * A query tab's session is one connection held for the tab's life. The pool
+ * that carries it must not close it for idling, and must not quietly swap a
+ * dead one for a fresh one: the next script would run on a new session.
+ */
+describe('buildSessionConfig', () => {
+  it('holds one connection, never closes it for idling, and does not let the pool swap it', () => {
+    const hook = (): void => undefined
+    const built = buildSessionConfig(
+      config(),
+      { localHost: '127.0.0.1', localPort: 54321 },
+      'reports',
+      hook
+    ) as unknown as Record<string, unknown> & { options: Record<string, unknown> }
+    expect(built.pool).toEqual({ min: 0, max: 1, idleTimeoutMillis: SESSION_IDLE_MS })
+    expect(built.validateConnection).toBe(false)
+    expect(built.beforeConnect).toBe(hook)
+    expect(built.database).toBe('reports')
+    expect(built.server).toBe('127.0.0.1')
+    expect(built.port).toBe(54321)
+    expect(built.options.encrypt).toBe(true)
   })
 })
 

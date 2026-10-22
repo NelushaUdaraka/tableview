@@ -7,7 +7,7 @@
  */
 import { computed, nextTick, watch } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSettingsStore } from '../../../src/renderer/src/stores/settings'
 import {
   hasUnsavedRoutineChanges,
@@ -18,6 +18,16 @@ import {
   type TableTab
 } from '../../../src/renderer/src/stores/tabs'
 import type { TableCache } from '../../../src/renderer/src/lib/tableCache'
+import type { SessionState } from '../../../src/shared/types'
+import { endSession, stopRun } from '../../../src/renderer/src/lib/tabSessions'
+
+// What the store asks of the main process for a tab's session; the store
+// decides when, which is what these tests read.
+vi.mock('../../../src/renderer/src/lib/tabSessions', () => ({
+  STOP_WAIT_MS: 10_000,
+  endSession: vi.fn(async () => undefined),
+  stopRun: vi.fn(async () => true)
+}))
 
 beforeEach(() => setActivePinia(createPinia()))
 
@@ -1008,5 +1018,176 @@ describe('switching a table between its rows and its structure', () => {
     const tab = tabs.tabs.find((entry) => entry.id === id) as TableTab
     expect(tab.filterRevision).toBe(before + 1)
     expect(tab.filters).toEqual([{ column: 'customer_id', operator: '=', value: '2' }])
+  })
+})
+
+/**
+ * A query tab knows its session as the main process last reported it: after
+ * a run, or when it moved or was lost on its own. The state belongs to that
+ * tab alone — not to a copy split off it, and not to what is saved for the
+ * next restart, where no session survives.
+ */
+describe("a query tab's session", () => {
+  const live = { transactionCount: 1, transactionState: 1 as const, database: 'sales' }
+
+  it("takes a change meant for it, and nobody else's", async () => {
+    const tabs = useTabStore()
+    await tabs.openQuery('c1')
+    const id = tabs.activeId!
+    tabs.applySessionEvent({ connectionId: 'c1', sessionId: id, state: live })
+    expect((tabs.tabs[0] as QueryTab).session).toEqual(live)
+    tabs.applySessionEvent({ connectionId: 'c2', sessionId: id, state: null, lost: live })
+    expect((tabs.tabs[0] as QueryTab).session).toEqual(live)
+    tabs.applySessionEvent({ connectionId: 'c1', sessionId: id, state: null, lost: live })
+    expect(tabs.tabs[0] as QueryTab).toMatchObject({ session: undefined, sessionLost: live })
+  })
+
+  it('does not carry a session into a split copy', async () => {
+    const tabs = useTabStore()
+    await tabs.openQuery('c1', 'SELECT 1')
+    tabs.update<QueryTab>(tabs.activeId!, { session: live, sessionLost: live })
+    await tabs.splitTab(tabs.activeId!)
+    const copy = tabs.tabs[1] as QueryTab
+    expect(copy.session).toBeUndefined()
+    expect(copy.sessionLost).toBeUndefined()
+  })
+
+  it('does not save a session with the tab', async () => {
+    const tabs = useTabStore()
+    await tabs.openQuery('c1', 'SELECT 1')
+    tabs.update<QueryTab>(tabs.activeId!, { session: live })
+    expect(JSON.stringify(tabs.snapshot('c1'))).not.toContain('transactionCount')
+  })
+
+  it('ends the session of a tab that closes', async () => {
+    const tabs = useTabStore()
+    await tabs.openQuery('c1', 'SELECT 1')
+    const id = tabs.activeId!
+    tabs.update<QueryTab>(id, { session: { ...live, transactionCount: 0, transactionState: 0 } })
+    await tabs.close(id)
+    expect(endSession).toHaveBeenCalledWith(expect.objectContaining({ id, connectionId: 'c1' }))
+  })
+
+  it('ends the session of a tab that closes while its first run is still opening one', async () => {
+    const tabs = useTabStore()
+    await tabs.openQuery('c1', 'SELECT 1')
+    const id = tabs.activeId!
+    tabs.update<QueryTab>(id, { running: true, executionId: 'exec-1' })
+    // The session takes longer to open than a close waits for the run to stop.
+    vi.mocked(stopRun).mockResolvedValueOnce(false)
+    vi.mocked(endSession).mockClear()
+    await tabs.close(id)
+    expect(endSession).toHaveBeenCalledWith(expect.objectContaining({ id, connectionId: 'c1' }))
+  })
+})
+
+/**
+ * A tab's open transaction ends with its session, so anything that would end
+ * the session — closing the tab, moving it to another window, disconnecting,
+ * closing the window, quitting — asks first. A query still running is
+ * stopped before anything is decided, unless it is running inside a
+ * transaction that was already open, which is asked about before it is
+ * stopped. Nothing new is asked of a tab with no transaction.
+ */
+describe('ending a session with a transaction open', () => {
+  const open = { transactionCount: 1, transactionState: 1 as const, database: 'sales' }
+  const none = { transactionCount: 0, transactionState: 0 as const, database: 'sales' }
+
+  async function queryTab(tabs = useTabStore(), session: SessionState = open) {
+    await tabs.openQuery('c1', 'SELECT 1')
+    const id = tabs.activeId!
+    tabs.update<QueryTab>(id, { session })
+    return { tabs, id }
+  }
+
+  /** The question the store is asking, once it has got round to asking it. */
+  async function asked(tabs: ReturnType<typeof useTabStore>) {
+    for (let i = 0; i < 20 && !tabs.transactionPrompt; i += 1) await Promise.resolve()
+    return tabs.transactionPrompt
+  }
+
+  it('closes without asking when no transaction is open and nothing runs', async () => {
+    const { tabs, id } = await queryTab(undefined, none)
+    expect(await tabs.close(id)).toBe(true)
+    expect(tabs.transactionPrompt).toBeNull()
+  })
+
+  it('asks before closing a tab with a transaction open, and keeps it on Cancel', async () => {
+    const { tabs, id } = await queryTab()
+    const closing = tabs.close(id)
+    expect(await asked(tabs)).toMatchObject({ tabId: id, reason: 'close', running: false, stopped: false })
+    tabs.answerTransaction(false)
+    expect(await closing).toBe(false)
+    expect(tabs.tabs.map((tab) => tab.id)).toEqual([id])
+  })
+
+  it('asks before a tab with a transaction open moves to another window', async () => {
+    const { tabs, id } = await queryTab()
+    const moving = tabs.close(id, { moving: true })
+    expect((await asked(tabs))?.reason).toBe('move')
+    tabs.answerTransaction(true)
+    expect(await moving).toBe(true)
+  })
+
+  it('asks before disconnecting, and before the window closes', async () => {
+    const { tabs } = await queryTab()
+    const disconnecting = tabs.closeConnection('c1')
+    expect((await asked(tabs))?.reason).toBe('disconnect')
+    tabs.answerTransaction(false)
+    expect(await disconnecting).toBe(false)
+    const quitting = tabs.canCloseWindow('quit')
+    expect((await asked(tabs))?.reason).toBe('quit')
+    tabs.answerTransaction(true)
+    expect(await quitting).toBe(true)
+  })
+
+  it('stops a running query first, and asks only if that left a transaction open', async () => {
+    const { tabs, id } = await queryTab(undefined, none)
+    tabs.update<QueryTab>(id, { running: true, executionId: 'e1' })
+    vi.mocked(stopRun).mockImplementationOnce(async () => {
+      tabs.update<QueryTab>(id, { running: false })
+      return true
+    })
+    expect(await tabs.close(id)).toBe(true)
+    expect(stopRun).toHaveBeenCalled()
+
+    const second = await queryTab(tabs, none)
+    tabs.update<QueryTab>(second.id, { running: true, executionId: 'e2' })
+    vi.mocked(stopRun).mockImplementationOnce(async () => {
+      tabs.update<QueryTab>(second.id, { running: false, session: open })
+      return true
+    })
+    const closing = tabs.close(second.id)
+    expect(await asked(tabs)).toMatchObject({ stopped: true, running: false })
+    tabs.answerTransaction(true)
+    expect(await closing).toBe(true)
+  })
+
+  it('asks before stopping a query that runs inside an open transaction', async () => {
+    const { tabs, id } = await queryTab()
+    tabs.update<QueryTab>(id, { running: true, executionId: 'e1' })
+    vi.mocked(stopRun).mockClear()
+    const closing = tabs.close(id)
+    expect(await asked(tabs)).toMatchObject({ running: true })
+    expect(stopRun).not.toHaveBeenCalled()
+    tabs.answerTransaction(false)
+    expect(await closing).toBe(false)
+  })
+
+  it('closes anyway when a query does not stop in time', async () => {
+    const { tabs, id } = await queryTab(undefined, none)
+    tabs.update<QueryTab>(id, { running: true, executionId: 'e1' })
+    vi.mocked(stopRun).mockResolvedValueOnce(false)
+    expect(await tabs.close(id)).toBe(true)
+    expect(tabs.transactionPrompt).toBeNull()
+  })
+
+  it('counts a running query or an open transaction as work the window would lose', async () => {
+    const { tabs, id } = await queryTab(undefined, none)
+    expect(tabs.hasUnsavedWork).toBe(false)
+    tabs.update<QueryTab>(id, { session: open })
+    expect(tabs.hasUnsavedWork).toBe(true)
+    tabs.update<QueryTab>(id, { session: none, running: true })
+    expect(tabs.hasUnsavedWork).toBe(true)
   })
 })

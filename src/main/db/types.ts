@@ -14,6 +14,8 @@ import type {
   SchemaObject,
   SchemaObjectType,
   ServerMessage,
+  SessionLoss,
+  SessionState,
   StatementResult,
   TableChangeSet,
   TableDataRequest,
@@ -62,6 +64,32 @@ export interface ExecuteOptions {
   onMessage?: (message: ServerMessage) => void
 }
 
+/** What a query tab's run came to, and where its session stands after it. */
+export interface SessionRun {
+  statements: StatementResult[]
+  /** The session's state after the run; null when the tab has no live session. */
+  session: SessionState | null
+  /** Set when the tab's previous session had been lost before this run. */
+  lost?: SessionLoss
+}
+
+/**
+ * A tab's session changed with no run to report it: a database switch moved
+ * it, or it was lost — in which case `state` is null and `lost` says what it had.
+ */
+export interface SessionChange {
+  sessionId: string
+  state: SessionState | null
+  lost?: SessionState
+}
+
+export type SessionChangeListener = (change: SessionChange) => void
+
+export interface SessionRunOptions extends ExecuteOptions {
+  /** A routine's tab: the database its session opens in, and stays in. */
+  pinnedDatabase?: string
+}
+
 export interface DbClient {
   readonly isConnected: boolean
   /** Local port of the SSH tunnel, when one is in use. */
@@ -80,6 +108,28 @@ export interface DbClient {
   setReadOnly(readOnly: boolean): void
 
   runScript(text: string, options?: ExecuteOptions): Promise<StatementResult[]>
+  /**
+   * Runs a query tab's script on that tab's own session, opening it on first
+   * use. What the script leaves on the session — temp tables, settings, a
+   * `USE`, an open transaction — is there for the tab's next run and nowhere
+   * else.
+   */
+  runInSession(sessionId: string, text: string, options?: SessionRunOptions): Promise<SessionRun>
+  /** Ends a tab's session, rolling back anything open; the window asks first. */
+  closeSession(sessionId: string): Promise<void>
+  /** Registered by the registry so a session that moves or is lost reaches its window. */
+  onSessionChange(listener: SessionChangeListener | null): void
+  /**
+   * For a client about to be replaced by a reconnect: ends every tab's
+   * session as lost, telling the window, and gives back what each lost
+   * session had that its tab's next run has not yet been told of, by tab id.
+   */
+  retireSessions(): Map<string, SessionState>
+  /**
+   * What the client this one replaced gave back from `retireSessions`: each
+   * tab's next run is held to it as if the session had been lost here.
+   */
+  adoptLostSessions(lost: Map<string, SessionState>): void
   cancel(executionId: string): boolean
 
   listDatabases(): Promise<DatabaseSummary[]>

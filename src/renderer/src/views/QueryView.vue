@@ -1,8 +1,17 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { format as formatSql } from 'sql-formatter'
 import type { CellValue, ColumnMeta } from '@shared/types'
 import { statementAt, statementsInRange } from '@shared/sql/statements'
+import {
+  COMMIT_SQL,
+  ROLLBACK_SQL,
+  canCommit,
+  lostSessionNote,
+  sameDatabase,
+  transactionAge,
+  transactionOpen
+} from '@shared/sessions'
 import AppIcon from '../components/AppIcon.vue'
 import SqlEditor from '../components/SqlEditor.vue'
 import ResultsPanel from '../components/ResultsPanel.vue'
@@ -88,6 +97,53 @@ const completionSchema = computed(() => {
 })
 
 const currentStatement = computed(() => statementAt(props.tab.sql, cursor.value))
+
+// --- the tab's session ---------------------------------------------------------
+
+/**
+ * The database the tab's next statement runs in, said only when it is not the
+ * sidebar's: after a `USE` of its own, or on a routine's tab, which stays in
+ * its routine's database.
+ */
+const tabDatabase = computed(() => {
+  const database = props.tab.session?.database ?? props.tab.routine?.database
+  if (!database) return null
+  return sameDatabase(database, connections.activeStatus?.currentDatabase) ? null : database
+})
+
+const inTransaction = computed(() => transactionOpen(props.tab.session))
+
+/** Ticks once a second while a transaction is open, for the age said beside it. */
+const now = ref(Date.now())
+let ticker: ReturnType<typeof setInterval> | null = null
+watch(
+  inTransaction,
+  (open) => {
+    if (ticker) clearInterval(ticker)
+    ticker = null
+    if (!open) return
+    now.value = Date.now()
+    ticker = setInterval(() => (now.value = Date.now()), 1000)
+  },
+  { immediate: true }
+)
+onBeforeUnmount(() => {
+  if (ticker) clearInterval(ticker)
+})
+
+const transactionLabel = computed(() => {
+  const age = transactionAge(props.tab.session?.transactionSince, new Date(now.value))
+  return age ? `Transaction open · ${age}` : 'Transaction open'
+})
+
+/** Commit and Rollback are runs of the tab, so they show in its results and history. */
+function commit(): void {
+  void runQueryTab(props.tab.id, COMMIT_SQL)
+}
+
+function rollBack(): void {
+  void runQueryTab(props.tab.id, ROLLBACK_SQL)
+}
 
 /** Runs the tab, or the part of it given; see `runQueryTab`. */
 function run(text?: string): Promise<boolean> {
@@ -249,6 +305,49 @@ defineExpose({
             </button>
             <div class="query__spacer"></div>
 
+            <!-- Where the tab runs, when that is not where the sidebar is. -->
+            <span
+              v-if="tabDatabase"
+              class="badge query__database"
+              :title="`This tab's session is in ${tabDatabase}; the sidebar is in ${connections.activeStatus?.currentDatabase ?? 'another database'}`"
+            >
+              <AppIcon name="database" :size="11" />
+              {{ tabDatabase }}
+            </span>
+
+            <!-- A transaction left open stays open, holding its locks, until
+                 it is committed or rolled back here — or asked about when the
+                 tab would close. -->
+            <template v-if="inTransaction">
+              <span
+                class="query__transaction"
+                title="A transaction is open in this tab's session. It holds its locks until it is committed or rolled back."
+              >
+                <AppIcon name="clock" :size="12" />
+                {{ transactionLabel }}
+              </span>
+              <button
+                class="btn"
+                :disabled="tab.running || !canCommit(tab.session)"
+                :title="
+                  canCommit(tab.session)
+                    ? 'Commit everything the transaction has done'
+                    : 'An error has doomed this transaction: it can only be rolled back'
+                "
+                @click="commit"
+              >
+                Commit
+              </button>
+              <button
+                class="btn"
+                :disabled="tab.running"
+                title="Undo everything the transaction has done"
+                @click="rollBack"
+              >
+                Rollback
+              </button>
+            </template>
+
             <!-- Said before Run rather than after it: a script that writes is
                  turned down whole, before any of it is sent. -->
             <span
@@ -336,12 +435,20 @@ defineExpose({
       </template>
 
       <template #second>
-        <ResultsPanel
-          v-model:show-row-panel="showRowPanel"
-          :result="tab.result"
-          :running="tab.running"
-          @export="(columns, rows) => emit('export', columns, rows)"
-        />
+        <div class="query__results">
+          <!-- Said once, until the next run: what went with a lost session. -->
+          <div v-if="tab.sessionLost" class="query__notice" role="status">
+            <AppIcon name="info" :size="12" />
+            <span>{{ lostSessionNote(tab.sessionLost) }}</span>
+          </div>
+          <ResultsPanel
+            v-model:show-row-panel="showRowPanel"
+            class="query__results-panel"
+            :result="tab.result"
+            :running="tab.running"
+            @export="(columns, rows) => emit('export', columns, rows)"
+          />
+        </div>
       </template>
     </SplitPane>
 
@@ -399,6 +506,47 @@ defineExpose({
 }
 .query__spacer {
   flex: 1;
+}
+.query__database {
+  flex: 0 0 auto;
+  gap: 4px;
+}
+/* Staged work's colour, as an edge and its text: never a fill over the toolbar. */
+.query__transaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border-strong));
+  border-radius: var(--radius-xs);
+  color: var(--warning);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.query__results {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.query__results-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.query__notice {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  border-left: 2px solid var(--warning);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 .query__changes {
   display: flex;

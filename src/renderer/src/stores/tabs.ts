@@ -4,12 +4,18 @@ import type {
   QueryExecutionResult,
   RoutineSource,
   SchemaObjectType,
+  SessionEvent,
+  SessionState,
   TableFilter
 } from '@shared/types'
 import type { SavedTab, SavedTabs } from '@shared/uiState'
 import type { TableCache } from '../lib/tableCache'
+import { transactionOpen } from '@shared/sessions'
 import { splitLines } from '../lib/lineDiff'
+import { endSession, stopRun } from '../lib/tabSessions'
+import { useBusyStore } from './busy'
 import { useSettingsStore } from './settings'
+import { useToastStore } from './toasts'
 
 export interface QueryTab {
   id: string
@@ -48,6 +54,16 @@ export interface QueryTab {
    * differs from the server, and reverting every change answers "no" again.
    */
   changeCount?: number
+  /**
+   * The tab's own session as the main process last reported it: absent before
+   * the tab first runs anything, and once the session is closed or lost.
+   */
+  session?: SessionState
+  /**
+   * What a lost session had, said once above the results; the next run
+   * clears it.
+   */
+  sessionLost?: SessionState
 }
 
 export interface TableTab {
@@ -161,6 +177,24 @@ export interface ClosePrompt {
   resolve: (close: boolean) => void
 }
 
+/** What would end a tab's session, which is what its question says. */
+export type TransactionReason = CloseReason | 'move'
+
+/**
+ * A query tab whose session is about to end with a transaction open in it,
+ * waiting to hear whether it may. The workspace's dialog commits or rolls it
+ * back and answers true, or answers false to keep everything as it was.
+ */
+export interface TransactionPrompt {
+  tabId: string
+  reason: TransactionReason
+  /** Its query is running inside a transaction that was open before the run. */
+  running: boolean
+  /** Its query was stopped to end the session, and left a transaction open. */
+  stopped: boolean
+  resolve: (proceed: boolean) => void
+}
+
 export const useTabStore = defineStore('tabs', () => {
   const tabs = ref<Tab[]>([])
   const panes = ref<TabPane[]>([{ id: newPaneId(), tabIds: [], activeTabId: null }])
@@ -170,6 +204,8 @@ export const useTabStore = defineStore('tabs', () => {
   const guards = new Map<string, LeaveGuard>()
 
   const closePrompt = ref<ClosePrompt | null>(null)
+
+  const transactionPrompt = ref<TransactionPrompt | null>(null)
 
   /**
    * Asks about every routine among `ids` that would close with its changes
@@ -203,7 +239,81 @@ export const useTabStore = defineStore('tabs', () => {
     for (const tabId of mountedExcept([])) {
       if (ids.includes(tabId) && !(await canLeave(tabId, reason))) return false
     }
-    return canClose(ids, reason)
+    if (!(await canClose(ids, reason))) return false
+    return canEndSessions(ids, reason)
+  }
+
+  /** Asks about one tab's transaction; false straight away while another question waits. */
+  async function askTransaction(
+    tabId: string,
+    reason: TransactionReason,
+    situation: { running: boolean; stopped: boolean }
+  ): Promise<boolean> {
+    // One question at a time: an end asked for while another is waiting on
+    // its answer is dropped rather than left to wait behind it.
+    if (transactionPrompt.value) return false
+    return new Promise<boolean>((resolve) => {
+      transactionPrompt.value = { tabId, reason, ...situation, resolve }
+    })
+  }
+
+  /** Whether the query tab `id` is running right now, read afresh. */
+  function isRunning(id: string): boolean {
+    const tab = byId(id)
+    return tab?.kind === 'query' && tab.running
+  }
+
+  /**
+   * Asks every query tab among `ids` whose session would end with a
+   * transaction open in it, one at a time, and resolves false as soon as one
+   * is to stay.
+   *
+   * A tab still running is stopped first, the way its Cancel button does:
+   * nothing can be committed or rolled back on a session while a run holds
+   * it, and only once it has stopped is it known whether the run left a
+   * transaction open. A run inside a transaction that was already open is
+   * asked about before it is stopped. A query that will not stop in time is
+   * not waited on for ever: its session ends with the tab, and the server
+   * undoes what it had not finished.
+   */
+  async function canEndSessions(ids: string[], reason: TransactionReason): Promise<boolean> {
+    for (const id of ids) {
+      const tab = byId(id)
+      if (tab?.kind !== 'query') continue
+
+      if (tab.running) {
+        if (transactionOpen(tab.session)) {
+          if (!(await askTransaction(id, reason, { running: true, stopped: false }))) return false
+          continue
+        }
+        const busy = useBusyStore()
+        useToastStore().info(`Stopping the query in ${tab.title}…`)
+        busy.begin()
+        let stopped = false
+        try {
+          stopped = await stopRun(tab, () => isRunning(id))
+        } finally {
+          busy.end()
+        }
+        if (!stopped) continue
+        const after = byId(id)
+        if (after?.kind === 'query' && transactionOpen(after.session)) {
+          if (!(await askTransaction(id, reason, { running: false, stopped: true }))) return false
+        }
+        continue
+      }
+
+      if (transactionOpen(tab.session)) {
+        if (!(await askTransaction(id, reason, { running: false, stopped: false }))) return false
+      }
+    }
+    return true
+  }
+
+  function answerTransaction(proceed: boolean): void {
+    const prompt = transactionPrompt.value
+    transactionPrompt.value = null
+    prompt?.resolve(proceed)
   }
 
   function answerClose(close: boolean): void {
@@ -498,12 +608,18 @@ export const useTabStore = defineStore('tabs', () => {
     if (pane.activeTabId === id && !(await canLeave(id, leaving))) return false
     // Any tab can be holding a routine's unsaved changes.
     if (!options.moving && !(await canClose([id]))) return false
+    // A session cannot go with a tab to another window, so moving asks too.
+    if (!(await canEndSessions([id], options.moving ? 'move' : 'close'))) return false
     removeTab(id)
     return true
   }
 
   function removeTab(id: string): void {
     const pane = paneFor(id)
+    const leaving = byId(id)
+    // A query tab takes its session with it — one still opening for its
+    // first run too; whatever was open in it has been asked about by now.
+    if (leaving?.kind === 'query') void endSession(leaving)
     guards.delete(id)
     tabs.value = tabs.value.filter((tab) => tab.id !== id)
     if (!pane) return
@@ -577,12 +693,17 @@ export const useTabStore = defineStore('tabs', () => {
 
   /**
    * Whether any tab holds work that closing the window would lose: a table's
-   * staged edits, or a routine's unsaved changes. The main process holds a
-   * window's close while this is true, and asks.
+   * staged edits, a routine's unsaved changes, or a query tab's open
+   * transaction — or a query still running, which may be opening one. The
+   * main process holds a window's close while this is true, and asks.
    */
   const hasUnsavedWork = computed(() =>
     tabs.value.some((tab) =>
-      tab.kind === 'table' ? tab.pendingEdits > 0 : hasUnsavedRoutineChanges(tab)
+      tab.kind === 'table'
+        ? tab.pendingEdits > 0
+        : // A running query may be opening a transaction this window has not
+          // seen yet, so it is stopped and looked at before the window goes.
+          tab.running || transactionOpen(tab.session) || hasUnsavedRoutineChanges(tab)
     )
   )
 
@@ -677,7 +798,10 @@ export const useTabStore = defineStore('tabs', () => {
         running: false,
         executionId: null,
         savedQueryId: tab.savedQueryId,
-        dirty: tab.dirty
+        dirty: tab.dirty,
+        // A session belongs to one tab: the copy opens its own when it runs.
+        session: undefined,
+        sessionLost: undefined
       }
     }
     return {
@@ -756,6 +880,20 @@ export const useTabStore = defineStore('tabs', () => {
    * itself indefinitely, which production builds have no recursion guard to
    * stop. Comparing first makes a no-op cost nothing.
    */
+  /**
+   * A tab's session moved with the sidebar's database, or was lost, with no
+   * run of the tab's to say so. Meant for one tab on one connection.
+   */
+  function applySessionEvent(event: SessionEvent): void {
+    const tab = byId(event.sessionId)
+    if (tab?.kind !== 'query' || tab.connectionId !== event.connectionId) return
+    if (event.state) {
+      update<QueryTab>(tab.id, { session: event.state })
+    } else {
+      update<QueryTab>(tab.id, { session: undefined, sessionLost: event.lost ?? tab.sessionLost })
+    }
+  }
+
   function update<T extends Tab>(id: string, patch: Partial<T>): void {
     const current = tabs.value.find((tab) => tab.id === id) as T | undefined
     if (!current) return
@@ -908,9 +1046,12 @@ export const useTabStore = defineStore('tabs', () => {
     splitTab,
     closeSplit,
     update,
+    applySessionEvent,
     setLeaveGuard,
     closePrompt,
     answerClose,
+    transactionPrompt,
+    answerTransaction,
     snapshot,
     restore
   }

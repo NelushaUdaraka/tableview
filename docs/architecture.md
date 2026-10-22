@@ -10,7 +10,8 @@ src/
 ├── main/                     Electron main process
 │   ├── db/
 │   │   ├── registry.ts       live client per connection
-│   │   └── sqlserver/        client, config mapping, catalog queries, type mapping
+│   │   └── sqlserver/        client, config mapping, catalog queries, type mapping, and
+│   │                         session.ts — a query tab's own connection to the server
 │   ├── tunnel/               ssh.ts, ssm.ts (AWS Session Manager), ec2Instances.ts
 │   │                         (the bastion picker's lookup, and the name a
 │   │                         connection resolves on connect), shared contract
@@ -34,6 +35,8 @@ src/
 │   ├── tableplus.ts          a connection copied out of TablePlus as a URL, and what it fills in
 │   ├── sql/                  identifier escaping, T-SQL lexer, query builders, and
 │   │                         readOnly.ts — what a read-only connection refuses to send
+│   ├── sessions.ts           a query tab's session: when it follows the sidebar, when a run
+│   │                         after losing one is refused, and what the tab says
 │   ├── serialize.ts          driver values ⇄ IPC-safe cell values
 │   ├── export.ts             CSV/JSON/SQL/Markdown
 │   ├── updates.ts            the update state both sides share, and where releases live
@@ -50,6 +53,7 @@ src/
     ├── lib/lineDiff.ts       what differs from a routine's stored definition, and putting one change back
     ├── lib/changeTracking.ts the editor's change marks, the peek under a change, and its revert
     ├── lib/runQueryTab.ts    runs a query tab, on screen or not, and says whether it saved a routine
+    ├── lib/tabSessions.ts    ending a tab's session, and stopping the query running on it
     ├── lib/sortConnections.ts the orders the connection list can be read in
     ├── lib/updateStatus.ts   the Settings line about updating, and the one button beside it
     ├── lib/connectionGroups.ts the headings the list is filed under
@@ -61,8 +65,10 @@ src/
     │                         read-only (the question before one may write again),
     │                         updates (what a window says about a new release)
     ├── components/           title bar, grid, row panel (and its JSON tree),
-    │                         editor, sidebar (and its structure tree), dialogs,
-    │                         the toolbar's drop-down panels (a choice menu, the column picker)
+    │                         editor, sidebar (and its structure tree), dialogs
+    │                         (OpenTransactionDialog: the question before a tab's
+    │                         transaction would end), the toolbar's drop-down panels
+    │                         (a choice menu, the column picker)
     └── views/                connection screen, workspace, pane, query, table
 ```
 
@@ -79,6 +85,34 @@ explicitly writing SQL.
 **Scripts split on `GO`, not `;`.** A semicolon terminates a statement *inside* a batch, so splitting
 on it would cut `BEGIN … END` bodies in half. `splitStatements` (which does split on `;`) exists only
 for editor conveniences like "run the statement under the cursor".
+
+**A query tab has a session of its own; everything else shares the pool.** The window's pool
+hands back the most recently released connection, never resets one between uses, and closes any
+left idle for thirty seconds. That suits the app's own reads, which ask for nothing to last, and
+does not suit a script, whose temp tables, settings, `USE` and transactions are meant to be there
+for the next run and nowhere else. Run on the pool, a `USE` in one tab sent the table tabs and the
+tree to another database, and a transaction left open became part of whatever borrowed its
+connection next, until the pool closed the connection and the server rolled the work back. So each
+query tab holds a connection of its own (`QuerySession`), opened on its first run and closed with
+the tab, while the tree, the table tabs, completion and the heartbeat keep to the pool.
+
+A session's connection is never replaced behind the tab's back. mssql checks a pooled connection
+before handing it out and quietly swaps a dead one for a fresh one; for a session that would run the
+next script with none of what the last one set up — or commit, statement by statement, work that
+was meant to stay inside a transaction. So the session's pool has validation off, sees every
+connection it makes through `beforeConnect`, closes any after the first, and reports the session
+lost; whether the tab's next run may go ahead on a new session is decided knowing what the old one
+held. A session is lost only when its connection ends or fails at the socket — never because a
+statement was refused — and a client replaced by a reconnect hands what its sessions held to the
+next (`retireSessions`, `adoptLostSessions`).
+
+One thing at a time goes down a session: its runs, the moves the sidebar's database switch asks
+for, and its heartbeats take turns (`QuerySession.exclusive`), each a request and a state read that
+must not have another let in between. A move is decided when its turn comes, from where the session
+is then, and the switch answers without waiting for any of them. The state read after each run
+(`STATE_SQL`) comes back empty under options that compile without running, such as `SET
+SHOWPLAN_XML` or `NOEXEC`; the transaction and the database then come from the server's own
+notices, which tedious keeps.
 
 **Cell values are tagged across IPC.** Dates, binary and bigints do not survive structured clone
 with their identity intact, so they cross as `{ t: 'date' | 'bytes' | 'bigint' | 'json', v: … }` and

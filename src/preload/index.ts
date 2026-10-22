@@ -18,6 +18,7 @@ import type {
   ConnectionStatus,
   ExportRequest,
   RunQueryRequest,
+  SessionEvent,
   TableChangeSet,
   TableDataRequest
 } from '../shared/types'
@@ -93,6 +94,8 @@ const api: RendererApi = {
   runQuery: (request: RunQueryRequest) => invoke(CHANNELS.queryRun, request),
   cancelQuery: (connectionId, executionId) =>
     invoke(CHANNELS.queryCancel, connectionId, executionId),
+  closeSession: (connectionId, sessionId) =>
+    invoke(CHANNELS.queryCloseSession, connectionId, sessionId),
 
   listHistory: (search) => invoke(CHANNELS.historyList, search),
   clearHistory: () => invoke(CHANNELS.historyClear),
@@ -132,7 +135,9 @@ const api: RendererApi = {
   onCloseRequested: (handler: (reason: WindowCloseReason) => void) =>
     subscribe(CHANNELS.eventCloseRequested, handler as (payload: never) => void),
   onUpdateState: (handler: (state: UpdateState) => void) =>
-    subscribe(CHANNELS.eventUpdateState, handler as (payload: never) => void)
+    subscribe(CHANNELS.eventUpdateState, handler as (payload: never) => void),
+  onSessionChanged: (handler: (event: SessionEvent) => void) =>
+    subscribe(CHANNELS.eventSessionChanged, handler as (payload: never) => void)
 }
 
 contextBridge.exposeInMainWorld('api', api)

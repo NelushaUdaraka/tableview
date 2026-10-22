@@ -9,6 +9,7 @@
  * to open in a window of their own.
  */
 import { computed, nextTick, ref, watch } from 'vue'
+import { transactionOpen } from '@shared/sessions'
 import AppIcon from './AppIcon.vue'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
 import type { IconName } from '../lib/icons'
@@ -219,6 +220,15 @@ function onDragEnd(event: DragEvent, tabId: string): void {
             class="tab__dot tab__dot--edit"
             :title="`${tab.pendingEdits} pending change(s)`"
           ></span>
+          <!-- Beside the spinner or the dot rather than instead of them: a
+               transaction stays open through a run, and through edits. -->
+          <AppIcon
+            v-if="tab.kind === 'query' && transactionOpen(tab.session)"
+            class="tab__txn"
+            name="clock"
+            :size="12"
+            title="Transaction open"
+          />
           <span class="tab__close" title="Close" @click.stop="tabs.close(tab.id)">
             <AppIcon name="x" :size="12" />
           </span>
@@ -369,6 +379,11 @@ function onDragEnd(event: DragEvent, tabId: string): void {
   width: 11px;
   height: 11px;
   border-width: 1.5px;
+}
+.tab__txn {
+  flex: 0 0 auto;
+  margin: 0 2px;
+  color: var(--warning);
 }
 .tab__dot {
   width: 7px;

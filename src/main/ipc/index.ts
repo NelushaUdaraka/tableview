@@ -24,6 +24,8 @@ import {
   ExportRequest,
   QueryExecutionResult,
   RunQueryRequest,
+  ServerMessage,
+  SessionEvent,
   SsmConfig,
   TableChangeSet,
   TableDataRequest
@@ -50,6 +52,7 @@ import {
   parseAwsCredentials
 } from '../../shared/aws/credentials'
 import { ConnectionRegistry } from '../db/registry'
+import type { SessionRun } from '../db/types'
 import { enterRememberedDatabase } from '../db/lastDatabase'
 import { serializeError } from '../db/sqlserver/client'
 import { AppData } from '../storage/appData'
@@ -96,6 +99,18 @@ export function registerIpcHandlers(context: IpcContext): void {
     )
     if (window && !window.isDestroyed()) {
       window.webContents.send(CHANNELS.eventStatusChanged, status)
+    }
+  })
+
+  // A tab's session that moved with the sidebar or was lost has no call to
+  // return to either; it goes to the window whose tab it is.
+  registry.onSessionChange((scope, connectionId, change) => {
+    const window = BrowserWindow.getAllWindows().find(
+      (candidate) => scopeForWindow(candidate) === scope
+    )
+    if (window && !window.isDestroyed()) {
+      const event: SessionEvent = { connectionId, ...change }
+      window.webContents.send(CHANNELS.eventSessionChanged, event)
     }
   })
 
@@ -392,18 +407,26 @@ export function registerIpcHandlers(context: IpcContext): void {
     const executionId = request.executionId ?? randomUUID()
     const started = Date.now()
 
-    const statements = await client.runScript(request.sql, {
+    const options = {
       maxRows: request.maxRows,
       executionId,
       asSingleBatch: request.asSingleBatch,
-      onMessage: (message) => {
+      onMessage: (message: ServerMessage) => {
         sendToWindow(call, CHANNELS.eventServerMessage, {
           connectionId: request.connectionId,
           executionId,
           message
         })
       }
-    })
+    }
+    // A query tab runs on its own session; anything else on the shared pool.
+    const run: SessionRun = request.sessionId
+      ? await client.runInSession(request.sessionId, request.sql, {
+          ...options,
+          pinnedDatabase: request.pinnedDatabase
+        })
+      : { statements: await client.runScript(request.sql, options), session: null }
+    const { statements } = run
 
     const rowCount = statements.reduce(
       (total, statement) =>
@@ -415,7 +438,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     appData.addHistory({
       connectionId: request.connectionId,
       connectionName: client.currentConfig.name,
-      database: client.info?.currentDatabase,
+      // Where it ran: a tab's session can be somewhere the sidebar is not.
+      database: run.session?.database ?? client.info?.currentDatabase,
       sql: request.sql,
       runAt: new Date(started).toISOString(),
       durationMs: Date.now() - started,
@@ -428,13 +452,20 @@ export function registerIpcHandlers(context: IpcContext): void {
       executionId,
       statements,
       totalDurationMs: Date.now() - started,
-      cancelled: false
+      cancelled: false,
+      session: run.session ?? undefined,
+      sessionLost: run.lost
     }
   })
 
   handle(CHANNELS.queryCancel, (call, connectionId: string, executionId: string) => {
     const client = registry.find(call.scope, connectionId)
     return client ? client.cancel(executionId) : false
+  })
+
+  // A connection already closed took its sessions with it: nothing to do.
+  handle(CHANNELS.queryCloseSession, async (call, connectionId: string, sessionId: string) => {
+    await registry.find(call.scope, connectionId)?.closeSession(sessionId)
   })
 
   // -- history & saved queries ----------------------------------------------

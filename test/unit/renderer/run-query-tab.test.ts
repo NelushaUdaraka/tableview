@@ -23,6 +23,8 @@ vi.mock('../../../src/renderer/src/lib/api', () => ({
 const { runQueryTab } = await import('../../../src/renderer/src/lib/runQueryTab')
 const { useTabStore } = await import('../../../src/renderer/src/stores/tabs')
 const { useToastStore } = await import('../../../src/renderer/src/stores/toasts')
+const { useConnectionStore } = await import('../../../src/renderer/src/stores/connections')
+const { useConfirmWritesStore } = await import('../../../src/renderer/src/stores/confirmWrites')
 type QueryTab = import('../../../src/renderer/src/stores/tabs').QueryTab
 
 const STORED = 'CREATE OR ALTER PROCEDURE dbo.usp_orders AS\nSELECT 1'
@@ -198,5 +200,61 @@ describe('runQueryTab', () => {
   it('does nothing for a tab that is gone', async () => {
     expect(await runQueryTab('tab-missing')).toBe(false)
     expect(runQuery).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * A connection that confirms its writes shows what a script would change and
+ * sends nothing until the user says so; the run then says it was confirmed,
+ * which the main process needs to let it through.
+ */
+describe('runQueryTab on a confirm-writes connection', () => {
+  async function queryTab(sql: string): Promise<string> {
+    const connections = useConnectionStore()
+    connections.activeId = 'c1'
+    connections.setStatus({
+      connectionId: 'c1',
+      state: 'connected',
+      currentDatabase: 'sales',
+      readOnly: false,
+      confirmWrites: true
+    })
+    const tabs = useTabStore()
+    await tabs.openQuery('c1')
+    const id = tabs.activeId!
+    tabs.update<QueryTab>(id, { sql })
+    return id
+  }
+
+  it('runs a script that only reads without asking', async () => {
+    const id = await queryTab('SELECT * FROM t')
+    runQuery.mockResolvedValue(answer())
+    await runQueryTab(id)
+    expect(useConfirmWritesStore().question).toBeNull()
+    expect(runQuery.mock.calls[0][0].confirmedWrites).toBe(false)
+  })
+
+  it('asks first, listing each write, and sends nothing on Cancel', async () => {
+    const id = await queryTab('SELECT 1\nDELETE FROM t WHERE id = 1')
+    const running = runQueryTab(id)
+    await vi.waitFor(() => expect(useConfirmWritesStore().question).not.toBeNull())
+    expect(useConfirmWritesStore().question?.items).toEqual([
+      { line: 2, description: 'DELETE changes data', database: 'sales', danger: undefined }
+    ])
+
+    useConfirmWritesStore().answer(false)
+    expect(await running).toBe(false)
+    expect(runQuery).not.toHaveBeenCalled()
+  })
+
+  it('sends the script marked as confirmed once the answer is yes', async () => {
+    const id = await queryTab('DELETE FROM t WHERE id = 1')
+    runQuery.mockResolvedValue(answer())
+    const running = runQueryTab(id)
+    await vi.waitFor(() => expect(useConfirmWritesStore().question).not.toBeNull())
+    useConfirmWritesStore().answer(true)
+
+    await running
+    expect(runQuery.mock.calls[0][0].confirmedWrites).toBe(true)
   })
 })

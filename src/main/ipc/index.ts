@@ -244,9 +244,14 @@ export function registerIpcHandlers(context: IpcContext): void {
   handle(CHANNELS.connectionsList, () => appData.listConnections())
   handle(CHANNELS.connectionsSave, (_call, input: Partial<ConnectionConfig> & { name: string }) => {
     const saved = appData.saveConnection(input)
-    // Read-only holds the moment it is saved, wherever the connection is
-    // open, rather than from the next time it is opened.
-    if (input.readOnly !== undefined) registry.setReadOnly(saved.id, saved.readOnly === true)
+    // Read-only and confirm writes hold the moment they are saved, wherever
+    // the connection is open, rather than from the next time it is opened.
+    if (input.readOnly !== undefined || input.confirmWrites !== undefined) {
+      registry.setWriteGuard(saved.id, {
+        readOnly: saved.readOnly === true,
+        confirmWrites: saved.confirmWrites === true
+      })
+    }
     return saved
   })
   handle(CHANNELS.connectionsDelete, async (call, id: string) => {
@@ -390,14 +395,16 @@ export function registerIpcHandlers(context: IpcContext): void {
     registry.get(call.scope, changeSet.connectionId).applyChanges(changeSet)
   )
 
-  handle(CHANNELS.dbTruncate, (call, id: string, schema: string, table: string) =>
-    registry.get(call.scope, id).truncateTable(schema, table)
+  handle(
+    CHANNELS.dbTruncate,
+    (call, id: string, schema: string, table: string, confirmed?: boolean) =>
+      registry.get(call.scope, id).truncateTable(schema, table, confirmed)
   )
 
   handle(
     CHANNELS.dbDrop,
-    (call, id: string, schema: string, name: string, type: 'table' | 'view') =>
-      registry.get(call.scope, id).dropObject(schema, name, type)
+    (call, id: string, schema: string, name: string, type: 'table' | 'view', confirmed?: boolean) =>
+      registry.get(call.scope, id).dropObject(schema, name, type, confirmed)
   )
 
   // -- query execution ------------------------------------------------------
@@ -411,6 +418,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       maxRows: request.maxRows,
       executionId,
       asSingleBatch: request.asSingleBatch,
+      confirmedWrites: request.confirmedWrites,
       onMessage: (message: ServerMessage) => {
         sendToWindow(call, CHANNELS.eventServerMessage, {
           connectionId: request.connectionId,

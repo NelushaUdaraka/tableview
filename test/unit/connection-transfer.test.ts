@@ -274,16 +274,26 @@ describe('turning one back into a connection', () => {
     expect(toSaveInput(parseExportFile(file).connections[0]).readOnly).toBe(true)
   })
 
+  it('keeps confirming writes on the machine it moves to', () => {
+    const file = JSON.stringify(buildExport([loaded({ confirmWrites: true })]))
+    const input = toSaveInput(parseExportFile(file).connections[0])
+    expect(input.confirmWrites).toBe(true)
+    expect(input.readOnly).toBe(false)
+  })
+
   it('arrives writable from a file written before read-only existed', () => {
     const exported: Record<string, unknown> = { ...toExportedConnection(loaded()) }
     delete exported.readOnly
+    delete exported.confirmWrites
     const file = JSON.stringify({
       kind: CONNECTION_EXPORT_KIND,
       version: 1,
       exportedAt: '2024-06-01T09:00:00.000Z',
       connections: [exported]
     })
-    expect(toSaveInput(parseExportFile(file).connections[0]).readOnly).toBe(false)
+    const input = toSaveInput(parseExportFile(file).connections[0])
+    expect(input.readOnly).toBe(false)
+    expect(input.confirmWrites).toBe(false)
   })
 
   it('brings no password with it, however the flag reads', () => {

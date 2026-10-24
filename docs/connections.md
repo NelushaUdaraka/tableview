@@ -2,7 +2,7 @@
 
 Saving, organising and opening connections: how they sign in, how they reach the server, and what
 they do once open. Connecting through an AWS bastion has [a page of its own](aws-ssm.md), as does
-[read-only mode](read-only.md).
+[read-only and confirm-writes mode](read-only.md).
 
 ## Saving and organising
 
@@ -35,7 +35,7 @@ they do once open. Connecting through an AWS bastion has [a page of its own](aws
   password, SSH passphrase or AWS credential block is ever written to that file**: an export lands
   in a downloads folder, goes out as an attachment and ends up in a backup, and none of those are
   places for the key to production. What travels is the shape of each connection — including its
-  group, its colour, whether it is read-only and the day it was made — plus a note of which secrets
+  group, its colour, whether it is read-only or confirms its writes and the day it was made — plus a note of which secrets
   it had, so the toast can say how many will need a password entering rather than leaving it to be
   discovered at connect time. A name already saved is left alone rather than imported beside
   itself, so re-importing the same file to pick up one new connection does not leave you with two
@@ -47,8 +47,8 @@ they do once open. Connecting through an AWS bastion has [a page of its own](aws
   TableView's own), the TablePlus tag as its group, and the SSH tunnel when there is one — and
   nothing is saved until *Save*, so it can be looked over and tested first. A name already in the
   list is called out before saving, and saving puts the new one beside it without touching the
-  old; a connection TablePlus kept in a safe mode arrives read-only, since TablePlus has no
-  read-only mode of its own and refusing writes is the nearest TableView has to its warnings; and
+  old; a connection TablePlus kept in any safe mode but *Silent* arrives with *Confirm writes* on,
+  since those modes warn or ask before a query is sent, which is what confirm writes does; and
   what the URL cannot carry — an SSH key file, a Windows sign-in — the form asks for. The
   clipboard is read in the main process, and only a SQL Server URL from TablePlus is handed to the
   window: anything else that was copied, another database's URL with its password in it
@@ -83,7 +83,13 @@ they do once open. Connecting through an AWS bastion has [a page of its own](aws
   toolbars all say which connection it applies to. It is switched from the *Read-only* switch in
   the status bar while connected, or from the padlock beside each connection in the list, without
   opening the connection's settings; it changes at once, with no reconnect, and turning it off
-  always asks first (see [Read-only connections](read-only.md))
+  asks first (see [Read-only connections](read-only.md))
+- **Confirm writes, for the one you sometimes have to change** — writes go through, but each script
+  that writes, each *Apply* and each truncate or drop is shown first, statement by statement with
+  the database it changes, and waits for *Run anyway*; a `DROP`, a `TRUNCATE`, or an `UPDATE` or
+  `DELETE` with no `WHERE` also wants its table's name typed. Like read-only it is enforced in the
+  main process, marked in the list, the status bar and the toolbars, and switched from its own
+  switch beside *Read-only* (see [Confirm writes](read-only.md#confirm-writes))
 - **Kept alive, and put back when it drops** — an idle connection is poked once a minute (the
   *Keepalive* option; 0 turns it off) so an SSM session, an SSH forward or a firewall does not tear
   it down for want of traffic. A connection that goes anyway is reopened in the background with a

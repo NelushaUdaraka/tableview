@@ -88,8 +88,10 @@ const api: RendererApi = {
 
   fetchTableData: (request: TableDataRequest) => invoke(CHANNELS.dbTableData, request),
   applyChanges: (changeSet: TableChangeSet) => invoke(CHANNELS.dbApplyChanges, changeSet),
-  truncateTable: (id, schema, table) => invoke(CHANNELS.dbTruncate, id, schema, table),
-  dropObject: (id, schema, name, type) => invoke(CHANNELS.dbDrop, id, schema, name, type),
+  truncateTable: (id, schema, table, confirmed) =>
+    invoke(CHANNELS.dbTruncate, id, schema, table, confirmed),
+  dropObject: (id, schema, name, type, confirmed) =>
+    invoke(CHANNELS.dbDrop, id, schema, name, type, confirmed),
 
   runQuery: (request: RunQueryRequest) => invoke(CHANNELS.queryRun, request),
   cancelQuery: (connectionId, executionId) =>

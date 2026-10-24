@@ -249,8 +249,13 @@ describe('switching read-only', () => {
   it('saves the setting alone', async () => {
     const store = useConnectionStore()
     await store.load()
-    await store.setReadOnly(store.saved[0], false)
-    expect(saveConnection).toHaveBeenCalledWith({ id: 'c1', name: 'Prod', readOnly: false })
+    await store.setWriteGuard(store.saved[0], { readOnly: false, confirmWrites: false })
+    expect(saveConnection).toHaveBeenCalledWith({
+      id: 'c1',
+      name: 'Prod',
+      readOnly: false,
+      confirmWrites: false
+    })
   })
 
   it('unlocks the open connection straight away', async () => {
@@ -258,9 +263,28 @@ describe('switching read-only', () => {
     const store = useConnectionStore()
     await store.connect('c1')
 
-    await store.setReadOnly(store.saved[0], false)
+    await store.setWriteGuard(store.saved[0], { readOnly: false, confirmWrites: false })
     expect(store.readOnly).toBe(false)
     expect(store.activeStatus?.state).toBe('connected')
+  })
+
+  it('says the open connection now confirms its writes', async () => {
+    connect.mockResolvedValue({ connectionId: 'c1', state: 'connected', readOnly: true })
+    const store = useConnectionStore()
+    await store.connect('c1')
+    expect(store.writeMode).toBe('read-only')
+
+    await store.setWriteGuard(store.saved[0], { readOnly: false, confirmWrites: true })
+    expect(store.writeMode).toBe('confirm')
+  })
+
+  it('keeps confirm writes through a status that does not say', async () => {
+    connect.mockResolvedValue({ connectionId: 'c1', state: 'connected', confirmWrites: true })
+    const store = useConnectionStore()
+    await store.connect('c1')
+
+    store.setStatus({ connectionId: 'c1', state: 'connecting' })
+    expect(store.confirmWrites).toBe(true)
   })
 
   it('leaves the open connection alone when another one is switched', async () => {
@@ -268,7 +292,7 @@ describe('switching read-only', () => {
     const store = useConnectionStore()
     await store.connect('c1')
 
-    await store.setReadOnly({ ...connection('c2', 'Dev'), readOnly: true }, false)
+    await store.setWriteGuard({ ...connection('c2', 'Dev'), readOnly: true }, { readOnly: false, confirmWrites: false })
     expect(store.readOnly).toBe(true)
   })
 })

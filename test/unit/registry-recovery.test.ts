@@ -14,6 +14,7 @@ import type {
   SessionChange,
   SessionChangeListener
 } from '../../src/main/db/types'
+import type { WriteGuard } from '../../src/shared/writeMode'
 import {
   DEFAULT_SQLSERVER_OPTIONS,
   DEFAULT_SSH_CONFIG,
@@ -52,8 +53,8 @@ class FakeClient {
     built.push(this)
   }
 
-  setReadOnly(readOnly: boolean): void {
-    this.currentConfig = { ...this.currentConfig, readOnly }
+  setWriteGuard(guard: WriteGuard): void {
+    this.currentConfig = { ...this.currentConfig, ...guard }
   }
 
   get isConnected(): boolean {
@@ -310,7 +311,7 @@ describe('switching read-only on an open connection', () => {
     await registry.open('win2', config())
     await registry.open('win2', { ...config(), id: 'c2' })
 
-    registry.setReadOnly('c1', true)
+    registry.setWriteGuard('c1', { readOnly: true, confirmWrites: false })
 
     expect(seen.map(({ scope, status }) => [scope, status.connectionId, status.readOnly])).toEqual([
       ['win1', 'c1', true],
@@ -325,7 +326,7 @@ describe('switching read-only on an open connection', () => {
     const seen = listen(registry)
     await registry.open('win1', { ...config(), readOnly: true })
 
-    registry.setReadOnly('c1', true)
+    registry.setWriteGuard('c1', { readOnly: true, confirmWrites: false })
     expect(seen).toHaveLength(0)
   })
 
@@ -334,14 +335,14 @@ describe('switching read-only on an open connection', () => {
     client.connected = false
     client.report({ state: 'reconnecting', error: new Error('socket hang up') })
 
-    registry.setReadOnly('c1', true)
+    registry.setWriteGuard('c1', { readOnly: true, confirmWrites: false })
     expect(registry.status('win1', 'c1')).toMatchObject({ state: 'connecting', readOnly: true })
   })
 
   it('leaves alone a connection nobody has open', () => {
     const registry = new ConnectionRegistry()
     const seen = listen(registry)
-    expect(() => registry.setReadOnly('c1', true)).not.toThrow()
+    expect(() => registry.setWriteGuard('c1', { readOnly: true, confirmWrites: false })).not.toThrow()
     expect(seen).toHaveLength(0)
   })
 
@@ -352,16 +353,30 @@ describe('switching read-only on an open connection', () => {
     // Handed the config as it was before the switch, as a slow tunnel would be.
     const opening = registry.open('win1', config())
 
-    registry.setReadOnly('c1', true)
+    registry.setWriteGuard('c1', { readOnly: true, confirmWrites: false })
     release()
 
     expect(await opening).toMatchObject({ state: 'connected', readOnly: true })
     expect(registry.find('win1', 'c1')?.currentConfig.readOnly).toBe(true)
   })
 
+  it('switches confirm writes the same way, and says so in the status', async () => {
+    const registry = new ConnectionRegistry()
+    const seen = listen(registry)
+    await registry.open('win1', config())
+
+    registry.setWriteGuard('c1', { readOnly: false, confirmWrites: true })
+
+    expect(seen.map(({ status }) => [status.readOnly, status.confirmWrites])).toEqual([
+      [false, true]
+    ])
+    expect(registry.status('win1', 'c1')).toMatchObject({ readOnly: false, confirmWrites: true })
+    expect(registry.find('win1', 'c1')?.currentConfig.confirmWrites).toBe(true)
+  })
+
   it('opens the way it is told when the switch came before it started', async () => {
     const registry = new ConnectionRegistry()
-    registry.setReadOnly('c1', true)
+    registry.setWriteGuard('c1', { readOnly: true, confirmWrites: false })
 
     // Read afresh for this open, so the config is the later word.
     expect(await registry.open('win1', config())).toMatchObject({ readOnly: false })

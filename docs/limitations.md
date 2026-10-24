@@ -34,6 +34,10 @@ Deliberately out of scope for phase 1, in rough priority order for phase 2:
   writes, so the check is the app's own reading of the T-SQL, and it errs towards refusing: `EXEC`
   is turned down even for `sp_help`, and a `#temp` table counts as a write like any other. A login
   that can only read is the guarantee; the setting is the safety net.
+- **Confirm writes lists statements as a lexer sees them.** It lists each statement that writes and
+  spots an `UPDATE` or `DELETE` with no `WHERE` from the words of the script, not a parse of it: a
+  `WHERE` hidden in dynamic SQL is not seen, and a procedure is listed as running a procedure,
+  whatever it does inside. Whether to ask at all is the read-only check, which errs towards asking.
 - **macOS builds do not update themselves.** The release workflow builds for Windows and Linux, so a
   macOS package has no release to update from and does not look for one. Nor does a Linux package
   other than the AppImage and the .deb.

@@ -9,6 +9,7 @@ import WorkspaceView from './views/WorkspaceView.vue'
 import ToastHost from './components/ToastHost.vue'
 import CredentialsExpiredDialog from './components/CredentialsExpiredDialog.vue'
 import ReadOnlyWarningDialog from './components/ReadOnlyWarningDialog.vue'
+import ConfirmWritesDialog from './components/ConfirmWritesDialog.vue'
 import UpdateInstallingOverlay from './components/UpdateInstallingOverlay.vue'
 import { useConnectionStore } from './stores/connections'
 import { useSettingsStore } from './stores/settings'
@@ -190,8 +191,11 @@ onBeforeUnmount(() => {
     <ToastHost />
     <!-- Raised from anywhere a session can run out, so it lives above the views. -->
     <CredentialsExpiredDialog />
-    <!-- Asked by every read-only toggle — the status bar, the list, the form. -->
+    <!-- Asked by every read-only and confirm-writes switch — the status bar,
+         the list, the form. -->
     <ReadOnlyWarningDialog />
+    <!-- Asked before anything writes on a confirm-writes connection. -->
+    <ConfirmWritesDialog />
     <!-- Last, over everything: the app is about to close into an update. -->
     <UpdateInstallingOverlay />
   </div>

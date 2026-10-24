@@ -6,6 +6,7 @@
  * engine in a later phase means writing one more implementation and teaching
  * the registry which one to construct.
  */
+import type { WriteGuard } from '../../shared/writeMode'
 import type {
   AppliedChanges,
   ConnectionConfig,
@@ -61,6 +62,8 @@ export interface ExecuteOptions {
   executionId?: string
   /** Send the text as a single batch instead of splitting it. */
   asSingleBatch?: boolean
+  /** The user confirmed what this writes; a confirm-writes connection refuses a write without it. */
+  confirmedWrites?: boolean
   onMessage?: (message: ServerMessage) => void
 }
 
@@ -102,10 +105,11 @@ export interface DbClient {
   /** Registered by the registry so an unprompted drop reaches the window. */
   onStateChange(listener: ClientStateListener | null): void
   /**
-   * Turns read-only on or off for the open connection. It holds from the next
-   * statement on, with no reconnect — nothing open in the window is lost.
+   * Sets read-only and confirm writes for the open connection. They hold from
+   * the next statement on, with no reconnect — nothing open in the window is
+   * lost.
    */
-  setReadOnly(readOnly: boolean): void
+  setWriteGuard(guard: WriteGuard): void
 
   runScript(text: string, options?: ExecuteOptions): Promise<StatementResult[]>
   /**
@@ -146,6 +150,12 @@ export interface DbClient {
   fetchTableData(request: TableDataRequest): Promise<TableDataResponse>
   applyChanges(changeSet: TableChangeSet): Promise<AppliedChanges>
 
-  truncateTable(schema: string, table: string): Promise<void>
-  dropObject(schema: string, name: string, type: SchemaObjectType): Promise<void>
+  /** `confirmed`: the user was asked, for a confirm-writes connection. */
+  truncateTable(schema: string, table: string, confirmed?: boolean): Promise<void>
+  dropObject(
+    schema: string,
+    name: string,
+    type: SchemaObjectType,
+    confirmed?: boolean
+  ): Promise<void>
 }

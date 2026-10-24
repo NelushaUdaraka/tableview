@@ -41,7 +41,7 @@ describe('parseTablePlusUrl', () => {
         password: "Fake{pw'|x;)y~`.z>9",
         color: '#1971c2',
         group: 'Development',
-        readOnly: false,
+        confirmWrites: false,
         ssh: { ...DEFAULT_SSH_CONFIG }
       },
       colourLabel: 'Blue',
@@ -72,7 +72,7 @@ describe('parseTablePlusUrl', () => {
       password: '',
       color: '',
       group: '',
-      readOnly: false
+      confirmWrites: false
     })
     expect(result.colourLabel).toBeNull()
     expect(parseTablePlusUrl('sqlserver://h?statusColor=nothex').connection.color).toBe('')
@@ -102,15 +102,15 @@ describe('parseTablePlusUrl', () => {
     expect(group('')).toBe('')
   })
 
-  it('arrives read-only for any safe mode but Silent', () => {
-    const readOnly = (query: string): boolean =>
-      parseTablePlusUrl(`sqlserver://h/db${query}`).connection.readOnly
-    expect(readOnly('?safeModeLevel=0&advancedSafeModeLevel=0')).toBe(false)
-    expect(readOnly('?safeModeLevel=1&advancedSafeModeLevel=0')).toBe(true)
-    expect(readOnly('?safeModeLevel=1&advancedSafeModeLevel=1')).toBe(true)
-    expect(readOnly('?safeModeLevel=2&advancedSafeModeLevel=0')).toBe(true)
-    expect(readOnly('?safeModeLevel=2&advancedSafeModeLevel=1')).toBe(true)
-    expect(readOnly('')).toBe(false)
+  it('arrives confirming writes for any safe mode but Silent', () => {
+    const confirms = (query: string): boolean =>
+      parseTablePlusUrl(`sqlserver://h/db${query}`).connection.confirmWrites
+    expect(confirms('?safeModeLevel=0&advancedSafeModeLevel=0')).toBe(false)
+    expect(confirms('?safeModeLevel=1&advancedSafeModeLevel=0')).toBe(true)
+    expect(confirms('?safeModeLevel=1&advancedSafeModeLevel=1')).toBe(true)
+    expect(confirms('?safeModeLevel=2&advancedSafeModeLevel=0')).toBe(true)
+    expect(confirms('?safeModeLevel=2&advancedSafeModeLevel=1')).toBe(true)
+    expect(confirms('')).toBe(false)
   })
 
   it('brings an SSH tunnel with a password', () => {
@@ -221,8 +221,8 @@ describe('tablePlusUrlFromClipboard', () => {
 describe('tablePlusStatus', () => {
   const SAME_NAME =
     'You already have a connection called “App DEV”. Saving adds this one beside it; that one stays as it is.'
-  const READ_ONLY =
-    'TablePlus had a safe mode on for this one, so it arrives read-only. Untick Read-only before saving if you do not want that.'
+  const CONFIRMS =
+    'TablePlus had a safe mode on for this one, so it arrives confirming writes: anything that would change the database is shown to you before it runs. Choose Writable under Writes before saving if you do not want that.'
   const KEY_FILE = 'Choose the SSH key file on the Tunnel tab: TablePlus does not put it in the URL.'
   const NO_LOGIN =
     'No login came with this URL. If the connection signs in with Windows or Microsoft Entra ID, set that up by hand before saving.'
@@ -259,8 +259,8 @@ describe('tablePlusStatus', () => {
     ).not.toContain(SAME_NAME)
   })
 
-  it('says a safe mode arrived as read-only', () => {
-    expect(statusOf('sqlserver://appuser@h/db?safeModeLevel=2').warnings).toContain(READ_ONLY)
+  it('says a safe mode arrived as confirming writes', () => {
+    expect(statusOf('sqlserver://appuser@h/db?safeModeLevel=2').warnings).toContain(CONFIRMS)
   })
 
   it('asks for the key file until one is chosen', () => {
@@ -279,6 +279,6 @@ describe('tablePlusStatus', () => {
       statusOf('sqlserver+ssh://deploy@b/h/db?name=App%20DEV&usePrivateKey=true&safeModeLevel=1', {
         savedNames: ['App DEV']
       }).warnings
-    ).toEqual([SAME_NAME, READ_ONLY, KEY_FILE, NO_LOGIN])
+    ).toEqual([SAME_NAME, CONFIRMS, KEY_FILE, NO_LOGIN])
   })
 })

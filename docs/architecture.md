@@ -34,7 +34,9 @@ src/
 │   ├── connectionTransfer.ts the connection export file, and what it leaves out
 │   ├── tableplus.ts          a connection copied out of TablePlus as a URL, and what it fills in
 │   ├── sql/                  identifier escaping, T-SQL lexer, query builders, and
-│   │                         readOnly.ts — what a read-only connection refuses to send
+│   │                         readOnly.ts — what a read-only connection refuses to send,
+│   │                         and every write a confirm-writes one asks about
+│   ├── writeMode.ts          read-only and confirm writes, and which switch asks first
 │   ├── sessions.ts           a query tab's session: when it follows the sidebar, when a run
 │   │                         after losing one is refused, and what the tab says
 │   ├── serialize.ts          driver values ⇄ IPC-safe cell values
@@ -53,6 +55,7 @@ src/
     ├── lib/lineDiff.ts       what differs from a routine's stored definition, and putting one change back
     ├── lib/changeTracking.ts the editor's change marks, the peek under a change, and its revert
     ├── lib/runQueryTab.ts    runs a query tab, on screen or not, and says whether it saved a routine
+    ├── lib/confirmWrites.ts  what the confirm-writes question lists, and when a typed name counts
     ├── lib/tabSessions.ts    ending a tab's session, and stopping the query running on it
     ├── lib/sortConnections.ts the orders the connection list can be read in
     ├── lib/updateStatus.ts   the Settings line about updating, and the one button beside it
@@ -62,7 +65,8 @@ src/
     ├── styles/index.css      design tokens for both themes, and the shared controls
     ├── stores/               connections, schema, tabs (and panes), library,
     │                         settings, toasts, busy (the window's progress bar),
-    │                         read-only (the question before one may write again),
+    │                         read-only (the question before one may write freely again),
+    │                         confirmWrites (the question before a write is sent),
     │                         updates (what a window says about a new release)
     ├── components/           title bar, grid, row panel (and its JSON tree),
     │                         editor, sidebar (and its structure tree), dialogs

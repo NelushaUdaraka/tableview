@@ -13,6 +13,7 @@ import { ACCENT_SWATCHES } from '@shared/accent'
 import { parseAwsCredentials } from '@shared/aws/credentials'
 import { isLoopbackHost } from '@shared/hosts'
 import type { TablePlusImport } from '@shared/tableplus'
+import { switchAsks, writeModeOf } from '@shared/writeMode'
 import { AWS_REGIONS, describeRegion, isRegionLike } from '@shared/aws/regions'
 import { api } from '../lib/api'
 import { useReadOnlyStore } from '../stores/readOnly'
@@ -82,6 +83,7 @@ function blank(): Partial<ConnectionConfig> & { name: string } {
     domain: '',
     savePassword: true,
     readOnly: false,
+    confirmWrites: false,
     options: { ...DEFAULT_SQLSERVER_OPTIONS },
     ssh: { ...DEFAULT_SSH_CONFIG },
     ssm: { ...DEFAULT_SSM_CONFIG }
@@ -132,6 +134,7 @@ watch(
       domain: connection.domain ?? '',
       savePassword: connection.savePassword,
       readOnly: connection.readOnly === true,
+      confirmWrites: connection.confirmWrites === true,
       options: { ...DEFAULT_SQLSERVER_OPTIONS, ...connection.options },
       ssh: { ...DEFAULT_SSH_CONFIG, ...connection.ssh, password: '', passphrase: '' },
       ssm: { ...DEFAULT_SSM_CONFIG, ...connection.ssm }
@@ -143,18 +146,22 @@ watch(
 const readOnlyPrompt = useReadOnlyStore()
 
 /**
- * Unticking read-only on a connection saved that way asks first, the same
- * question every read-only toggle asks; ticking it, or unticking a box ticked
- * in this sitting, just happens.
+ * Unticking a box that leaves a connection writing without asking — read-only
+ * with confirm writes off, or confirm writes with read-only off — asks first,
+ * the same question every switch asks, when the connection was saved guarded.
+ * Ticking either, or unticking what was ticked in this sitting, just happens.
  */
-async function onReadOnlyChange(event: Event): Promise<void> {
+async function onGuardChange(event: Event, setting: 'readOnly' | 'confirmWrites'): Promise<void> {
   const box = event.target as HTMLInputElement
-  if (box.checked || !props.connection?.readOnly) {
-    form.readOnly = box.checked
+  const saved = props.connection
+  const next = { readOnly: form.readOnly, confirmWrites: form.confirmWrites, [setting]: box.checked }
+  const from = saved ? writeModeOf(saved) : 'write'
+  if (!saved || !switchAsks(from, writeModeOf(next)) || writeModeOf(form) === 'write') {
+    form[setting] = box.checked
     return
   }
   box.checked = true
-  if (await readOnlyPrompt.confirmWritable(props.connection)) form.readOnly = false
+  if (await readOnlyPrompt.confirmWritable(saved, writeModeOf(form))) form[setting] = false
 }
 
 /**
@@ -693,13 +700,34 @@ async function browseForKey(): Promise<void> {
 
       <div class="form__toggle">
         <label class="checkbox">
-          <input :checked="form.readOnly" type="checkbox" @change="onReadOnlyChange" />
+          <input
+            :checked="form.readOnly"
+            type="checkbox"
+            @change="onGuardChange($event, 'readOnly')"
+          />
           <span>Read-only</span>
         </label>
         <span class="field__hint form__toggle-hint">
           Table edits, truncate and drop are switched off, and a statement that would change
           anything is stopped before it is sent. A safety net for the window you took for
           staging — the login itself can still write.
+        </span>
+      </div>
+
+      <div class="form__toggle">
+        <label class="checkbox">
+          <input
+            :checked="form.confirmWrites"
+            type="checkbox"
+            @change="onGuardChange($event, 'confirmWrites')"
+          />
+          <span>Confirm writes</span>
+        </label>
+        <span class="field__hint form__toggle-hint">
+          For the connection you do sometimes need to change: a script that writes, table edits,
+          truncate and drop are shown to you first, and run only once you say so. A drop, a
+          truncate, or an UPDATE or DELETE with no WHERE also wants its table's name typed.
+          With Read-only on as well, Read-only wins, and this is where turning it off lands.
         </span>
       </div>
     </section>

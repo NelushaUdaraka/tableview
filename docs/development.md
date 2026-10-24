@@ -101,7 +101,7 @@ Three layers, all runnable on Linux:
 
 | Command | What it covers |
 | --- | --- |
-| `npm test` | 1049 unit tests — SQL building, T-SQL lexing, the read-only check, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh, the columns a table shows, TablePlus URLs, when the app updates itself |
+| `npm test` | 1156 unit tests — SQL building, T-SQL lexing, the read-only check and what confirm writes lists, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh, the columns a table shows, TablePlus URLs, when the app updates itself |
 | `npm run test:integration` | 72 tests against a **real SQL Server 2022** and a **real sshd** |
 | `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
 
@@ -119,7 +119,7 @@ and flips `AllowTcpForwarding` on, which the `linuxserver/openssh-server` image 
 ### End-to-end
 
 ```bash
-scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | table-tools | routines | auto-refresh | unsaved | read-only | ssm-form
+scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | table-tools | routines | auto-refresh | unsaved | read-only | confirm-writes | ssm-form
 ```
 
 On a headless box it starts Xvfb itself. It needs Electron's usual Linux libraries:
@@ -192,6 +192,16 @@ The suites:
   list, and the row's ⋮ menu, turn a connection on and, after the question, off without connecting
   it; and in the form, unticking it asks over the form, Escape answers only the question, and
   *Cancel* leaves the saved setting as it was
+- **confirm-writes** — saves a writable connection and one that confirms its writes, and checks the
+  list, the status bar and the query and table toolbars mark only that one. A script that reads
+  runs without a question; one that writes stops on the question, listing the `DELETE` with its line
+  and database, with the focus on *Cancel*: Escape sends nothing and *Run anyway* runs it. An
+  `UPDATE` with no `WHERE` keeps *Run anyway* asleep until the table's name is typed, in any case
+  but not in part. The same writes sent straight to the main process without the mark — a script,
+  staged edits, truncate, drop, a raw filter — are each refused, and the rows are counted. *Apply*
+  in a table and *Truncate* from the tree ask the same question. Last the switch: off asks first
+  (*Keep confirming* has the focus, Escape keeps it), after which a write runs without a question;
+  on does not ask; and read-only turned on and off again lands back on confirming without asking
 - **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block
   with *Paste from clipboard* (after checking that something else on the clipboard never reaches
   the box), fetches the account's instances and picks the bastion from the list (including the

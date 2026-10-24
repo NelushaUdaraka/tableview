@@ -358,6 +358,14 @@ defineExpose({
               <AppIcon name="lock" :size="11" />
               Read-only
             </span>
+            <span
+              v-else-if="connections.writeMode === 'confirm'"
+              class="badge query__confirms"
+              title="This connection confirms writes: a script that would change the database is shown to you first, and runs only once you say so"
+            >
+              <AppIcon name="shield-check" :size="11" />
+              Confirm writes
+            </span>
 
             <!-- A routine's tab says how far it has moved from what is stored,
                  and steps through the changes the gutter marks. -->
@@ -486,7 +494,8 @@ defineExpose({
 .query__toolbar .btn {
   flex: 0 0 auto;
 }
-.query__readonly {
+.query__readonly,
+.query__confirms {
   flex: 0 0 auto;
   gap: 4px;
 }

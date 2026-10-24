@@ -28,7 +28,8 @@ export interface TablePlusConnection {
   color: string
   /** The TablePlus tag with its first letter capitalised, or '' for none. */
   group: string
-  readOnly: boolean
+  /** TablePlus's safe modes, which warn or ask before a query is sent. */
+  confirmWrites: boolean
   /** `{ ...DEFAULT_SSH_CONFIG }` when the URL has no tunnel. */
   ssh: SshConfig
 }
@@ -167,9 +168,8 @@ export function parseTablePlusUrl(text: string): TablePlusImport {
       color: swatch?.hex ?? '',
       group: groupFrom(params.get('env')),
       // TablePlus has no read-only mode: every safe mode but Silent warns or
-      // asks before a query is sent, and the nearest TableView has to either
-      // is refusing the writes outright.
-      readOnly: Number(params.get('safeModeLevel')) > 0,
+      // asks before a query is sent, which is what confirm writes does.
+      confirmWrites: Number(params.get('safeModeLevel')) > 0,
       ssh: tunnelled ? tunnelFrom(url, usesKey) : { ...DEFAULT_SSH_CONFIG }
     },
     colourLabel: swatch?.label ?? null,
@@ -218,9 +218,9 @@ export function tablePlusStatus(
       `You already have a connection called “${name}”. Saving adds this one beside it; that one stays as it is.`
     )
   }
-  if (connection.readOnly) {
+  if (connection.confirmWrites) {
     warnings.push(
-      'TablePlus had a safe mode on for this one, so it arrives read-only. Untick Read-only before saving if you do not want that.'
+      'TablePlus had a safe mode on for this one, so it arrives confirming writes: anything that would change the database is shown to you before it runs. Choose Writable under Writes before saving if you do not want that.'
     )
   }
   if (result.keyFileNeeded && !state.keyFileChosen) {

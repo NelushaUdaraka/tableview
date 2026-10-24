@@ -59,6 +59,27 @@ function toggleReadOnly(): void {
   if (connection) void readOnly.setReadOnly(connection, !connections.readOnly)
 }
 
+/**
+ * Flips the open connection's confirm writes. On happens at once; off asks
+ * first while read-only is off, since that leaves it writing without asking.
+ */
+function toggleConfirmWrites(): void {
+  const connection = connections.active
+  if (connection) void readOnly.setConfirmWrites(connection, !connections.confirmWrites)
+}
+
+/** What the confirm-writes switch says it does, given read-only beside it. */
+const confirmTitle = computed(() => {
+  if (connections.readOnly) {
+    return connections.confirmWrites
+      ? 'Confirm writes: read-only is on, so nothing writes now; once read-only is off, each write is shown to you and asked about first. Click to turn it off.'
+      : 'Read-only is on, so nothing writes now. Click to have writes asked about once read-only is off.'
+  }
+  return connections.confirmWrites
+    ? 'Confirm writes: each script that writes, table edit, truncate and drop is shown to you and waits for a yes. Click to turn it off.'
+    : 'Writes go straight through. Click to be asked before each one.'
+})
+
 /** Where the cursor sits in the active query tab, pushed here by QueryView. */
 const statementLine = computed(() =>
   tabs.active?.kind === 'query' ? tabs.active.statementLine : null
@@ -117,6 +138,28 @@ const version = computed(() => {
       <AppIcon :name="connections.readOnly ? 'lock' : 'lock-open'" :size="12" />
       Read-only
       <span class="switch" :class="{ 'switch--on': connections.readOnly }" aria-hidden="true"></span>
+    </button>
+    <!-- Beside it, and labelled either way for the same reason. With read-only
+         on it waits behind it: it is what turning read-only off lands on. -->
+    <button
+      v-if="connections.inSession && connections.active"
+      class="status__seg status__lock status__confirm"
+      :class="{
+        'status__confirm--on': connections.writeMode === 'confirm',
+        'status__confirm--waiting': connections.readOnly
+      }"
+      role="switch"
+      :aria-checked="connections.confirmWrites"
+      :title="confirmTitle"
+      @click="toggleConfirmWrites"
+    >
+      <AppIcon name="shield-check" :size="12" />
+      Confirm writes
+      <span
+        class="switch"
+        :class="{ 'switch--on': connections.confirmWrites }"
+        aria-hidden="true"
+      ></span>
     </button>
 
     <template v-if="status?.state === 'connected'">
@@ -243,12 +286,18 @@ const version = computed(() => {
   background: var(--bg-hover-strong);
   color: var(--text-primary);
 }
-.status__lock--on {
+.status__lock--on,
+.status__confirm--on {
   color: var(--text-primary);
   font-weight: 500;
 }
-.status__lock--on .icon {
+.status__lock--on .icon,
+.status__confirm--on .icon {
   color: var(--accent-fg);
+}
+/* Behind read-only it changes nothing yet, and says so by staying quiet. */
+.status__confirm--waiting .switch {
+  opacity: 0.6;
 }
 .status__transport {
   display: inline-flex;

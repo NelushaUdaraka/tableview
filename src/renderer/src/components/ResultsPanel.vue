@@ -10,6 +10,7 @@
 import { computed, ref, watch } from 'vue'
 import {
   READ_ONLY_CONNECTION,
+  WRITE_NOT_CONFIRMED,
   type CellValue,
   type ColumnMeta,
   type QueryExecutionResult
@@ -350,6 +351,11 @@ function durationLabel(ms: number): string {
           <div v-if="error.code === READ_ONLY_CONNECTION" class="message__title">
             <AppIcon name="lock" :size="14" />
             Not run on a read-only connection<template v-if="error.lineNumber">, Line {{ error.lineNumber }}</template>
+          </div>
+          <!-- Nor one a confirm-writes connection was sent without a yes. -->
+          <div v-else-if="error.code === WRITE_NOT_CONFIRMED" class="message__title">
+            <AppIcon name="shield-check" :size="14" />
+            Not run without confirming<template v-if="error.lineNumber">, Line {{ error.lineNumber }}</template>
           </div>
           <div v-else class="message__title">
             <AppIcon name="circle-x" :size="14" />

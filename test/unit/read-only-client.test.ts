@@ -12,6 +12,7 @@ import {
   DEFAULT_SSH_CONFIG,
   DEFAULT_SSM_CONFIG,
   READ_ONLY_CONNECTION,
+  WRITE_NOT_CONFIRMED,
   type ConnectionConfig,
   type TableChangeSet,
   type TableDataRequest
@@ -116,7 +117,7 @@ describe('a writable connection', () => {
 describe('switching read-only on an open connection', () => {
   it('refuses writes from the moment it is turned on', async () => {
     const writable = client(false)
-    writable.setReadOnly(true)
+    writable.setWriteGuard({ readOnly: true, confirmWrites: false })
 
     const [result] = await writable.runScript('DELETE FROM dbo.orders')
     expect(result.error?.code).toBe(READ_ONLY_CONNECTION)
@@ -127,9 +128,72 @@ describe('switching read-only on an open connection', () => {
 
   it('sends writes on again once it is turned off', async () => {
     const readOnly = client(true)
-    readOnly.setReadOnly(false)
+    readOnly.setWriteGuard({ readOnly: false, confirmWrites: false })
 
     await expect(readOnly.runScript('DELETE FROM dbo.orders')).rejects.toThrow(/Not connected/)
     expect(readOnly.currentConfig.readOnly).toBe(false)
+  })
+})
+
+/**
+ * A confirm-writes connection lets a write through only when the run says it
+ * was confirmed; anything else is refused before it is sent, so no window can
+ * skip the question.
+ */
+describe('a confirm-writes connection', () => {
+  function confirming(): SqlServerClient {
+    const confirmWrites = client(false)
+    confirmWrites.setWriteGuard({ readOnly: false, confirmWrites: true })
+    return confirmWrites
+  }
+
+  it('refuses a script that writes and was not confirmed, saying which line', async () => {
+    const [result] = await confirming().runScript('SELECT 1\nDELETE FROM dbo.orders')
+    expect(result.error).toMatchObject({ code: WRITE_NOT_CONFIRMED, lineNumber: 2 })
+    expect(result.error?.message).toMatch(/^DELETE changes data — this connection confirms writes/)
+  })
+
+  it('refuses a tab’s unconfirmed write the same way, before its session opens', async () => {
+    const run = await confirming().runInSession('tab-1', 'UPDATE t SET a = 1')
+    expect(run.statements[0].error?.code).toBe(WRITE_NOT_CONFIRMED)
+  })
+
+  it('sends on a confirmed script, and a script that only reads', async () => {
+    await expect(
+      confirming().runScript('DELETE FROM dbo.orders', { confirmedWrites: true })
+    ).rejects.toThrow(/Not connected/)
+    await expect(confirming().runScript('SELECT 1')).rejects.toThrow(/Not connected/)
+  })
+
+  it('refuses unconfirmed edits, truncate and drop, and lets confirmed ones through', async () => {
+    const confirmWrites = confirming()
+    await expect(confirmWrites.applyChanges(changeSet)).rejects.toMatchObject({
+      code: WRITE_NOT_CONFIRMED
+    })
+    await expect(confirmWrites.truncateTable('dbo', 'orders')).rejects.toMatchObject({
+      code: WRITE_NOT_CONFIRMED
+    })
+    await expect(confirmWrites.dropObject('dbo', 'orders', 'table')).rejects.toMatchObject({
+      code: WRITE_NOT_CONFIRMED
+    })
+    await expect(confirmWrites.applyChanges({ ...changeSet, confirmed: true })).rejects.toThrow(
+      /Not connected/
+    )
+    await expect(confirmWrites.truncateTable('dbo', 'orders', true)).rejects.toThrow(
+      /Not connected/
+    )
+  })
+
+  it('turns down a write in a raw filter, which has no way to be confirmed', async () => {
+    await expect(
+      confirming().fetchTableData(rawFilter('1 = 1; DELETE FROM dbo.orders'))
+    ).rejects.toMatchObject({ code: WRITE_NOT_CONFIRMED })
+  })
+
+  it('stays read-only while read-only is on as well', async () => {
+    const both = client(true)
+    both.setWriteGuard({ readOnly: true, confirmWrites: true })
+    const [result] = await both.runScript('DELETE FROM dbo.orders', { confirmedWrites: true })
+    expect(result.error?.code).toBe(READ_ONLY_CONNECTION)
   })
 })

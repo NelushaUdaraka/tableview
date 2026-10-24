@@ -183,6 +183,7 @@ export class AppData {
       // Omitted leaves it as it was: a safety setting must not come off
       // because an edit was about something else.
       readOnly: (input.readOnly ?? existing?.readOnly) === true,
+      confirmWrites: (input.confirmWrites ?? existing?.confirmWrites) === true,
       // An import from a Beekeeper Clone export arrives on its old default name.
       options: withCurrentAppName({
         ...DEFAULT_SQLSERVER_OPTIONS,

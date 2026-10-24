@@ -44,6 +44,8 @@ export interface ExportedConnection {
   savePassword: boolean
   /** Travels: a connection marked read-only here should not arrive writable. */
   readOnly?: boolean
+  /** Travels, for the same reason. */
+  confirmWrites?: boolean
   options: SqlServerOptions
   ssh: Omit<SshConfig, 'password' | 'passphrase'>
   ssm: Omit<SsmConfig, 'credentials' | 'credentialSummary' | 'credentialsText'>
@@ -111,6 +113,7 @@ export function toExportedConnection(connection: SavedConnection): ExportedConne
     domain: connection.domain || undefined,
     savePassword: connection.savePassword,
     readOnly: connection.readOnly === true,
+    confirmWrites: connection.confirmWrites === true,
     options: { ...connection.options },
     ssh: { ...ssh } as ExportedConnection['ssh'],
     ssm: { ...ssm } as ExportedConnection['ssm'],
@@ -190,6 +193,7 @@ export function parseExportFile(contents: string): ConnectionExportFile {
       group: text(record.group),
       // Files from before the setting existed have no flag, and mean writable.
       readOnly: record.readOnly === true,
+      confirmWrites: record.confirmWrites === true,
       missingSecrets: Array.isArray(record.missingSecrets)
         ? (record.missingSecrets as MissingSecret[])
         : []
@@ -253,6 +257,7 @@ export function toSaveInput(
     // typed in — the setting travels even though the secret does not.
     savePassword: connection.savePassword,
     readOnly: connection.readOnly === true,
+    confirmWrites: connection.confirmWrites === true,
     options: connection.options,
     ssh: connection.ssh as SshConfig,
     ssm: connection.ssm as SsmConfig,

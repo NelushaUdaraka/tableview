@@ -6,6 +6,8 @@ import AppIcon from './AppIcon.vue'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
 import ObjectStructureTree from './ObjectStructureTree.vue'
 import { useConnectionStore } from '../stores/connections'
+import { useConfirmWritesStore } from '../stores/confirmWrites'
+import { dropWrite, truncateWrite } from '../lib/confirmWrites'
 import { useLibraryStore } from '../stores/library'
 import { useSchemaStore } from '../stores/schema'
 import { useTabStore } from '../stores/tabs'
@@ -23,6 +25,7 @@ const emit = defineEmits<{
 }>()
 
 const connections = useConnectionStore()
+const confirmWrites = useConfirmWritesStore()
 const schema = useSchemaStore()
 const library = useLibraryStore()
 const tabs = useTabStore()
@@ -154,15 +157,34 @@ async function onMenuSelect(action: string): Promise<void> {
       case 'exec':
         emit('open-sql', `EXEC ${qualified};`, target.name)
         break
+      // A connection that confirms its writes asks its own question, which
+      // wants the name typed; any other asks the plain one.
       case 'truncate': {
-        if (!confirm(`Delete every row from ${qualified}? This cannot be undone.`)) return
-        await api.truncateTable(id, target.schema, target.name)
+        const confirmed = confirmWrites.asking()
+        if (confirmed) {
+          const item = truncateWrite(target.schema, target.name, currentDatabase.value)
+          const title = `Truncate ${target.schema}.${target.name}?`
+          if (!(await confirmWrites.askAbout([item], { title, action: 'Truncate anyway' }))) {
+            return
+          }
+        } else if (!confirm(`Delete every row from ${qualified}? This cannot be undone.`)) {
+          return
+        }
+        await api.truncateTable(id, target.schema, target.name, confirmed)
         toasts.success(`Truncated ${qualified}`)
         break
       }
       case 'drop': {
-        if (!confirm(`Drop ${qualified}? This cannot be undone.`)) return
-        await api.dropObject(id, target.schema, target.name, target.type as 'table' | 'view')
+        const type = target.type as 'table' | 'view'
+        const confirmed = confirmWrites.asking()
+        if (confirmed) {
+          const item = dropWrite(target.schema, target.name, type, currentDatabase.value)
+          const title = `Drop ${target.schema}.${target.name}?`
+          if (!(await confirmWrites.askAbout([item], { title, action: 'Drop anyway' }))) return
+        } else if (!confirm(`Drop ${qualified}? This cannot be undone.`)) {
+          return
+        }
+        await api.dropObject(id, target.schema, target.name, type, confirmed)
         toasts.success(`Dropped ${qualified}`)
         await schema.loadAll(id)
         break

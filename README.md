@@ -57,6 +57,8 @@ the connections where a mistake would hurt. It is built with Electron, Vue 3 and
 
 **Safety**
 - Read-only connections: a script that writes is refused before any of it is sent
+- Confirm-writes connections: every statement that writes is shown, and waits for a yes, before
+  any of it is sent
 - Staged edits and unsaved routines are never dropped without asking
 - A connection's colour tints its whole window, so production never looks like staging
 
@@ -99,7 +101,8 @@ name.
   colours
 - [Connecting through an AWS bastion](docs/aws-ssm.md) — SSM port forwarding, finding the bastion,
   credentials
-- [Read-only connections](docs/read-only.md) — what is refused, and how it is switched
+- [Read-only and confirm writes](docs/read-only.md) — what is refused or asked about, and how it
+  is switched
 - [Tables](docs/tables.md) — the schema tree, browsing, filtering, editing and export
 - [Query editor](docs/query-editor.md) — running scripts, and editing stored procedures
 - [The workspace](docs/workspace.md) — the title bar, panes, tabs and windows

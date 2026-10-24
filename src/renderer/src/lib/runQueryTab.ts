@@ -9,7 +9,9 @@
  */
 import { markRaw } from 'vue'
 import { api } from './api'
+import { scriptWrites } from './confirmWrites'
 import { useBusyStore } from '../stores/busy'
+import { useConfirmWritesStore } from '../stores/confirmWrites'
 import { useConnectionStore } from '../stores/connections'
 import { useCredentialsStore } from '../stores/credentials'
 import { useLibraryStore } from '../stores/library'
@@ -52,6 +54,28 @@ export async function runQueryTab(tabId: string, text?: string): Promise<boolean
     })
   }
 
+  // A connection that confirms its writes shows what this one would change
+  // first, and sends nothing until it is told to. The main process checks
+  // again, and refuses a write that does not come marked as confirmed.
+  let confirmedWrites = false
+  const confirmWrites = useConfirmWritesStore()
+  if (confirmWrites.asking()) {
+    const database =
+      tab.session?.database ??
+      tab.routine?.database ??
+      connections.activeStatus?.currentDatabase ??
+      ''
+    const writes = scriptWrites(body, database)
+    if (writes.length > 0) {
+      const proceed = await confirmWrites.askAbout(writes, {
+        title: writes.length === 1 ? 'Run a statement that writes?' : 'Run statements that write?',
+        action: 'Run anyway'
+      })
+      if (!proceed) return false
+      confirmedWrites = true
+    }
+  }
+
   const executionId = `exec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   // A loss said after the last run has been read; this run says its own.
   tabs.update<QueryTab>(tabId, { running: true, executionId, sessionLost: undefined })
@@ -73,7 +97,8 @@ export async function runQueryTab(tabId: string, text?: string): Promise<boolean
       // The tab's own session, kept from one run to the next; a routine's
       // stays in the database the routine lives in.
       sessionId: tab.id,
-      pinnedDatabase: tab.routine?.database
+      pinnedDatabase: tab.routine?.database,
+      confirmedWrites
     })
     // markRaw keeps the (potentially huge) result set out of the reactivity
     // graph; it is only ever replaced, never mutated field by field.

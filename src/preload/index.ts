@@ -85,6 +85,8 @@ const api: RendererApi = {
   getObjectDefinition: (id, schema, name) =>
     invoke(CHANNELS.dbObjectDefinition, id, schema, name),
   getAutocompleteSchema: (id) => invoke(CHANNELS.dbAutocomplete, id),
+  searchDefinitions: (request) => invoke(CHANNELS.dbSearchDefinitions, request),
+  findReferences: (id, schema, name) => invoke(CHANNELS.dbFindReferences, id, schema, name),
 
   fetchTableData: (request: TableDataRequest) => invoke(CHANNELS.dbTableData, request),
   applyChanges: (changeSet: TableChangeSet) => invoke(CHANNELS.dbApplyChanges, changeSet),

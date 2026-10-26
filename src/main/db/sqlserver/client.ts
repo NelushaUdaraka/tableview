@@ -13,6 +13,9 @@ import {
   ColumnMeta,
   ConnectionConfig,
   DatabaseSummary,
+  DefinitionMatch,
+  DefinitionSearchResult,
+  MODULE_KINDS,
   QueryResultSet,
   RoutineObject,
   RoutineType,
@@ -31,6 +34,7 @@ import {
   TableIndex,
   TableStructure,
   TableTrigger,
+  UnsearchableModule,
   DEFAULT_SQLSERVER_OPTIONS,
   READ_ONLY_CONNECTION,
   SESSION_LOST,
@@ -54,6 +58,7 @@ import {
   renderColumnType
 } from '../../../shared/sql/builder'
 import { splitBatches } from '../../../shared/sql/statements'
+import { containsPattern, matchingLines, moduleTypeOf } from '../../../shared/sql/definitionSearch'
 import { findWrite, findWriteInScript, type WriteStatement } from '../../../shared/sql/readOnly'
 import { SshTunnel } from '../../tunnel/ssh'
 import { SsmTunnel } from '../../tunnel/ssm'
@@ -66,6 +71,7 @@ import { planReconnect } from '../reconnect'
 import type {
   ClientStateListener,
   DbClient,
+  DefinitionSearch,
   ExecuteOptions,
   ServerInfo,
   SessionChange,
@@ -78,6 +84,44 @@ import { DriverColumn, declarationOf, isReadOnlyType, jsKindOf, renderDriverType
 
 
 const DEFAULT_MAX_ROWS = 50000
+
+/** At most this many objects come back from one definition search. */
+const MAX_DEFINITION_MATCHES = 500
+
+interface ModuleRow {
+  schema: string
+  name: string
+  type: string
+  definition?: string | null
+}
+
+/**
+ * The matching lines of each definition. A search keeps only the objects with
+ * a line to show; a reference list keeps every object, lines or not.
+ */
+function moduleMatches(
+  rows: ModuleRow[],
+  text: string,
+  options: { matchCase?: boolean; wholeWord?: boolean },
+  needLines: boolean
+): DefinitionMatch[] {
+  const matches: DefinitionMatch[] = []
+  for (const row of rows) {
+    const type = moduleTypeOf(row.type)
+    if (!type || typeof row.definition !== 'string') continue
+    const { lines, moreLines } = matchingLines(row.definition, text, options)
+    if (needLines && lines.length === 0) continue
+    matches.push({ schema: row.schema, name: row.name, type, lines, moreLines })
+  }
+  return matches
+}
+
+function unsearchableModules(rows: ModuleRow[]): UnsearchableModule[] {
+  return rows.flatMap((row) => {
+    const type = moduleTypeOf(row.type)
+    return type ? [{ schema: row.schema, name: row.name, type }] : []
+  })
+}
 
 /**
  * How long to let a tunnel explain itself after the driver has given up.
@@ -1295,6 +1339,48 @@ export class SqlServerClient implements DbClient {
       { name: 'object', value: qualify(schema, table) }
     ])
     return groupForeignKeys(rows)
+  }
+
+  /**
+   * Finds text in the definitions of the current database's procedures,
+   * functions, views and triggers, with the lines it is on.
+   */
+  async searchDefinitions(search: DefinitionSearch): Promise<DefinitionSearchResult> {
+    const text = search.text.trim()
+    if (!text) return { matches: [], unsearchable: [], truncated: false }
+    const kinds = search.kinds?.length ? search.kinds : MODULE_KINDS
+    const bits: SqlParam[] = MODULE_KINDS.map((kind) => ({
+      name: `${kind}s`,
+      value: kinds.includes(kind) ? 1 : 0
+    }))
+    const [rows, hidden] = await Promise.all([
+      this.queryObjects<ModuleRow>(Q.searchDefinitionsQuery(Boolean(search.matchCase)), [
+        ...bits,
+        { name: 'pattern', value: containsPattern(text) },
+        { name: 'limit', value: MAX_DEFINITION_MATCHES + 1 }
+      ]),
+      this.queryObjects<ModuleRow>(Q.UNSEARCHABLE_MODULES, bits)
+    ])
+    return {
+      matches: moduleMatches(rows.slice(0, MAX_DEFINITION_MATCHES), text, search, true),
+      unsearchable: unsearchableModules(hidden),
+      truncated: rows.length > MAX_DEFINITION_MATCHES
+    }
+  }
+
+  /** The routines, views and triggers that use a table, view or routine. */
+  async findReferences(schema: string, name: string): Promise<DefinitionSearchResult> {
+    const rows = await this.queryObjects<ModuleRow>(Q.REFERENCING_MODULES, [
+      { name: 'object', value: qualify(schema, name) },
+      { name: 'schema', value: schema },
+      { name: 'name', value: name }
+    ])
+    return {
+      // Every one of them uses it, whether or not its name can be pointed at.
+      matches: moduleMatches(rows, name, { wholeWord: true }, false),
+      unsearchable: unsearchableModules(rows.filter((row) => row.definition === null)),
+      truncated: false
+    }
   }
 
   // -------------------------------------------------------------------------

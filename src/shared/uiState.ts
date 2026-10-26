@@ -10,14 +10,14 @@
  */
 import type { RoutineSource, SchemaObjectType } from './types'
 
-export type SidebarPanel = 'objects' | 'history' | 'saved'
+export type SidebarPanel = 'objects' | 'search' | 'history' | 'saved'
 
 export interface UiState {
   /** Width of the schema sidebar, in pixels. */
   sidebarWidth: number
   /** Whether the sidebar was put away (`Ctrl+B`) in a full window. */
   sidebarCollapsed: boolean
-  /** Which of Schema, History and Saved the sidebar shows. */
+  /** Which of Schema, Search, History and Saved the sidebar shows. */
   sidebarPanel: SidebarPanel
   /** Height of a query tab's editor above its results, in pixels. */
   queryEditorHeight: number
@@ -92,7 +92,7 @@ export const DEFAULT_UI_STATE: UiState = {
 /** Enough for every table anyone watches; past it, the longest-unset go first. */
 export const MAX_REMEMBERED_TABLES = 200
 
-const PANELS: readonly SidebarPanel[] = ['objects', 'history', 'saved']
+const PANELS: readonly SidebarPanel[] = ['objects', 'search', 'history', 'saved']
 
 /** Names one table across restarts: a tab's id does not outlive the window. */
 export function tableMemoryKey(

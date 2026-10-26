@@ -21,6 +21,7 @@ import {
   DEFAULT_SQLSERVER_OPTIONS,
   DEFAULT_SSH_CONFIG,
   DEFAULT_SSM_CONFIG,
+  DefinitionSearchRequest,
   ExportRequest,
   QueryExecutionResult,
   RunQueryRequest,
@@ -383,6 +384,12 @@ export function registerIpcHandlers(context: IpcContext): void {
   )
   handle(CHANNELS.dbAutocomplete, (call, id: string) =>
     registry.get(call.scope, id).getAutocompleteSchema()
+  )
+  handle(CHANNELS.dbSearchDefinitions, (call, { connectionId, ...search }: DefinitionSearchRequest) =>
+    registry.get(call.scope, connectionId).searchDefinitions(search)
+  )
+  handle(CHANNELS.dbFindReferences, (call, id: string, schema: string, name: string) =>
+    registry.get(call.scope, id).findReferences(schema, name)
   )
 
   // -- table data -----------------------------------------------------------

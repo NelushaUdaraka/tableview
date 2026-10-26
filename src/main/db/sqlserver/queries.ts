@@ -253,6 +253,89 @@ export const OBJECT_DEFINITION_QUERY = `
 SELECT OBJECT_DEFINITION(OBJECT_ID(@object)) AS [definition];
 `
 
+/**
+ * Definitions containing `@pattern`, a `LIKE` pattern escaped with `\`.
+ *
+ * The collation is spelled out rather than left to the database's, so "match
+ * case" means the same on every server; each kind is searched only when its
+ * bit is set. Encrypted modules have no definition to search and are listed
+ * by `UNSEARCHABLE_MODULES` instead.
+ */
+export function searchDefinitionsQuery(matchCase: boolean): string {
+  const collation = matchCase ? 'Latin1_General_100_CS_AS' : 'Latin1_General_100_CI_AS'
+  return `
+SELECT TOP (@limit)
+  s.name       AS [schema],
+  o.name       AS [name],
+  o.type       AS [type],
+  m.definition AS [definition]
+FROM sys.sql_modules m
+INNER JOIN sys.objects o ON o.object_id = m.object_id
+INNER JOIN sys.schemas s ON s.schema_id = o.schema_id
+WHERE o.is_ms_shipped = 0
+  AND ${MODULE_KIND_FILTER}
+  AND m.definition COLLATE ${collation} LIKE @pattern ESCAPE '\\'
+ORDER BY s.name, o.name;
+`
+}
+
+const MODULE_KIND_FILTER = `(
+       (o.type = 'P' AND @procedures = 1)
+    OR (o.type IN ('FN', 'IF', 'TF') AND @functions = 1)
+    OR (o.type = 'V' AND @views = 1)
+    OR (o.type = 'TR' AND @triggers = 1)
+  )`
+
+/** Modules of the searched kinds whose definition the server will not give out. */
+export const UNSEARCHABLE_MODULES = `
+SELECT
+  s.name AS [schema],
+  o.name AS [name],
+  o.type AS [type]
+FROM sys.sql_modules m
+INNER JOIN sys.objects o ON o.object_id = m.object_id
+INNER JOIN sys.schemas s ON s.schema_id = o.schema_id
+WHERE o.is_ms_shipped = 0
+  AND ${MODULE_KIND_FILTER}
+  AND m.definition IS NULL
+ORDER BY s.name, o.name;
+`
+
+/**
+ * Routines, views and triggers that use `@object` (`[schema].[name]`).
+ *
+ * A reference SQL Server could resolve when the module was created carries the
+ * object's id; one it could not — a name left without its schema in a
+ * procedure, resolved only when it runs — carries just the name, so those are
+ * matched by name and by schema when one was written.
+ */
+export const REFERENCING_MODULES = `
+SELECT
+  s.name       AS [schema],
+  o.name       AS [name],
+  o.type       AS [type],
+  m.definition AS [definition]
+FROM sys.objects o
+INNER JOIN sys.schemas s ON s.schema_id = o.schema_id
+INNER JOIN sys.sql_modules m ON m.object_id = o.object_id
+WHERE o.type IN ('P', 'FN', 'IF', 'TF', 'V', 'TR')
+  AND o.object_id <> ISNULL(OBJECT_ID(@object), 0)
+  AND o.object_id IN (
+    SELECT d.referencing_id
+    FROM sys.sql_expression_dependencies d
+    WHERE d.referenced_class = 1
+      AND d.referenced_server_name IS NULL
+      AND d.referenced_database_name IS NULL
+      AND (
+           d.referenced_id = OBJECT_ID(@object)
+        OR (d.referenced_id IS NULL
+            AND d.referenced_entity_name = @name
+            AND (d.referenced_schema_name IS NULL OR d.referenced_schema_name = @schema))
+      )
+  )
+ORDER BY s.name, o.name;
+`
+
 export const SERVER_INFO = `
 SELECT
   CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128)) AS [productVersion],

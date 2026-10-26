@@ -408,6 +408,57 @@ export interface RoutineSource {
   baseline: string
 }
 
+/** Something whose definition is T-SQL text the server keeps: a routine, a view or a trigger. */
+export type ModuleType = RoutineType | 'view' | 'trigger'
+
+/** The kinds a definition search can be narrowed to; functions are one, whatever they return. */
+export type ModuleKind = 'procedure' | 'function' | 'view' | 'trigger'
+
+export const MODULE_KINDS: readonly ModuleKind[] = ['procedure', 'function', 'view', 'trigger']
+
+/** Text to find across the definitions of the current database. */
+export interface DefinitionSearchRequest {
+  connectionId: string
+  text: string
+  matchCase?: boolean
+  /** Only where the text is not part of a longer identifier. */
+  wholeWord?: boolean
+  /** Which kinds to search; empty or absent searches them all. */
+  kinds?: ModuleKind[]
+}
+
+/** One line of a definition that matched, numbered from 1 as the editor numbers it. */
+export interface DefinitionMatchLine {
+  line: number
+  /** The line, or the part of it around the match when it is long. */
+  text: string
+  /** Where in `text` each match is, as `[start, end)` offsets. */
+  ranges: [number, number][]
+}
+
+export interface DefinitionMatch {
+  schema: string
+  name: string
+  type: ModuleType
+  lines: DefinitionMatchLine[]
+  /** Matching lines past the ones kept in `lines`. */
+  moreLines: number
+}
+
+/** A module whose definition the server will not show: encrypted, so it cannot be searched. */
+export interface UnsearchableModule {
+  schema: string
+  name: string
+  type: ModuleType
+}
+
+export interface DefinitionSearchResult {
+  matches: DefinitionMatch[]
+  unsearchable: UnsearchableModule[]
+  /** More objects matched than were returned. */
+  truncated: boolean
+}
+
 export interface TableColumn {
   name: string
   position: number

@@ -17,6 +17,11 @@ import { useBusyStore } from './busy'
 import { useSettingsStore } from './settings'
 import { useToastStore } from './toasts'
 
+export interface RevealLine {
+  line: number
+  find?: { text: string; matchCase?: boolean; wholeWord?: boolean }
+}
+
 export interface QueryTab {
   id: string
   kind: 'query'
@@ -33,6 +38,12 @@ export interface QueryTab {
   dirty: boolean
   /** Line the statement under the cursor starts on, reported by the status bar. */
   statementLine: number | null
+  /**
+   * A line to bring into view once the editor is on screen, and the text on
+   * it to select: where a search result was clicked. The view takes it and
+   * clears it, so it is never kept or carried to another window.
+   */
+  revealLine?: RevealLine
   /**
    * Whether the selected row's fields are shown beside the results.
    *

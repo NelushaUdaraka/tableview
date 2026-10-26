@@ -62,7 +62,7 @@ up or dismissed: a button that fades before it can be reached is no button at al
 ## The layout, remembered
 
 Where the workspace was left comes back after a restart: the sidebar's width, whether it was put
-away (`Ctrl+B`), which of *Schema*, *History* and *Saved* it shows, how tall the query editor is
+away (`Ctrl+B`), which of *Schema*, *Search*, *History* and *Saved* it shows, how tall the query editor is
 above its results, each table's auto-refresh interval (see [tables](tables.md)), the tabs each
 connection had open, and the database each was left in (below). None of this is
 a setting — it is what the last drag or click left — so it lives in `ui-state.json` in the app's data

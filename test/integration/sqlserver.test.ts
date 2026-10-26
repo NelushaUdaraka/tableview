@@ -373,3 +373,69 @@ describe('schema introspection', () => {
     await client.runScript('DROP TABLE dbo.customers_ddl_copy')
   })
 })
+
+describe('searching definitions', () => {
+  beforeAll(async () => {
+    const results = await client.runScript(`
+CREATE OR ALTER PROCEDURE dbo.usp_search_orders AS
+BEGIN
+  SELECT order_id, Total FROM sales.orders;
+END
+GO
+CREATE OR ALTER PROCEDURE dbo.usp_search_unqualified AS
+  SELECT email FROM customers;
+GO
+CREATE OR ALTER PROCEDURE dbo.usp_search_hidden WITH ENCRYPTION AS
+  SELECT 1 AS hidden_100_percent;
+GO`)
+    expect(results.every((result) => !result.error)).toBe(true)
+  })
+
+  it('finds text in procedures and views, with the lines it is on', async () => {
+    const { matches } = await client.searchDefinitions({ text: 'sales.orders' })
+    const proc = matches.find((match) => match.name === 'usp_search_orders')
+    expect(proc?.type).toBe('procedure')
+    expect(proc?.lines.map((line) => line.line)).toEqual([3])
+    expect(matches.find((match) => match.name === 'customer_summary')?.type).toBe('view')
+  })
+
+  it('matches case only when asked to', async () => {
+    const loose = await client.searchDefinitions({ text: 'TOTAL' })
+    expect(loose.matches.some((match) => match.name === 'usp_search_orders')).toBe(true)
+    const strict = await client.searchDefinitions({ text: 'TOTAL', matchCase: true })
+    expect(strict.matches.some((match) => match.name === 'usp_search_orders')).toBe(false)
+  })
+
+  it('treats LIKE wildcards in the text literally', async () => {
+    const { matches } = await client.searchDefinitions({ text: 'order[_]id' })
+    expect(matches).toEqual([])
+  })
+
+  it('searches only the kinds asked for', async () => {
+    const { matches } = await client.searchDefinitions({ text: 'sales.orders', kinds: ['view'] })
+    expect(matches.length).toBeGreaterThan(0)
+    expect(matches.every((match) => match.type === 'view')).toBe(true)
+  })
+
+  it('lists encrypted modules as unsearchable rather than dropping them', async () => {
+    const result = await client.searchDefinitions({ text: 'hidden_100_percent' })
+    expect(result.matches).toEqual([])
+    expect(result.unsearchable).toContainEqual({
+      schema: 'dbo',
+      name: 'usp_search_hidden',
+      type: 'procedure'
+    })
+  })
+
+  it('finds what uses a table, by id or by a name left without its schema', async () => {
+    const orders = await client.findReferences('sales', 'orders')
+    const names = orders.matches.map((match) => match.name)
+    expect(names).toEqual(expect.arrayContaining(['customer_summary', 'usp_search_orders']))
+    expect(orders.matches.find((match) => match.name === 'usp_search_orders')?.lines[0].line).toBe(3)
+
+    const customers = await client.findReferences('dbo', 'customers')
+    expect(customers.matches.map((match) => match.name)).toEqual(
+      expect.arrayContaining(['customer_summary', 'usp_search_unqualified'])
+    )
+  })
+})

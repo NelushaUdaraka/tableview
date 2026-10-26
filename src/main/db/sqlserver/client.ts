@@ -140,13 +140,13 @@ const FORWARD_ERROR_GRACE_MS = 1500
 /** Used for connections saved before the option existed. */
 const DEFAULT_KEEPALIVE_MS = DEFAULT_SQLSERVER_OPTIONS.keepAliveIntervalMs
 
-/** Attaches a code so the renderer can offer the fix rather than a toast. */
 /** The session option each kind of plan is read with. */
 const PLAN_SWITCHES = {
   estimated: 'SET SHOWPLAN_XML',
   actual: 'SET STATISTICS XML'
 } as const
 
+/** Attaches a code so the renderer can offer the fix rather than a toast. */
 function codedError(message: string, code: string): Error {
   return Object.assign(new Error(message), { code })
 }

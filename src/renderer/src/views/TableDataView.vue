@@ -65,6 +65,8 @@ import { useSchemaStore } from '../stores/schema'
 import { useTabStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
 import { useConnectionStore } from '../stores/connections'
+import { useConfirmWritesStore } from '../stores/confirmWrites'
+import { changeSetWrites } from '../lib/confirmWrites'
 import { useCredentialsStore } from '../stores/credentials'
 import { useUiStateStore } from '../stores/uiState'
 import type { LeaveReason, TableTab } from '../stores/tabs'
@@ -82,6 +84,7 @@ const schemaStore = useSchemaStore()
 const tabs = useTabStore()
 const toasts = useToastStore()
 const connections = useConnectionStore()
+const confirmWrites = useConfirmWritesStore()
 const credentials = useCredentialsStore()
 const uiState = useUiStateStore()
 
@@ -1129,8 +1132,21 @@ function buildChangeSet(): TableChangeSet {
 async function apply(): Promise<boolean> {
   if (pendingCount.value === 0) return true
   const changeSet = buildChangeSet()
+  const noKeyNote = hasPrimaryKey.value
+    ? ''
+    : 'This table has no primary key, so rows are matched on every column. More than one row may be affected.'
 
-  if (settings.settings.confirmBeforeApply) {
+  // A connection that confirms its writes asks here instead of the setting's
+  // plainer question — once is enough — and the main process will not apply
+  // edits that do not say they were confirmed.
+  if (confirmWrites.asking()) {
+    const proceed = await confirmWrites.askAbout(
+      changeSetWrites(changeSet, connections.activeStatus?.currentDatabase ?? ''),
+      { title: 'Apply these edits?', action: 'Apply anyway', note: noKeyNote || undefined }
+    )
+    if (!proceed) return false
+    changeSet.confirmed = true
+  } else if (settings.settings.confirmBeforeApply) {
     const summary = [
       changeSet.inserts.length ? `${changeSet.inserts.length} insert` : '',
       changeSet.updates.length ? `${changeSet.updates.length} update` : '',
@@ -1138,9 +1154,7 @@ async function apply(): Promise<boolean> {
     ]
       .filter(Boolean)
       .join(', ')
-    const warning = hasPrimaryKey.value
-      ? ''
-      : '\n\nThis table has no primary key, so rows are matched on every column. More than one row may be affected.'
+    const warning = noKeyNote ? `\n\n${noKeyNote}` : ''
     if (!confirm(`Apply ${summary} to ${props.tab.schema}.${props.tab.table}?${warning}`)) {
       return false
     }
@@ -1575,6 +1589,16 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
           Apply
           <span class="seg__count">{{ pendingCount }}</span>
         </button>
+        <!-- Said here as well as in the status bar, beside the button it
+             changes: Apply asks before it sends. -->
+        <span
+          v-if="connections.writeMode === 'confirm'"
+          class="badge data__confirms"
+          title="This connection confirms writes: Apply shows what will change and asks first"
+        >
+          <AppIcon name="shield-check" :size="11" />
+          Confirm writes
+        </span>
       </template>
       <template v-else-if="connections.readOnly">
         <!-- Edits staged before read-only went on cannot be applied now, but
@@ -1908,7 +1932,8 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
   border-radius: 50%;
   background: var(--accent);
 }
-.data__readonly {
+.data__readonly,
+.data__confirms {
   gap: 4px;
 }
 .data__warning {

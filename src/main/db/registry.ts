@@ -11,6 +11,7 @@ import {
   SerializedError,
   type SessionState
 } from '../../shared/types'
+import type { WriteGuard } from '../../shared/writeMode'
 import type { ClientStateEvent, DbClient, SessionChange } from './types'
 import { SqlServerClient, serializeError } from './sqlserver/client'
 
@@ -36,6 +37,14 @@ function entryKey(scope: string, connectionId: string): string {
   return `${scope}${KEY_SEPARATOR}${connectionId}`
 }
 
+/** What an open client is keeping, as its status says it. */
+function guardOf(client: DbClient): WriteGuard {
+  return {
+    readOnly: client.currentConfig.readOnly === true,
+    confirmWrites: client.currentConfig.confirmWrites === true
+  }
+}
+
 export class ConnectionRegistry {
   private readonly clients = new Map<string, DbClient>()
   private readonly errors = new Map<string, SerializedError>()
@@ -45,13 +54,14 @@ export class ConnectionRegistry {
   private readonly statusListeners = new Set<StatusListener>()
   private readonly sessionListeners = new Set<SessionListener>()
   /**
-   * The last read-only switch for each connection, numbered in order.
+   * The last read-only or confirm-writes switch for each connection, numbered
+   * in order.
    *
    * `open` is handed a config read before it starts, and connecting can take
    * seconds — an SSM tunnel, a slow login — so a switch saved meanwhile has no
    * client to reach yet. The open looks here once it has one.
    */
-  private readonly switches = new Map<string, { readOnly: boolean; order: number }>()
+  private readonly switches = new Map<string, { guard: WriteGuard; order: number }>()
   private switchCount = 0
   /**
    * What the tabs' sessions had when their client was replaced by a reconnect,
@@ -106,7 +116,7 @@ export class ConnectionRegistry {
       const info = await client.connect()
       // Switched while it was opening: `config` is from before the switch.
       const switched = this.switches.get(config.id)
-      if (switched && switched.order > started) client.setReadOnly(switched.readOnly)
+      if (switched && switched.order > started) client.setWriteGuard(switched.guard)
       this.clients.set(key, client)
       this.recovering.delete(key)
       const lost = this.lostSessions.get(key)
@@ -129,7 +139,7 @@ export class ConnectionRegistry {
         currentDatabase: info.currentDatabase,
         currentUser: info.login,
         tunnelPort: client.tunnelPort,
-        readOnly: client.currentConfig.readOnly === true
+        ...guardOf(client)
       }
     } catch (error) {
       const serialized = serializeError(error)
@@ -221,14 +231,14 @@ export class ConnectionRegistry {
         currentDatabase: client.info?.currentDatabase,
         currentUser: client.info?.login,
         tunnelPort: client.tunnelPort,
-        readOnly: client.currentConfig.readOnly === true
+        ...guardOf(client)
       }
     }
     // A connection being reopened after a drop is on its way back, not gone —
-    // and is still whichever way read-only was left.
+    // and is still whichever way read-only and confirm writes were left.
     if (this.connecting.has(key) || this.recovering.has(key)) {
       return client
-        ? { connectionId, state: 'connecting', readOnly: client.currentConfig.readOnly === true }
+        ? { connectionId, state: 'connecting', ...guardOf(client) }
         : { connectionId, state: 'connecting' }
     }
     const error = this.errors.get(key)
@@ -237,21 +247,27 @@ export class ConnectionRegistry {
   }
 
   /**
-   * Turns read-only on or off wherever a connection is open.
+   * Sets read-only and confirm writes wherever a connection is open.
    *
-   * It is one setting on one saved connection, so every window that has it
+   * They are settings on one saved connection, so every window that has it
    * open switches with it, and each is told — the one that asked and any
    * other — so no window shows a lock its connection is no longer keeping.
    * A window whose connection was already that way hears nothing, and one
    * still connecting takes the switch when it opens.
    */
-  setReadOnly(connectionId: string, readOnly: boolean): void {
-    this.switches.set(connectionId, { readOnly, order: ++this.switchCount })
+  setWriteGuard(connectionId: string, guard: WriteGuard): void {
+    this.switches.set(connectionId, { guard, order: ++this.switchCount })
     for (const [key, client] of this.clients) {
       const at = key.indexOf(KEY_SEPARATOR)
       if (key.slice(at + KEY_SEPARATOR.length) !== connectionId) continue
-      if ((client.currentConfig.readOnly === true) === readOnly) continue
-      client.setReadOnly(readOnly)
+      const current = guardOf(client)
+      if (
+        current.readOnly === guard.readOnly &&
+        current.confirmWrites === guard.confirmWrites
+      ) {
+        continue
+      }
+      client.setWriteGuard(guard)
       const scope = key.slice(0, at)
       const status = this.status(scope, connectionId)
       for (const listener of this.statusListeners) listener(scope, status)

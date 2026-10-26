@@ -4,6 +4,22 @@ What changed in each release of TableView, newest first. The downloads are on th
 [Releases page](https://github.com/NelushaUdaraka/tableview/releases); a version at the top that is
 not there yet is the next release, still being prepared.
 
+## 0.4.0
+
+- A connection can now confirm its writes: a setting between read-only and writable, for the
+  production connection you do sometimes need to change. Turn on *Confirm writes* (beside
+  *Read-only* in the status bar, in the connection list's ⋮ menu, or on the connection's General
+  tab) and anything that would change the database is shown to you first: every statement in the
+  script that writes, with its line and the database it changes, and nothing is sent until you
+  press *Run anyway*. The same question comes before *Apply* in a table and before *Truncate* and
+  *Drop* in the tree.
+- On such a connection, a `DROP`, a `TRUNCATE`, and an `UPDATE` or `DELETE` with no `WHERE` also
+  ask you to type the table's name before they will run.
+- With *Read-only* on as well, nothing writes; turning read-only off then leaves the connection
+  confirming its writes rather than writing freely.
+- A connection pasted from TablePlus with a safe mode on now arrives confirming its writes, instead
+  of read-only.
+
 ## 0.3.0
 
 - Each query tab now keeps its own session with the server, as an SSMS query window does. A temp

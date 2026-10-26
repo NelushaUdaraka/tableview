@@ -8,6 +8,7 @@ import type {
   SavedConnection
 } from '@shared/types'
 import type { ConnectionExportResult } from '@shared/ipc'
+import { writeModeOf, type WriteGuard } from '@shared/writeMode'
 import type { ImportSummary } from '@shared/connectionTransfer'
 import {
   defaultDirectionFor,
@@ -50,6 +51,15 @@ export const useConnectionStore = defineStore('connections', () => {
    * the connection is not keeping is worse than no lock at all.
    */
   const readOnly = computed(() => activeStatus.value?.readOnly === true)
+  /**
+   * Whether the open connection's confirm writes is on, on the same word. It
+   * asks before a write only while read-only is off: see `writeMode`.
+   */
+  const confirmWrites = computed(() => activeStatus.value?.confirmWrites === true)
+  /** What the open connection does with a write: refuse it, ask first, or send it. */
+  const writeMode = computed(() =>
+    writeModeOf({ readOnly: readOnly.value, confirmWrites: confirmWrites.value })
+  )
 
   /**
    * The order the list is read in, as the reader last left it.
@@ -145,16 +155,16 @@ export const useConnectionStore = defineStore('connections', () => {
   }
 
   /**
-   * Turns read-only on or off for a saved connection — and, through the main
-   * process, wherever it is open, from the next statement on.
+   * Sets read-only and confirm writes for a saved connection — and, through
+   * the main process, wherever it is open, from the next statement on.
    *
    * A partial save, like a move between groups, so nothing else about the
    * connection is touched. The open connection's lock follows at once rather
    * than waiting on the status the main process sends after the save.
    */
-  async function setReadOnly(connection: SavedConnection, readOnly: boolean): Promise<void> {
-    await save({ id: connection.id, name: connection.name, readOnly })
-    if (activeId.value === connection.id) setStatus({ ...statusFor(connection.id), readOnly })
+  async function setWriteGuard(connection: SavedConnection, guard: WriteGuard): Promise<void> {
+    await save({ id: connection.id, name: connection.name, ...guard })
+    if (activeId.value === connection.id) setStatus({ ...statusFor(connection.id), ...guard })
   }
 
   /** Writes the list to a file. Null when the save dialog was dismissed. */
@@ -204,18 +214,19 @@ export const useConnectionStore = defineStore('connections', () => {
   }
 
   /**
-   * Records a status, keeping what the last one said about read-only when this
-   * one does not: a connection being put back, or one that failed to come
-   * back, is still the read-only connection it was — and the lock must not
-   * blink off while it is away.
+   * Records a status, keeping what the last one said about read-only and
+   * confirm writes when this one does not: a connection being put back, or one
+   * that failed to come back, is still the read-only connection it was — and
+   * the lock must not blink off while it is away.
    */
   function setStatus(status: ConnectionStatus): void {
     const previous = statuses.value[status.connectionId]
     const readOnly = status.readOnly ?? previous?.readOnly
-    statuses.value = {
-      ...statuses.value,
-      [status.connectionId]: readOnly === undefined ? status : { ...status, readOnly }
-    }
+    const confirmWrites = status.confirmWrites ?? previous?.confirmWrites
+    const kept = { ...status }
+    if (readOnly !== undefined) kept.readOnly = readOnly
+    if (confirmWrites !== undefined) kept.confirmWrites = confirmWrites
+    statuses.value = { ...statuses.value, [status.connectionId]: kept }
   }
 
   function statusFor(id: string): ConnectionStatus {
@@ -230,7 +241,7 @@ export const useConnectionStore = defineStore('connections', () => {
     isCollapsed,
     toggleGroup,
     setGroup,
-    setReadOnly,
+    setWriteGuard,
     exportAll,
     importFile,
     sortKey,
@@ -244,6 +255,8 @@ export const useConnectionStore = defineStore('connections', () => {
     isConnected,
     inSession,
     readOnly,
+    confirmWrites,
+    writeMode,
     connectingId,
     load,
     save,

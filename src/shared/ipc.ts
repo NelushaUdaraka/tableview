@@ -329,12 +329,19 @@ export interface RendererApi {
 
   fetchTableData(request: TableDataRequest): Promise<TableDataResponse>
   applyChanges(changeSet: TableChangeSet): Promise<AppliedChanges>
-  truncateTable(connectionId: string, schema: string, table: string): Promise<void>
+  /** `confirmed`: the user was asked first, which a confirm-writes connection needs. */
+  truncateTable(
+    connectionId: string,
+    schema: string,
+    table: string,
+    confirmed?: boolean
+  ): Promise<void>
   dropObject(
     connectionId: string,
     schema: string,
     name: string,
-    type: 'table' | 'view'
+    type: 'table' | 'view',
+    confirmed?: boolean
   ): Promise<void>
 
   runQuery(request: RunQueryRequest): Promise<QueryExecutionResult>

@@ -1,12 +1,13 @@
 <script setup lang="ts">
 /**
- * The question asked before a read-only connection may write again.
+ * The question asked before a connection may write freely again — coming off
+ * read-only, or no longer confirming its writes.
  *
- * Whichever toggle raised it — the status bar, the list, the form — the
- * answer is the same: a connection that was kept read-only on purpose is about
- * to accept edits, truncate, drop and whatever is run in it. The safe answer
- * has the focus, so Enter or Escape keeps the lock on; only the button that
- * says so takes it off.
+ * Whichever switch raised it — the status bar, the list, the form — the
+ * answer is the same: a connection that was guarded on purpose is about to
+ * accept edits, truncate, drop and whatever is run in it, without asking. The
+ * safe answer has the focus, so Enter or Escape keeps the guard on; only the
+ * button that says so takes it off.
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
@@ -22,6 +23,25 @@ watch(prompt, (value) => {
 })
 
 /** Where the writes would go, the way the connection list shows it. */
+/** Which guard is coming off, in the words of its switch. */
+const wording = computed(() =>
+  prompt.value?.from === 'confirm'
+    ? {
+        kicker: 'Confirm writes',
+        title: 'Stop confirming writes?',
+        keep: 'Keep confirming',
+        drop: 'Stop confirming',
+        again: 'Turn confirm writes back on when you are done.'
+      }
+    : {
+        kicker: 'Read-only',
+        title: 'Turn off read-only?',
+        keep: 'Keep read-only',
+        drop: 'Turn off read-only',
+        again: 'Turn read-only back on when you are done.'
+      }
+)
+
 const target = computed(() => {
   const connection = prompt.value?.connection
   if (!connection) return ''
@@ -33,8 +53,8 @@ const target = computed(() => {
 <template>
   <BaseModal
     v-if="prompt"
-    kicker="Read-only"
-    title="Turn off read-only?"
+    :kicker="wording.kicker"
+    :title="wording.title"
     :subtitle="prompt.connection.name"
     width="500px"
     @close="readOnly.answer(false)"
@@ -43,20 +63,23 @@ const target = computed(() => {
       <AppIcon class="writable__icon" name="triangle-alert" :size="18" />
       <div class="writable__text">
         <p>
-          “{{ prompt.connection.name }}” will accept changes again: table edits, truncate and drop,
-          and any statement you run, against <span class="mono">{{ target }}</span>.
+          “{{ prompt.connection.name }}” will accept changes again without asking: table edits,
+          truncate and drop, and any statement you run, against
+          <span class="mono">{{ target }}</span>.
         </p>
         <p class="writable__note">
           The setting is saved with the connection and changes at once in every window that has
-          it open. Turn read-only back on when you are done.
+          it open. {{ wording.again }}
         </p>
       </div>
     </div>
 
     <template #footer>
-      <button ref="keepButton" class="btn" @click="readOnly.answer(false)">Keep read-only</button>
+      <button ref="keepButton" class="btn" @click="readOnly.answer(false)">
+        {{ wording.keep }}
+      </button>
       <div class="writable__spacer"></div>
-      <button class="btn btn--danger" @click="readOnly.answer(true)">Turn off read-only</button>
+      <button class="btn btn--danger" @click="readOnly.answer(true)">{{ wording.drop }}</button>
     </template>
   </BaseModal>
 </template>

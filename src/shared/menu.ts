@@ -16,6 +16,7 @@ export type MenuAction =
   | 'connections:export'
   | 'connection:disconnect'
   | 'connection:toggle-read-only'
+  | 'connection:toggle-confirm-writes'
   | 'tab:new-query'
   | 'tab:close'
   | 'tab:next'
@@ -144,6 +145,7 @@ export function buildMenuModel(platform: string): MenuModel[] {
         { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', action: 'tab:close' },
         { label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W', role: 'closeWindow' },
         { label: 'Toggle Read-only', action: 'connection:toggle-read-only' },
+        { label: 'Toggle Confirm Writes', action: 'connection:toggle-confirm-writes' },
         { label: 'Disconnect', action: 'connection:disconnect' },
         SEPARATOR,
         isMac

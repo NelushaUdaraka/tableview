@@ -388,6 +388,12 @@ function handleAction(action: string): void {
         void readOnly.setReadOnly(connections.active, !connections.readOnly)
       }
       break
+    case 'connection:toggle-confirm-writes':
+      // The status bar's other switch: on at once, off once asked if it must.
+      if (connections.active) {
+        void readOnly.setConfirmWrites(connections.active, !connections.confirmWrites)
+      }
+      break
     case 'help:shortcuts':
       showShortcuts.value = true
       break

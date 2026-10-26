@@ -157,6 +157,14 @@ export interface ConnectionConfig {
    * what the login may do is still up to the server. Absent means writable.
    */
   readOnly?: boolean
+  /**
+   * Lets writes through, but only once each one has been shown and confirmed:
+   * a script that writes, staged table edits, truncate and drop. Like
+   * read-only it is enforced in the main process, which refuses a write that
+   * does not say it was confirmed. Read-only wins when both are on; see
+   * `shared/writeMode.ts`.
+   */
+  confirmWrites?: boolean
   options: SqlServerOptions
   ssh: SshConfig
   ssm: SsmConfig
@@ -232,6 +240,13 @@ export const SSM_CREDENTIALS_EXPIRED = 'SSM_CREDENTIALS_EXPIRED'
 
 /** Marks something a read-only connection refused to send, so it can be said as such. */
 export const READ_ONLY_CONNECTION = 'READ_ONLY_CONNECTION'
+
+/**
+ * Marks a write a confirm-writes connection refused because it did not come
+ * confirmed — sent from somewhere that did not ask, or after the connection
+ * was switched to confirming from another window.
+ */
+export const WRITE_NOT_CONFIRMED = 'WRITE_NOT_CONFIRMED'
 
 /**
  * Marks a run that was not sent because the tab's session had been lost with
@@ -335,6 +350,8 @@ export interface RunQueryRequest {
   sessionId?: string
   /** A routine's tab: the database its session is pinned to. */
   pinnedDatabase?: string
+  /** The user was shown what this script writes and said to run it. */
+  confirmedWrites?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -547,6 +564,8 @@ export interface TableChangeSet {
   inserts: PendingInsert[]
   updates: PendingUpdate[]
   deletes: PendingDelete[]
+  /** The user was shown these edits and said to apply them; see `confirmWrites`. */
+  confirmed?: boolean
 }
 
 export interface AppliedChanges {
@@ -579,6 +598,8 @@ export interface ConnectionStatus {
    * leaves it out.
    */
   readOnly?: boolean
+  /** Whether the open connection asks before each write, said the same way. */
+  confirmWrites?: boolean
 }
 
 // ---------------------------------------------------------------------------

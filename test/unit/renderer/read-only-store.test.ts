@@ -43,7 +43,12 @@ describe('switching read-only', () => {
     const store = useReadOnlyStore()
     expect(await store.setReadOnly({ ...prod, readOnly: false }, true)).toBe(true)
     expect(store.prompt).toBeNull()
-    expect(saveConnection).toHaveBeenCalledWith({ id: 'c1', name: 'Prod', readOnly: true })
+    expect(saveConnection).toHaveBeenCalledWith({
+      id: 'c1',
+      name: 'Prod',
+      readOnly: true,
+      confirmWrites: false
+    })
   })
 
   it('asks before turning it off, and leaves it on when the answer is no', async () => {
@@ -63,7 +68,12 @@ describe('switching read-only', () => {
     store.answer(true)
 
     expect(await switching).toBe(true)
-    expect(saveConnection).toHaveBeenCalledWith({ id: 'c1', name: 'Prod', readOnly: false })
+    expect(saveConnection).toHaveBeenCalledWith({
+      id: 'c1',
+      name: 'Prod',
+      readOnly: false,
+      confirmWrites: false
+    })
   })
 
   it('withdraws a question nobody answered when another is asked', async () => {
@@ -81,5 +91,49 @@ describe('switching read-only', () => {
     saveConnection.mockRejectedValue(new Error('connections.json is read-only'))
     const store = useReadOnlyStore()
     expect(await store.setReadOnly({ ...prod, readOnly: false }, true)).toBe(false)
+  })
+})
+
+describe('switching confirm writes', () => {
+  const confirming = { ...prod, readOnly: false, confirmWrites: true } as SavedConnection
+
+  it('turns read-only off without asking when writes will still be confirmed', async () => {
+    const store = useReadOnlyStore()
+    expect(await store.setReadOnly({ ...prod, confirmWrites: true }, false)).toBe(true)
+    expect(store.prompt).toBeNull()
+    expect(saveConnection).toHaveBeenCalledWith({
+      id: 'c1',
+      name: 'Prod',
+      readOnly: false,
+      confirmWrites: true
+    })
+  })
+
+  it('turns it on without asking', async () => {
+    const store = useReadOnlyStore()
+    expect(await store.setConfirmWrites({ ...prod, readOnly: false }, true)).toBe(true)
+    expect(store.prompt).toBeNull()
+  })
+
+  it('asks before turning it off, naming what it leaves', async () => {
+    const store = useReadOnlyStore()
+    const switching = store.setConfirmWrites(confirming, false)
+    expect(store.prompt?.from).toBe('confirm')
+
+    store.answer(false)
+    expect(await switching).toBe(false)
+    expect(saveConnection).not.toHaveBeenCalled()
+  })
+
+  it('does not ask to turn it off behind read-only, which still refuses everything', async () => {
+    const store = useReadOnlyStore()
+    expect(await store.setConfirmWrites({ ...prod, confirmWrites: true }, false)).toBe(true)
+    expect(store.prompt).toBeNull()
+    expect(saveConnection).toHaveBeenCalledWith({
+      id: 'c1',
+      name: 'Prod',
+      readOnly: true,
+      confirmWrites: false
+    })
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findWrite, findWriteInScript } from '../../src/shared/sql/readOnly'
+import { findWrite, findWriteInScript, findWritesInScript } from '../../src/shared/sql/readOnly'
 
 describe('findWrite: what a read-only connection lets through', () => {
   it.each([
@@ -79,7 +79,7 @@ describe('findWrite: what it refuses', () => {
     expect(findWrite("sp_rename 'dbo.t', 't2'")).toEqual({
       keyword: 'sp_rename',
       line: 1,
-      description: '“sp_rename” is not a statement read-only mode knows to be a read'
+      description: '“sp_rename” is not a statement known to be a read'
     })
   })
 
@@ -126,5 +126,154 @@ describe('findWriteInScript', () => {
 
   it('lets a script of reads through', () => {
     expect(findWriteInScript('SELECT 1\nGO\nWITH x AS (SELECT 2 AS a) SELECT a FROM x')).toBeNull()
+  })
+})
+
+describe('findWritesInScript: what a confirm-writes connection lists', () => {
+  const keywords = (sql: string): string[] => findWritesInScript(sql).map((write) => write.keyword)
+
+  it('lists nothing for a script of reads', () => {
+    expect(findWritesInScript('SELECT 1\nGO\nUSE x; SELECT * FROM t WHERE a = 1')).toEqual([])
+  })
+
+  it('lists every statement that writes, with its line through the batches', () => {
+    expect(
+      findWritesInScript('SELECT 1\nUPDATE t SET a = 1 WHERE id = 2\nGO\nINSERT INTO t VALUES (1)')
+    ).toEqual([
+      { keyword: 'UPDATE', line: 2, description: 'UPDATE changes data', database: undefined },
+      { keyword: 'INSERT', line: 4, description: 'INSERT changes data', database: undefined }
+    ])
+  })
+
+  it('finds statements with no semicolon between them', () => {
+    expect(keywords('UPDATE a SET x = 1 WHERE id = 1\nDELETE FROM b WHERE id = 2\nDROP TABLE c')).toEqual(
+      ['UPDATE', 'DELETE', 'DROP']
+    )
+  })
+
+  it('does not list the parts of a statement already listed', () => {
+    expect(keywords('INSERT INTO t (a) SELECT a FROM s')).toEqual(['INSERT'])
+    expect(
+      keywords(
+        'MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET a = s.a ' +
+          'WHEN NOT MATCHED THEN INSERT (a) VALUES (s.a) WHEN NOT MATCHED BY SOURCE THEN DELETE;'
+      )
+    ).toEqual(['MERGE'])
+    expect(keywords('ALTER TABLE t ADD c int')).toEqual(['ALTER'])
+    expect(keywords('ALTER TABLE t DROP COLUMN c')).toEqual(['ALTER'])
+    expect(keywords('ALTER TABLE t ALTER COLUMN c bigint')).toEqual(['ALTER'])
+    expect(
+      keywords('ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY (a) REFERENCES p (id) ON DELETE CASCADE')
+    ).toEqual(['ALTER'])
+    expect(keywords('DELETE FROM t OUTPUT deleted.id INTO log (id) WHERE a = 1')).toEqual(['DELETE'])
+    expect(keywords('GRANT SELECT, INSERT, UPDATE, DELETE ON t TO bob')).toEqual(['GRANT'])
+    expect(keywords("BULK INSERT t FROM 'x.csv'")).toEqual(['BULK'])
+    expect(keywords('DISABLE TRIGGER trg ON t')).toEqual(['DISABLE'])
+    expect(keywords('CREATE TRIGGER trg ON t AFTER INSERT AS SELECT 1')).toEqual(['CREATE'])
+  })
+
+  it('lists a module as one write, whatever its body does', () => {
+    expect(
+      findWritesInScript(
+        'CREATE OR ALTER PROCEDURE dbo.purge AS\nBEGIN\n  DELETE FROM dbo.orders\n  DROP TABLE x\nEND'
+      )
+    ).toEqual([
+      { keyword: 'CREATE', line: 1, description: 'CREATE changes the schema', database: undefined }
+    ])
+    expect(keywords('ALTER VIEW v AS SELECT 1 AS a\nGO\nDELETE FROM t WHERE a = 1')).toEqual([
+      'ALTER',
+      'DELETE'
+    ])
+  })
+
+  it('still lists a SELECT … INTO, and a procedure called by name', () => {
+    expect(keywords('SELECT * INTO dbo.copy FROM t')).toEqual(['INTO'])
+    expect(keywords('DECLARE @a int; FETCH NEXT FROM c INTO @a')).toEqual([])
+    expect(keywords("sp_rename 'a', 'b'")).toEqual(['sp_rename'])
+    expect(keywords('INSERT INTO t EXEC dbo.load')).toEqual(['INSERT', 'EXEC'])
+  })
+
+  it('says which database a USE moved to', () => {
+    const writes = findWritesInScript(
+      'DELETE FROM t WHERE a = 1\nUSE [Sales Archive]\nGO\nUPDATE t SET a = 1 WHERE id = 1'
+    )
+    expect(writes.map((write) => write.database)).toEqual([undefined, 'Sales Archive'])
+  })
+
+  it('lists whatever the read-only check refuses', () => {
+    for (const sql of [
+      'DECLARE c CURSOR FOR SELECT a FROM t FOR UPDATE',
+      'IF UPDATE(a) SELECT 1',
+      "exec('x')"
+    ]) {
+      expect(findWriteInScript(sql)).not.toBeNull()
+      expect(findWritesInScript(sql).length).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe('findWritesInScript: what cannot be taken back', () => {
+  const dangers = (sql: string): Array<{ name: string; reason: string } | undefined> =>
+    findWritesInScript(sql).map((write) => write.danger)
+
+  it('asks for the name before a DROP', () => {
+    expect(dangers('DROP TABLE dbo.Orders')).toEqual([
+      { name: 'Orders', reason: 'drops dbo.Orders, which cannot be undone' }
+    ])
+    expect(dangers('DROP TABLE IF EXISTS [dbo].[Order Lines]')[0]?.name).toBe('Order Lines')
+    expect(dangers('DROP DATABASE Sales')[0]?.name).toBe('Sales')
+    expect(dangers('DROP VIEW v')[0]?.name).toBe('v')
+    expect(dangers('DROP INDEX ix_a ON t')[0]?.name).toBe('ix_a')
+    // A table may be called by a word that names a kind of object.
+    expect(dangers('DROP TABLE Data')[0]?.name).toBe('Data')
+    expect(dangers('DROP TABLE dbo.Data, other')[0]?.name).toBe('Data')
+  })
+
+  it('asks for the name before a TRUNCATE', () => {
+    expect(dangers('TRUNCATE TABLE sales..orders')).toEqual([
+      { name: 'orders', reason: 'empties sales..orders, which cannot be undone' }
+    ])
+  })
+
+  it('asks before an UPDATE or DELETE with no WHERE', () => {
+    expect(dangers('UPDATE dbo.orders SET status = 0')).toEqual([
+      { name: 'orders', reason: 'has no WHERE, so it changes every row of dbo.orders' }
+    ])
+    expect(dangers('DELETE FROM [orders]')).toEqual([
+      { name: 'orders', reason: 'has no WHERE, so it deletes every row of [orders]' }
+    ])
+    expect(dangers('DELETE orders')[0]?.name).toBe('orders')
+    expect(dangers('DELETE TOP (10) PERCENT FROM orders')[0]?.name).toBe('orders')
+    expect(dangers('UPDATE TOP (5) orders SET a = 1')[0]?.name).toBe('orders')
+  })
+
+  it('does not ask when the WHERE is there', () => {
+    expect(dangers('UPDATE t SET a = 1 WHERE id = 1')).toEqual([undefined])
+    expect(dangers('DELETE FROM t WHERE CURRENT OF c')).toEqual([undefined])
+    expect(
+      dangers("UPDATE t SET a = CASE WHEN b = 1 THEN 'x' ELSE 'y' END WHERE id = 1")
+    ).toEqual([undefined])
+    expect(dangers('UPDATE t SET a = s.a FROM t JOIN s ON s.id = t.id WHERE s.ok = 1')).toEqual([
+      undefined
+    ])
+  })
+
+  it('does not take a WHERE that belongs to something else', () => {
+    expect(dangers('UPDATE t SET a = (SELECT MAX(b) FROM s WHERE s.id = 1)')[0]?.name).toBe('t')
+    expect(dangers('DELETE FROM t\nSELECT * FROM s WHERE a = 1')[0]?.name).toBe('t')
+    expect(dangers('DELETE FROM t; SELECT * FROM s WHERE a = 1')[0]?.name).toBe('t')
+    expect(dangers('IF 1 = 1 BEGIN DELETE FROM t END ELSE SELECT 1 FROM s WHERE a = 1')[0]?.name).toBe(
+      't'
+    )
+    expect(
+      dangers('DELETE FROM a\nUPDATE b SET x = 1 WHERE id = 1').map((danger) => danger?.name)
+    ).toEqual(['a', undefined])
+  })
+
+  it('does not ask about scratch tables or maintenance', () => {
+    expect(dangers('DROP TABLE IF EXISTS #work')).toEqual([undefined])
+    expect(dangers('TRUNCATE TABLE #work')).toEqual([undefined])
+    expect(dangers('DELETE FROM @rows')).toEqual([undefined])
+    expect(dangers('UPDATE STATISTICS dbo.orders')).toEqual([undefined])
   })
 })

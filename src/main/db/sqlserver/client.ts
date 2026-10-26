@@ -34,8 +34,10 @@ import {
   DEFAULT_SQLSERVER_OPTIONS,
   READ_ONLY_CONNECTION,
   SESSION_LOST,
-  SSM_CREDENTIALS_EXPIRED
+  SSM_CREDENTIALS_EXPIRED,
+  WRITE_NOT_CONFIRMED
 } from '../../../shared/types'
+import type { WriteGuard } from '../../../shared/writeMode'
 import {
   followDecision,
   lostSessionRefusal,
@@ -103,7 +105,33 @@ function codedError(message: string, code: string): Error {
  * the results like any other error, with the line it is about.
  */
 function readOnlyRefusal(sql: string, write: WriteStatement): StatementResult {
-  const message = `${write.description} — this connection is read-only, so nothing was run.`
+  return writeRefusal(
+    sql,
+    write,
+    `${write.description} — this connection is read-only, so nothing was run.`,
+    READ_ONLY_CONNECTION
+  )
+}
+
+/**
+ * What a confirm-writes connection answers with for a script that writes and
+ * did not come confirmed: refused whole, said the same way.
+ */
+function unconfirmedRefusal(sql: string, write: WriteStatement): StatementResult {
+  return writeRefusal(
+    sql,
+    write,
+    `${write.description} — this connection confirms writes first, and this run was not confirmed, so nothing was run.`,
+    WRITE_NOT_CONFIRMED
+  )
+}
+
+function writeRefusal(
+  sql: string,
+  write: WriteStatement,
+  message: string,
+  code: string
+): StatementResult {
   return {
     sql,
     resultSets: [],
@@ -111,7 +139,7 @@ function readOnlyRefusal(sql: string, write: WriteStatement): StatementResult {
     // Listed with the messages too, the way a failed statement's errors are.
     messages: [{ kind: 'error', message, lineNumber: write.line }],
     durationMs: 0,
-    error: { message, code: READ_ONLY_CONNECTION, lineNumber: write.line }
+    error: { message, code, lineNumber: write.line }
   }
 }
 
@@ -274,10 +302,10 @@ export class SqlServerClient implements DbClient {
     return this.serverInfo?.currentDatabase || this.config.database || ''
   }
 
-  setReadOnly(readOnly: boolean): void {
+  setWriteGuard(guard: WriteGuard): void {
     // Every check reads the config as it is at the time, and so does the
     // reconnect after a drop, which keeps whichever way it was left.
-    this.config = { ...this.config, readOnly }
+    this.config = { ...this.config, ...guard }
   }
 
   private announce(event: Parameters<ClientStateListener>[0]): void {
@@ -649,6 +677,21 @@ export class SqlServerClient implements DbClient {
     }
   }
 
+  /**
+   * Stops a change on a read-only connection, and one on a confirm-writes
+   * connection that did not come confirmed — from a window that did not ask,
+   * or one that has not yet heard the connection was switched.
+   */
+  private refuseUnlessAllowed(what: string, confirmed: boolean | undefined): void {
+    this.refuseIfReadOnly(what)
+    if (this.config.confirmWrites && !confirmed) {
+      throw codedError(
+        `This connection confirms writes first, and this was not confirmed, so ${what}.`,
+        WRITE_NOT_CONFIRMED
+      )
+    }
+  }
+
   private requirePool(): sql.ConnectionPool {
     if (!this.pool?.connected) {
       // A connection that is being reopened will be back on its own, so say
@@ -819,14 +862,17 @@ export class SqlServerClient implements DbClient {
 
   /**
    * What a read-only connection answers instead of running `text`, if it
-   * writes. The whole script is checked before any of it runs: a script
-   * refused halfway through has done the first half, which is harder to
-   * reason about than a script that has done nothing.
+   * writes — or a confirm-writes one, if it writes and the run does not say it
+   * was confirmed. The whole script is checked before any of it runs: a
+   * script refused halfway through has done the first half, which is harder
+   * to reason about than a script that has done nothing.
    */
   private refusalFor(text: string, options: ExecuteOptions): StatementResult | null {
-    if (!this.config.readOnly) return null
+    const readOnly = this.config.readOnly === true
+    if (!readOnly && (!this.config.confirmWrites || options.confirmedWrites)) return null
     const write = options.asSingleBatch ? findWrite(text) : findWriteInScript(text)
-    return write ? readOnlyRefusal(text, write) : null
+    if (!write) return null
+    return readOnly ? readOnlyRefusal(text, write) : unconfirmedRefusal(text, write)
   }
 
   async runInSession(
@@ -1272,14 +1318,21 @@ export class SqlServerClient implements DbClient {
     })
 
     // A raw WHERE is the user's own SQL inside ours, and a `;` ends the
-    // SELECT as readily there as anywhere.
-    if (useRaw && this.config.readOnly) {
+    // SELECT as readily there as anywhere. A filter has no way to be
+    // confirmed, so a confirm-writes connection turns a write there down too:
+    // a write belongs in a query tab, where it is asked about.
+    if (useRaw && (this.config.readOnly || this.config.confirmWrites)) {
       const write = findWrite(select.sql)
       if (write) {
-        throw codedError(
-          `${write.description} — this connection is read-only, so the filter was not run.`,
-          READ_ONLY_CONNECTION
-        )
+        throw this.config.readOnly
+          ? codedError(
+              `${write.description} — this connection is read-only, so the filter was not run.`,
+              READ_ONLY_CONNECTION
+            )
+          : codedError(
+              `${write.description} — this connection confirms writes first, and a filter cannot be confirmed, so it was not run. Write it in a query tab.`,
+              WRITE_NOT_CONFIRMED
+            )
       }
     }
 
@@ -1323,7 +1376,7 @@ export class SqlServerClient implements DbClient {
 
   /** Applies staged grid edits inside a single transaction. */
   async applyChanges(changeSet: TableChangeSet): Promise<AppliedChanges> {
-    this.refuseIfReadOnly('staged edits cannot be applied')
+    this.refuseUnlessAllowed('staged edits cannot be applied', changeSet.confirmed)
     const pool = this.requirePool()
     const statements: string[] = []
     let inserted = 0
@@ -1395,13 +1448,18 @@ export class SqlServerClient implements DbClient {
     return out
   }
 
-  async truncateTable(schema: string, table: string): Promise<void> {
-    this.refuseIfReadOnly('no table can be truncated')
+  async truncateTable(schema: string, table: string, confirmed?: boolean): Promise<void> {
+    this.refuseUnlessAllowed('no table can be truncated', confirmed)
     await this.executeOne(`TRUNCATE TABLE ${qualify(schema, table)}`, [], {})
   }
 
-  async dropObject(schema: string, name: string, type: 'table' | 'view'): Promise<void> {
-    this.refuseIfReadOnly('nothing can be dropped')
+  async dropObject(
+    schema: string,
+    name: string,
+    type: 'table' | 'view',
+    confirmed?: boolean
+  ): Promise<void> {
+    this.refuseUnlessAllowed('nothing can be dropped', confirmed)
     const keyword = type === 'view' ? 'VIEW' : 'TABLE'
     const result = await this.executeOne(`DROP ${keyword} ${qualify(schema, name)}`, [], {})
     if (result.error) throw Object.assign(new Error(result.error.message), result.error)

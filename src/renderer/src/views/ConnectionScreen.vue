@@ -344,6 +344,16 @@ function rowMenuItems(connection: SavedConnection): MenuEntry[] {
       label: connection.readOnly ? 'Turn off read-only…' : 'Turn on read-only',
       action: 'read-only'
     },
+    // Beside it, and switched the same way: off asks first when that leaves
+    // the connection writing without asking.
+    {
+      label: connection.confirmWrites
+        ? connection.readOnly
+          ? 'Stop confirming writes'
+          : 'Stop confirming writes…'
+        : 'Confirm writes',
+      action: 'confirm-writes'
+    },
     // No groups yet means nothing to move between; the form makes the first.
     ...(targets.length > 0 ? [{ label: 'Move to', items: targets }] : []),
     { separator: true, label: '' },
@@ -368,6 +378,9 @@ async function onMenuSelect(action: string): Promise<void> {
   else if (action === 'edit') startEdit(connection)
   else if (action === 'duplicate') await duplicate(connection)
   else if (action === 'read-only') await readOnly.setReadOnly(connection, !connection.readOnly)
+  else if (action === 'confirm-writes') {
+    await readOnly.setConfirmWrites(connection, !connection.confirmWrites)
+  }
   else if (action === 'delete') await remove(connection)
   else if (action.startsWith('group:')) await moveToGroup(connection, action.slice(6))
 }
@@ -591,6 +604,14 @@ function relativeTime(iso?: string): string {
                 >
                   <AppIcon name="lock" :size="11" />
                   <span class="row__readonly-label">Read-only</span>
+                </span>
+                <span
+                  v-else-if="connection.confirmWrites"
+                  class="badge row__confirms"
+                  title="Confirm writes: anything that would change the database is shown to you first, and runs only once you say so"
+                >
+                  <AppIcon name="shield-check" :size="11" />
+                  <span class="row__readonly-label">Confirm writes</span>
                 </span>
               </div>
               <div class="row__sub truncate">{{ connection.database || 'master' }}</div>
@@ -1073,7 +1094,8 @@ function relativeTime(iso?: string): string {
   font-size: 14px;
   font-weight: 600;
 }
-.row__readonly {
+.row__readonly,
+.row__confirms {
   flex: 0 0 auto;
   gap: 4px;
 }

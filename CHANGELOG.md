@@ -6,6 +6,12 @@ not there yet is the next release, still being prepared.
 
 ## 0.4.0
 
+- An activity monitor (View → Activity Monitor): every session on the server, what it is running,
+  what it is waiting on and for how long, and who is blocking whom — shown as chains with the head
+  blocker first. Kill ends a session once you say so, and is refused on a read-only connection.
+  TableView's own sessions are marked, so you don't kill the one you are using. It refreshes on the
+  same intervals as a table, and says which permission is missing when the login cannot see the
+  other sessions.
 - Quick open: press `Ctrl+P` from anywhere, type part of a name, and press Enter to open that
   table, view, procedure, function or saved query. Pinned tables and what you had open lately come
   first; `Shift+Enter` opens a table's structure instead. It works in a window holding a single

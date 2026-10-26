@@ -53,6 +53,8 @@ the connections where a mistake would hurt. It is built with Electron, Vue 3 and
 - Search the text of every procedure, function, view and trigger, and find what uses a table
 - Each tab keeps its own session, as an SSMS window does: temp tables, `USE` and transactions carry
   from one run to the next, and an open transaction is shown, and asked about before anything ends it
+- An activity monitor: the server's sessions, what each is running and waiting on, blocking chains
+  with the head blocker first, and Kill
 
 ![Typing a query that joins orders to customers, picking table names from the completion list, and running it to get revenue by country](docs/images/query.gif)
 
@@ -107,6 +109,7 @@ name.
 - [Tables](docs/tables.md) — the schema tree, browsing, filtering, editing and export
 - [Query editor](docs/query-editor.md) — running scripts, and editing stored procedures
 - [The workspace](docs/workspace.md) — the title bar, panes, tabs and windows
+- [Activity monitor](docs/activity.md) — the server's sessions, what they run, and who blocks whom
 - [Installing and updating](docs/install-and-update.md)
 - [Known limitations](docs/limitations.md)
 

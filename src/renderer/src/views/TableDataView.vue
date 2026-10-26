@@ -211,7 +211,7 @@ const figures = computed(() => {
     const key = `${row}:${focused.columnIndex}`
     return key in edits ? edits[key] : (allRows.value[row]?.[focused.columnIndex] ?? null)
   })
-  return { column: column.name, figures: selectionFigures(values, column.jsKind) }
+  return { column: column.name, figures: selectionFigures(values, column.jsKind, column.dataType) }
 })
 
 const pendingCount = computed(() => {

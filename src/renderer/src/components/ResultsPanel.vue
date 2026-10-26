@@ -127,7 +127,7 @@ const figures = computed(() => {
   const column = panel.columns[focused.columnIndex]
   if (!column) return null
   const values = selectedRows.value.map((row) => rows.value[row]?.[focused.columnIndex] ?? null)
-  return { column: column.name, figures: selectionFigures(values, column.jsKind) }
+  return { column: column.name, figures: selectionFigures(values, column.jsKind, column.dataType) }
 })
 
 /** What the grid's header draws its arrow from. */

@@ -6,6 +6,7 @@
  * integration tests against a real server.
  */
 import sql from 'mssql'
+import os from 'node:os'
 import { randomUUID } from 'node:crypto'
 import {
   AppliedChanges,
@@ -21,6 +22,7 @@ import {
   RoutineType,
   SchemaObject,
   SerializedError,
+  ServerActivity,
   ServerMessage,
   SessionLoss,
   SessionState,
@@ -67,6 +69,7 @@ import type { Tunnel, TunnelHandle } from '../../tunnel/types'
 import { buildMssqlConfig } from './config'
 import { isTransportFailure } from './errors'
 import { QuerySession } from './session'
+import { serverActivity, validSessionId, type ActivityMeta } from './activity'
 import { planReconnect } from '../reconnect'
 import type {
   ClientStateListener,
@@ -1010,6 +1013,7 @@ export class SqlServerClient implements DbClient {
           result = unsentStatement(statement.text, cancelledBeforeSending())
         } else {
           try {
+            current.lastBatch = statement.text
             result = await this.executeOne(statement.text, [], options, current)
           } catch (error) {
             // The session went between batches: nothing of this one was sent.
@@ -1381,6 +1385,53 @@ export class SqlServerClient implements DbClient {
       unsearchable: unsearchableModules(rows.filter((row) => row.definition === null)),
       truncated: false
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Server activity
+  // -------------------------------------------------------------------------
+
+  /**
+   * Every user session on the server and what it is running, for the activity
+   * monitor. One batch, so the session it reports as the monitor's own is the
+   * one that read the rest.
+   */
+  async readActivity(): Promise<ServerActivity> {
+    const request = this.requirePool().request()
+    try {
+      const result = await request.query(Q.SERVER_ACTIVITY)
+      const [meta, rows] = result.recordsets as unknown as [ActivityMeta[], Record<string, unknown>[]]
+      // Which of them are this window's query tabs, which the server only
+      // knows as connections that last ran the app's own state read.
+      const tabSessions: Record<number, string> = {}
+      const lastBatches: Record<number, string> = {}
+      for (const [tabId, session] of this.sessions) {
+        if (session.serverSessionId === null || session.lost) continue
+        tabSessions[session.serverSessionId] = tabId
+        if (session.lastBatch) lastBatches[session.serverSessionId] = session.lastBatch
+      }
+      return serverActivity(
+        meta?.[0] ?? ({} as ActivityMeta),
+        rows ?? [],
+        { pid: process.pid, host: os.hostname() },
+        { tabs: tabSessions, lastBatches }
+      )
+    } catch (error) {
+      this.noteTransportFailure(error)
+      throw this.explainTransportFailure(error)
+    }
+  }
+
+  /**
+   * Ends another session on the server. A read-only connection refuses it —
+   * the read-only check refuses `KILL` in a script for the same reason — and a
+   * confirm-writes one wants it confirmed; the window asks either way.
+   */
+  async killSession(sessionId: number, confirmed?: boolean): Promise<void> {
+    this.refuseUnlessAllowed('no session can be killed', confirmed)
+    const id = validSessionId(sessionId)
+    const result = await this.executeOne(Q.KILL_SESSION, [{ name: 'sessionId', value: id }], {})
+    if (result.error) throw Object.assign(new Error(result.error.message), result.error)
   }
 
   // -------------------------------------------------------------------------

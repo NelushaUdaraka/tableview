@@ -22,7 +22,8 @@ export const ROLLBACK_SQL = 'IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;'
  */
 export const STATE_SQL =
   'DECLARE @state smallint = XACT_STATE(); ' +
-  'SELECT @@TRANCOUNT AS transactionCount, @state AS transactionState, DB_NAME() AS [database];'
+  'SELECT @@TRANCOUNT AS transactionCount, @state AS transactionState, DB_NAME() AS [database], ' +
+  '@@SPID AS spid;'
 
 /** Database names compare without case, as they do under the usual server collation. */
 export function sameDatabase(a: string | null | undefined, b: string | null | undefined): boolean {

@@ -82,11 +82,30 @@ export function formatDecimal(value: Decimal): string {
   return `${negative ? '-' : ''}${grouped}${value.scale > 0 ? `.${fraction}` : ''}`
 }
 
-/** A cell as a decimal, when it holds a number. */
-function decimalOf(value: CellValue): Decimal | null {
+/**
+ * A cell as a decimal, when it holds a number. The driver hands a `bigint`
+ * over as its digits in a string, so in a numeric column a string of digits
+ * is a number too; anything else typed into one is not.
+ */
+function decimalOf(value: CellValue, kind: JsKind): Decimal | null {
   if (typeof value === 'number') return Number.isFinite(value) ? parseDecimal(String(value)) : null
   if (isTagged(value) && value.t === 'bigint') return parseDecimal(value.v)
+  if (typeof value === 'string' && kind === 'number' && /^\s*-?\d+(\.\d+)?\s*$/.test(value)) {
+    return parseDecimal(value)
+  }
   return null
+}
+
+/**
+ * How many places the column's type keeps: a `decimal(10, 2)` holding 1200
+ * arrives as the number 1200, and its figures should still read `1,200.00`.
+ * Money keeps four, but is read with two unless the values have more.
+ */
+export function declaredScale(dataType: string | undefined): number {
+  if (!dataType) return 0
+  const decimal = /^(?:decimal|numeric)\s*\(\s*\d+\s*,\s*(\d+)\s*\)/i.exec(dataType.trim())
+  if (decimal) return Number(decimal[1])
+  return /^(?:small)?money$/i.test(dataType.trim()) ? 2 : 0
 }
 
 /** What makes two values the same value, for the distinct count. */
@@ -101,15 +120,20 @@ function identity(value: CellValue): string {
  * `kind` is the column's type as the grid knows it. A column that says it is
  * numeric but holds something else — a cell typed into and not yet applied —
  * is counted as text rather than added up wrongly; a query's column of
- * unknown type is numeric when every value in it is.
+ * unknown type is numeric when every value in it is. `dataType` is the
+ * column's declared type, which says how many places the figures keep.
  */
-export function selectionFigures(values: CellValue[], kind: JsKind): SelectionFigures {
+export function selectionFigures(
+  values: CellValue[],
+  kind: JsKind,
+  dataType?: string
+): SelectionFigures {
   const present = values.filter((value) => value !== null && value !== undefined)
   const nulls = values.length - present.length
   const base = { rows: values.length, count: present.length, nulls }
 
   const mayBeNumeric = kind === 'number' || kind === 'unknown'
-  const decimals = mayBeNumeric ? present.map(decimalOf) : []
+  const decimals = mayBeNumeric ? present.map((value) => decimalOf(value, kind)) : []
   const numeric =
     present.length > 0 && mayBeNumeric && decimals.every((value): value is Decimal => !!value)
 
@@ -118,7 +142,7 @@ export function selectionFigures(values: CellValue[], kind: JsKind): SelectionFi
   }
 
   const exact = decimals as Decimal[]
-  const scale = Math.max(...exact.map((value) => value.scale))
+  const scale = Math.max(declaredScale(dataType), ...exact.map((value) => value.scale))
   if (scale > MAX_SCALE) return floatFigures(present as number[], base)
 
   const scaled = exact.map((value) => rescale(value, scale))

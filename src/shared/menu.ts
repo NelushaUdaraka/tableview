@@ -33,6 +33,7 @@ export type MenuAction =
   | 'results:export'
   | 'results:copy'
   | 'view:quick-open'
+  | 'view:activity'
   | 'view:toggle-sidebar'
   | 'view:toggle-row-panel'
   | 'view:split-tab'
@@ -199,6 +200,7 @@ export function buildMenuModel(platform: string): MenuModel[] {
         { label: 'Close Split', accelerator: 'CmdOrCtrl+Shift+\\', action: 'view:close-split' },
         { label: 'Toggle Theme', accelerator: 'CmdOrCtrl+Shift+L', action: 'view:toggle-theme' },
         { label: 'Refresh Schema', accelerator: 'F5', action: 'schema:refresh' },
+        { label: 'Activity Monitor', action: 'view:activity' },
         SEPARATOR,
         { label: 'Next Tab', accelerator: 'Ctrl+Tab', action: 'tab:next' },
         { label: 'Previous Tab', accelerator: 'Ctrl+Shift+Tab', action: 'tab:previous' },

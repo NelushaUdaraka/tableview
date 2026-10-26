@@ -355,6 +355,58 @@ export interface RunQueryRequest {
 }
 
 // ---------------------------------------------------------------------------
+// Server activity
+// ---------------------------------------------------------------------------
+
+/**
+ * One user session on the server, with the request it is running, if any —
+ * a row of the activity monitor.
+ */
+export interface ActivitySession {
+  sessionId: number
+  login: string
+  host: string
+  program: string
+  database: string | null
+  /** The request's status while one runs (`running`, `suspended`, `runnable`), else the session's. */
+  status: string
+  /** What the request is doing (`SELECT`, `WAITFOR`…); null for an idle session. */
+  command: string | null
+  /** The session this one's request waits on, when it is blocked. */
+  blockedBy: number | null
+  waitType: string | null
+  waitTimeMs: number
+  waitResource: string | null
+  /** The request's, while one runs; otherwise the session's totals. */
+  cpuMs: number
+  logicalReads: number
+  /** How long the running request has taken; null for an idle session. */
+  elapsedMs: number | null
+  openTransactions: number
+  /** The statement running, or for an idle session the last one it sent. */
+  sql: string | null
+  sqlIsCurrent: boolean
+  loginTime: string | null
+  lastRequestEnd: string | null
+  /** Opened by this copy of TableView — the tree, a table, a query tab, this monitor. */
+  ownProcess: boolean
+}
+
+export interface ServerActivity {
+  sessions: ActivitySession[]
+  /** The session the read itself ran on. */
+  monitorSessionId: number
+  /** Server session ids of this window's query tabs, to the tab each one is. */
+  tabSessions: Record<number, string>
+  /**
+   * The permission this login lacks to see anyone else's sessions —
+   * `VIEW SERVER STATE`, or `VIEW DATABASE STATE` on Azure SQL Database.
+   */
+  missingPermission?: string
+  readAt: string
+}
+
+// ---------------------------------------------------------------------------
 // Schema metadata
 // ---------------------------------------------------------------------------
 

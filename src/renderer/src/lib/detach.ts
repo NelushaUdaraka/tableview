@@ -7,9 +7,18 @@
  * window it came from.
  */
 import type { DetachedTab } from '@shared/ipc'
-import { useTabStore, type Tab, type TableTab } from '../stores/tabs'
+import { useTabStore, type ActivityTab, type Tab, type TableTab } from '../stores/tabs'
 
 export function detachedTabFrom(tab: Tab): DetachedTab {
+  if (tab.kind === 'activity') {
+    return {
+      kind: 'activity',
+      connectionId: tab.connectionId,
+      title: tab.title,
+      ...(tab.autoRefresh ? { autoRefresh: tab.autoRefresh } : {}),
+      ...(tab.showIdle ? { showIdle: true } : {})
+    }
+  }
   if (tab.kind === 'table') {
     return {
       kind: 'table',
@@ -45,6 +54,21 @@ export function detachedTabFrom(tab: Tab): DetachedTab {
  */
 export async function openTabFrom(tab: DetachedTab): Promise<void> {
   const tabs = useTabStore()
+
+  if (tab.kind === 'activity') {
+    await tabs.openActivity(tab.connectionId)
+    const opened = tabs.tabs.find(
+      (entry): entry is ActivityTab =>
+        entry.kind === 'activity' && entry.connectionId === tab.connectionId
+    )
+    if (opened && (tab.autoRefresh || tab.showIdle)) {
+      tabs.update<ActivityTab>(opened.id, {
+        ...(tab.autoRefresh ? { autoRefresh: tab.autoRefresh } : {}),
+        ...(tab.showIdle ? { showIdle: true } : {})
+      })
+    }
+    return
+  }
 
   if (tab.kind === 'table' && tab.schema && tab.table) {
     await tabs.openTable(

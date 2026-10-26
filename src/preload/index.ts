@@ -89,6 +89,9 @@ const api: RendererApi = {
   searchDefinitions: (request) => invoke(CHANNELS.dbSearchDefinitions, request),
   findReferences: (id, schema, name) => invoke(CHANNELS.dbFindReferences, id, schema, name),
 
+  readActivity: (id) => invoke(CHANNELS.dbActivity, id),
+  killSession: (id, sessionId, confirmed) =>
+    invoke(CHANNELS.dbKillSession, id, sessionId, confirmed),
   fetchTableData: (request: TableDataRequest) => invoke(CHANNELS.dbTableData, request),
   applyChanges: (changeSet: TableChangeSet) => invoke(CHANNELS.dbApplyChanges, changeSet),
   truncateTable: (id, schema, table, confirmed) =>

@@ -17,6 +17,7 @@ import {
   SavedQuery,
   SchemaObject,
   SerializedError,
+  ServerActivity,
   SessionEvent,
   TableChangeSet,
   TableDataRequest,
@@ -39,7 +40,7 @@ import type { UiState, UiStatePatch } from './uiState'
  * old window — staged edits, a result set, a scroll position — travels with it.
  */
 export interface DetachedTab {
-  kind: 'query' | 'table'
+  kind: 'query' | 'table' | 'activity'
   connectionId: string
   title: string
   /** Query tabs only. */
@@ -56,10 +57,13 @@ export interface DetachedTab {
   objectType?: SchemaObjectType
   view?: 'data' | 'structure'
   /**
-   * How often the table re-reads itself, when it does: a table being watched
-   * is the one most likely to be dragged out onto a screen of its own.
+   * How often the table — or the activity monitor — re-reads itself, when it
+   * does: one being watched is the one most likely to be dragged out onto a
+   * screen of its own.
    */
   autoRefresh?: number
+  /** The activity monitor: whether it lists idle sessions too. */
+  showIdle?: boolean
   /**
    * Columns taken out of its grid, by name. A table narrowed to the few
    * columns worth watching is the same table on another screen.
@@ -192,6 +196,8 @@ export const CHANNELS = {
   dbAutocomplete: 'db:autocomplete',
   dbSearchDefinitions: 'db:searchDefinitions',
   dbFindReferences: 'db:findReferences',
+  dbActivity: 'db:activity',
+  dbKillSession: 'db:killSession',
 
   queryRun: 'query:run',
   queryCancel: 'query:cancel',
@@ -349,6 +355,11 @@ export interface RendererApi {
   searchDefinitions(request: DefinitionSearchRequest): Promise<DefinitionSearchResult>
   /** The procedures, functions, views and triggers that use a table, view or routine. */
   findReferences(connectionId: string, schema: string, name: string): Promise<DefinitionSearchResult>
+
+  /** Every user session on the server and what it is running. */
+  readActivity(connectionId: string): Promise<ServerActivity>
+  /** Ends a session on the server. `confirmed`: the user was asked first. */
+  killSession(connectionId: string, sessionId: number, confirmed?: boolean): Promise<void>
 
   fetchTableData(request: TableDataRequest): Promise<TableDataResponse>
   applyChanges(changeSet: TableChangeSet): Promise<AppliedChanges>

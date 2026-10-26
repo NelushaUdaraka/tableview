@@ -84,6 +84,7 @@ function onMenuSelect(action: string): void {
 /** The icon the tree gives the same thing: a routine's tab is that routine. */
 function icon(tab: Tab): IconName {
   if (tab.kind === 'table') return 'table'
+  if (tab.kind === 'activity') return 'activity'
   if (tab.routine) return tab.routine.type && tab.routine.type !== 'procedure' ? 'function' : 'procedure'
   return 'terminal'
 }
@@ -201,7 +202,7 @@ function onDragEnd(event: DragEvent, tabId: string): void {
           :title="
             tab.kind === 'table'
               ? `${tab.schema}.${tab.table}`
-              : tab.routine
+              : tab.kind === 'query' && tab.routine
                 ? `${tab.routine.schema}.${tab.routine.name}`
                 : tab.title
           "

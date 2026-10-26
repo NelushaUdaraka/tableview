@@ -36,6 +36,7 @@
     "test:e2e:unsaved": "scripts/e2e.sh unsaved",
     "test:e2e:read-only": "scripts/e2e.sh read-only",
     "test:e2e:confirm-writes": "scripts/e2e.sh confirm-writes",
+    "test:e2e:workbench": "scripts/e2e.sh workbench",
     "testenv:up": "scripts/test-env.sh up",
     "testenv:down": "scripts/test-env.sh down",
     "testenv:status": "scripts/test-env.sh status",

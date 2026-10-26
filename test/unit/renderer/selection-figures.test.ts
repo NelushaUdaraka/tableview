@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  declaredScale,
   figureParts,
   formatDecimal,
   parseDecimal,
@@ -43,7 +44,22 @@ describe('formatDecimal', () => {
   })
 })
 
+describe('declaredScale', () => {
+  it('reads the places a decimal or money column keeps', () => {
+    expect(declaredScale('decimal(10, 2)')).toBe(2)
+    expect(declaredScale('numeric(18,4)')).toBe(4)
+    expect(declaredScale('money')).toBe(2)
+    expect(declaredScale('int')).toBe(0)
+    expect(declaredScale(undefined)).toBe(0)
+  })
+})
+
 describe('selectionFigures', () => {
+  it("keeps a decimal column's places when its values arrive without them", () => {
+    const figures = selectionFigures([0.1, 0.2, 1200], 'number', 'decimal(10, 2)')
+    expect(figures).toMatchObject({ sum: '1,200.30', avg: '400.10', min: '0.10', max: '1,200.00' })
+  })
+
   const pick = (values: CellValue[]): CellValue[] => values
 
   it('adds decimals without float error', () => {
@@ -74,6 +90,11 @@ describe('selectionFigures', () => {
     expect(figures.sum).toBe('18,014,398,509,481,986')
     expect(figures.max).toBe('9,007,199,254,740,993')
     expect(figures.avg).toBe('9,007,199,254,740,993')
+  })
+
+  it('adds bigints that arrive as strings of digits, as the driver sends them', () => {
+    const figures = selectionFigures(pick(['9007199254740993', '9007199254740993']), 'number')
+    expect(figures.sum).toBe('18,014,398,509,481,986')
   })
 
   it('skips NULLs in the figures and counts them apart', () => {

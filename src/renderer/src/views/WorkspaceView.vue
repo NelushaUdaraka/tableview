@@ -140,7 +140,7 @@ const recent = ref<string[]>([])
 watch(
   () => {
     const tab = tabs.active
-    if (!tab) return null
+    if (!tab || tab.kind === 'activity') return null
     if (tab.kind === 'table') return objectKey(tab.schema, tab.table)
     if (tab.routine) return routineKey(tab.routine.schema, tab.routine.name)
     return tab.savedQueryId ? queryKey(tab.savedQueryId) : null
@@ -433,8 +433,9 @@ function handleAction(action: string): void {
       else sidebar.value?.focusFilter()
       break
     case 'schema:refresh':
-      if (tabs.active?.kind === 'table') focusedView.value?.refresh()
-      else void sidebar.value?.refresh()
+      if (tabs.active?.kind === 'table' || tabs.active?.kind === 'activity') {
+        focusedView.value?.refresh()
+      } else void sidebar.value?.refresh()
       break
     case 'connection:disconnect':
       void disconnect()
@@ -456,6 +457,9 @@ function handleAction(action: string): void {
       break
     case 'view:quick-open':
       showQuickOpen.value = true
+      break
+    case 'view:activity':
+      if (connectionId.value) void tabs.openActivity(connectionId.value)
       break
   }
 }

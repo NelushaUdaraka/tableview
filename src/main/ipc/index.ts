@@ -402,6 +402,14 @@ export function registerIpcHandlers(context: IpcContext): void {
     registry.get(call.scope, id).findReferences(schema, name)
   )
 
+  // -- server activity --------------------------------------------------------
+
+  handle(CHANNELS.dbActivity, (call, id: string) => registry.get(call.scope, id).readActivity())
+
+  handle(CHANNELS.dbKillSession, (call, id: string, sessionId: number, confirmed?: boolean) =>
+    registry.get(call.scope, id).killSession(sessionId, confirmed)
+  )
+
   // -- table data -----------------------------------------------------------
 
   handle(CHANNELS.dbTableData, (call, request: TableDataRequest) =>

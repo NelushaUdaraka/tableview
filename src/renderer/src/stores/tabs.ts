@@ -121,7 +121,24 @@ export interface TableTab {
   cache?: TableCache
 }
 
-export type Tab = QueryTab | TableTab
+/**
+ * The server's sessions and what they are running: the activity monitor. One
+ * per connection in a window, since they would all show the same server.
+ */
+export interface ActivityTab {
+  id: string
+  kind: 'activity'
+  title: string
+  connectionId: string
+  /** Kept for the shape every tab shares; the monitor has no row panel. */
+  showRowPanel: boolean
+  /** How often it reads the server again, in milliseconds; absent or 0 is never. */
+  autoRefresh?: number
+  /** List sleeping sessions that hold nothing open, too. */
+  showIdle?: boolean
+}
+
+export type Tab = QueryTab | TableTab | ActivityTab
 
 /**
  * A column of the workspace: its own strip of tabs, one of which is showing.
@@ -606,6 +623,28 @@ export const useTabStore = defineStore('tabs', () => {
   }
 
   /**
+   * Opens the activity monitor for a connection — or shows the one already
+   * open, wherever it is: two would only show the same server twice.
+   */
+  async function openActivity(connectionId: string): Promise<void> {
+    const existing = tabs.value.find(
+      (tab) => tab.kind === 'activity' && tab.connectionId === connectionId
+    )
+    if (existing) return select(existing.id)
+    if (!(await canLeave(focusedPane.value?.activeTabId))) return
+    addTab(
+      {
+        id: newId(),
+        kind: 'activity',
+        title: 'Activity',
+        connectionId,
+        ...openingDefaults()
+      },
+      focusedPaneId.value
+    )
+  }
+
+  /**
    * Shows a table tab's rows or its structure. Resolves false when the tab
    * asked to stay where it was.
    *
@@ -732,9 +771,11 @@ export const useTabStore = defineStore('tabs', () => {
     tabs.value.some((tab) =>
       tab.kind === 'table'
         ? tab.pendingEdits > 0
-        : // A running query may be opening a transaction this window has not
-          // seen yet, so it is stopped and looked at before the window goes.
-          tab.running || transactionOpen(tab.session) || hasUnsavedRoutineChanges(tab)
+        : tab.kind === 'query'
+          ? // A running query may be opening a transaction this window has not
+            // seen yet, so it is stopped and looked at before the window goes.
+            tab.running || transactionOpen(tab.session) || hasUnsavedRoutineChanges(tab)
+          : false
     )
   )
 
@@ -835,6 +876,7 @@ export const useTabStore = defineStore('tabs', () => {
         sessionLost: undefined
       }
     }
+    if (tab.kind === 'activity') return { ...tab, id: newId() }
     return {
       ...tab,
       id: newId(),
@@ -939,6 +981,7 @@ export const useTabStore = defineStore('tabs', () => {
 
   function savedTabFrom(tab: Tab): SavedTab {
     const common = { title: tab.title, showRowPanel: tab.showRowPanel }
+    if (tab.kind === 'activity') return { kind: 'activity', ...common }
     if (tab.kind === 'table') {
       return {
         kind: 'table',
@@ -983,6 +1026,9 @@ export const useTabStore = defineStore('tabs', () => {
 
   function tabFromSaved(saved: SavedTab, connectionId: string): Tab {
     const showRowPanel = saved.showRowPanel ?? openingDefaults().showRowPanel
+    if (saved.kind === 'activity') {
+      return { id: newId(), kind: 'activity', title: saved.title || 'Activity', connectionId, showRowPanel }
+    }
     if (saved.kind === 'table') {
       return {
         id: newId(),
@@ -1062,6 +1108,7 @@ export const useTabStore = defineStore('tabs', () => {
     routineTab,
     storeRoutine,
     openTable,
+    openActivity,
     setTableView,
     close,
     closeOthers,

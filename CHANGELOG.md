@@ -6,6 +6,12 @@ not there yet is the next release, still being prepared.
 
 ## 0.4.0
 
+- Search inside stored procedures: the sidebar's new *Search* panel finds text across every
+  procedure, function, view and trigger in the database and shows the lines it is on, with options
+  to match case, match whole words and pick which kinds of object to search. Clicking a line opens
+  that definition scrolled to it, ready to edit. Encrypted ones are listed as *can't be searched*.
+- *Find references* on a table, view or routine in the schema tree lists the procedures,
+  functions, views and triggers that use it, in the same list.
 - *Apply* in a table now shows the statements it is about to run, in the order it runs them,
   values written in, instead of only counting them. *Copy as script* puts the same statements on
   the clipboard wrapped in one transaction, to keep for a change ticket or to run on another

@@ -31,6 +31,7 @@ import {
   setBaseline,
   trackedChanges
 } from '../lib/changeTracking'
+import { matcherFor, type LineMatchOptions } from '@shared/sql/definitionSearch'
 
 const props = withDefaults(
   defineProps<{
@@ -445,6 +446,30 @@ function insertText(text: string): void {
   view.focus()
 }
 
+/**
+ * Scrolls a line (numbered from 1) to the middle and puts the cursor on it —
+ * selecting `find` there when it is on that line, as a search result shows it.
+ * A line past the end goes to the last: the text may have been edited since
+ * the line was found.
+ */
+function revealLine(lineNumber: number, find?: LineMatchOptions & { text: string }): void {
+  if (!view) return
+  const doc = view.state.doc
+  const line = doc.line(Math.min(Math.max(1, Math.floor(lineNumber)), doc.lines))
+  let anchor = line.from
+  let head = line.from
+  const match = find?.text ? matcherFor(find.text, find).exec(line.text) : null
+  if (match) {
+    anchor = line.from + match.index
+    head = anchor + match[0].length
+  }
+  view.dispatch({
+    selection: { anchor, head },
+    effects: EditorView.scrollIntoView(anchor, { y: 'center' })
+  })
+  view.focus()
+}
+
 function setValue(text: string): void {
   if (!view) return
   view.dispatch({
@@ -458,6 +483,7 @@ defineExpose({
   focus,
   insertText,
   setValue,
+  revealLine,
   nextChange: () => changeCommand(nextChange),
   previousChange: () => changeCommand(previousChange),
   revertAllChanges: () => changeCommand(revertAllChanges)

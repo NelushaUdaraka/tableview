@@ -5,6 +5,8 @@ import {
   ConnectionConfig,
   ConnectionStatus,
   DatabaseSummary,
+  DefinitionSearchRequest,
+  DefinitionSearchResult,
   ExportRequest,
   QueryExecutionResult,
   QueryHistoryEntry,
@@ -187,6 +189,8 @@ export const CHANNELS = {
   dbTruncate: 'db:truncate',
   dbDrop: 'db:drop',
   dbAutocomplete: 'db:autocomplete',
+  dbSearchDefinitions: 'db:searchDefinitions',
+  dbFindReferences: 'db:findReferences',
 
   queryRun: 'query:run',
   queryCancel: 'query:cancel',
@@ -326,6 +330,10 @@ export interface RendererApi {
   ): Promise<TableForeignKey[]>
   getObjectDefinition(connectionId: string, schema: string, name: string): Promise<string | null>
   getAutocompleteSchema(connectionId: string): Promise<Record<string, string[]>>
+  /** Text in the current database's procedures, functions, views and triggers. */
+  searchDefinitions(request: DefinitionSearchRequest): Promise<DefinitionSearchResult>
+  /** The procedures, functions, views and triggers that use a table, view or routine. */
+  findReferences(connectionId: string, schema: string, name: string): Promise<DefinitionSearchResult>
 
   fetchTableData(request: TableDataRequest): Promise<TableDataResponse>
   applyChanges(changeSet: TableChangeSet): Promise<AppliedChanges>

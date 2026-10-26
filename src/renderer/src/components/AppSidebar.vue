@@ -1,6 +1,14 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import type { RoutineObject, SchemaObject } from '@shared/types'
+import { computed, nextTick, ref, watch } from 'vue'
+import {
+  MODULE_KINDS,
+  type DefinitionMatch,
+  type DefinitionMatchLine,
+  type ModuleKind,
+  type ModuleType,
+  type RoutineObject,
+  type SchemaObject
+} from '@shared/types'
 import type { SidebarPanel } from '@shared/uiState'
 import AppIcon from './AppIcon.vue'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
@@ -9,9 +17,10 @@ import { useConnectionStore } from '../stores/connections'
 import { useConfirmWritesStore } from '../stores/confirmWrites'
 import { useConfirmStore } from '../stores/confirm'
 import { dropWrite, truncateWrite } from '../lib/confirmWrites'
+import { useDefinitionSearchStore } from '../stores/definitionSearch'
 import { useLibraryStore } from '../stores/library'
 import { useSchemaStore } from '../stores/schema'
-import { useTabStore } from '../stores/tabs'
+import { useTabStore, type RevealLine } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
 import { useUiStateStore } from '../stores/uiState'
 import { api } from '../lib/api'
@@ -21,7 +30,7 @@ const emit = defineEmits<{
   (event: 'open-table', schema: string, table: string, type: 'table' | 'view'): void
   (event: 'open-structure', schema: string, table: string, type: 'table' | 'view'): void
   (event: 'open-sql', sql: string, title?: string): void
-  (event: 'open-routine', schema: string, name: string): void
+  (event: 'open-routine', schema: string, name: string, reveal?: RevealLine): void
   (event: 'generate', kind: string, schema: string, table: string): void
 }>()
 
@@ -30,14 +39,22 @@ const confirmWrites = useConfirmWritesStore()
 const confirmQuestion = useConfirmStore()
 const schema = useSchemaStore()
 const library = useLibraryStore()
+const finder = useDefinitionSearchStore()
 const tabs = useTabStore()
 const toasts = useToastStore()
 const uiState = useUiStateStore()
 
 type Panel = SidebarPanel
+const PANEL_LABELS: Record<Panel, string> = {
+  objects: 'Schema',
+  search: 'Search',
+  history: 'History',
+  saved: 'Saved'
+}
 /** Opens on the panel the sidebar was last left on. */
 const panel = ref<Panel>(uiState.state.sidebarPanel)
 const filterInput = ref<HTMLInputElement | null>(null)
+const searchInput = ref<HTMLInputElement | null>(null)
 
 const menu = ref<{
   x: number
@@ -57,7 +74,10 @@ watch(
   },
   { immediate: true }
 )
-watch(panel, (next) => uiState.remember({ sidebarPanel: next }))
+watch(panel, (next) => {
+  uiState.remember({ sidebarPanel: next })
+  if (next === 'search') void nextTick(() => searchInput.value?.focus())
+})
 
 // Reading the schema is the workspace's job, not this tree's: the editor's
 // autocomplete reads the same store, and a window showing one dragged-out tab
@@ -117,6 +137,7 @@ const objectMenuItems = computed<MenuEntry[]>(() => {
     { label: 'DELETE statement', action: 'delete' },
     { label: 'CREATE TABLE script', action: 'ddl' },
     { separator: true, label: '' },
+    { label: 'Find references', action: 'references' },
     { label: 'Copy qualified name', action: 'copy-name' },
     { label: 'Pin / unpin', action: 'pin' },
     { separator: true, label: '' },
@@ -128,6 +149,7 @@ const objectMenuItems = computed<MenuEntry[]>(() => {
 const routineMenuItems: MenuEntry[] = [
   { label: 'Show definition', action: 'definition' },
   { label: 'EXEC statement', action: 'exec' },
+  { label: 'Find references', action: 'references' },
   { label: 'Copy qualified name', action: 'copy-name' }
 ]
 
@@ -158,6 +180,11 @@ async function onMenuSelect(action: string): Promise<void> {
         break
       case 'exec':
         emit('open-sql', `EXEC ${qualified};`, target.name)
+        break
+      case 'references':
+        // Answered in the Search panel, in the same list as a text search.
+        panel.value = 'search'
+        await finder.findReferences(id, currentDatabase.value, target.schema, target.name)
         break
       // A connection that confirms its writes asks its own question, which
       // wants the name typed; any other asks the plain one.
@@ -253,6 +280,86 @@ const pinnedObjects = computed(() =>
   schema.objects.filter((object) => schema.isPinned(object.schema, object.name))
 )
 
+// --- searching definitions ---------------------------------------------------
+
+const KIND_LABELS: Record<ModuleKind, string> = {
+  procedure: 'Procedures',
+  function: 'Functions',
+  view: 'Views',
+  trigger: 'Triggers'
+}
+
+function runSearch(): void {
+  if (!connectionId.value) return
+  void finder.search(connectionId.value, currentDatabase.value)
+}
+
+/** A changed option answers again, when what is listed is a search's results. */
+function changeOption(change: () => void): void {
+  change()
+  if (finder.question?.mode === 'text') runSearch()
+}
+
+/**
+ * Results belong to the database they were found in: in another one the same
+ * names may be other objects, or none.
+ */
+watch([connectionId, currentDatabase], ([id, database], [previousId]) => {
+  if (id !== previousId || (finder.question && finder.question.database !== database)) {
+    finder.clear()
+  }
+})
+
+function moduleIcon(type: ModuleType): IconName {
+  if (type === 'procedure') return 'procedure'
+  if (type === 'view') return 'view'
+  if (type === 'trigger') return 'trigger'
+  return 'function'
+}
+
+/** A line's text, cut into the parts that matched and the parts between them. */
+function segments(line: DefinitionMatchLine): { text: string; hit: boolean }[] {
+  const parts: { text: string; hit: boolean }[] = []
+  let at = 0
+  for (const [from, to] of line.ranges) {
+    if (from > at) parts.push({ text: line.text.slice(at, from), hit: false })
+    parts.push({ text: line.text.slice(from, to), hit: true })
+    at = to
+  }
+  if (at < line.text.length) parts.push({ text: line.text.slice(at), hit: false })
+  return parts
+}
+
+/** Opens the object's definition at a line, selecting what was found there. */
+function openMatch(match: DefinitionMatch, line?: DefinitionMatchLine): void {
+  const question = finder.question
+  const at = line ?? match.lines[0]
+  if (!question || !at) {
+    emit('open-routine', match.schema, match.name)
+    return
+  }
+  const find =
+    question.mode === 'text'
+      ? { text: question.text, matchCase: question.matchCase, wholeWord: question.wholeWord }
+      : { text: question.name, wholeWord: true }
+  emit('open-routine', match.schema, match.name, { line: at.line, find })
+}
+
+function lineCountLabel(count: number): string {
+  return `${count} ${count === 1 ? 'line' : 'lines'}`
+}
+
+const resultSummary = computed(() => {
+  const result = finder.result
+  const question = finder.question
+  if (!result || !question) return ''
+  const objects = result.matches.length
+  const noun = objects === 1 ? 'object' : 'objects'
+  if (question.mode === 'references') return objects ? `Used by ${objects} ${noun}` : 'Nothing uses it'
+  if (!objects) return 'No matches'
+  return `${lineCountLabel(finder.lineCount)} in ${objects} ${noun}`
+})
+
 function focusFilter(): void {
   panel.value = 'objects'
   filterInput.value?.focus()
@@ -311,7 +418,7 @@ defineExpose({ focusFilter, refresh })
 
     <nav class="sidebar__tabs seg">
       <button
-        v-for="entry in (['objects', 'history', 'saved'] as Panel[])"
+        v-for="entry in (['objects', 'search', 'history', 'saved'] as Panel[])"
         :key="entry"
         class="sidebar__tab seg__opt"
         :class="{ 'sidebar__tab--active seg__opt--on': panel === entry }"
@@ -319,7 +426,7 @@ defineExpose({ focusFilter, refresh })
         @click="panel = entry"
       >
         <span class="sidebar__tab-label">
-          {{ entry === 'objects' ? 'Schema' : entry === 'history' ? 'History' : 'Saved' }}
+          {{ PANEL_LABELS[entry] }}
         </span>
       </button>
     </nav>
@@ -455,6 +562,147 @@ defineExpose({ focusFilter, refresh })
             {{ schema.filter ? 'Nothing matches that filter' : 'This database has no user objects' }}
           </div>
         </template>
+      </div>
+    </template>
+
+    <!-- Search: text in definitions, or what uses an object ---------------- -->
+    <template v-else-if="panel === 'search'">
+      <div class="sidebar__filter">
+        <div class="search">
+          <AppIcon class="search__glyph" name="search" :size="14" />
+          <input
+            ref="searchInput"
+            v-model="finder.text"
+            class="search__input"
+            placeholder="Search definitions…"
+            spellcheck="false"
+            @keydown.enter="runSearch"
+          />
+          <button
+            class="finder__opt"
+            :class="{ 'finder__opt--on': finder.matchCase }"
+            title="Match case"
+            :aria-pressed="finder.matchCase"
+            @click="changeOption(() => (finder.matchCase = !finder.matchCase))"
+          >
+            Aa
+          </button>
+          <button
+            class="finder__opt finder__opt--word"
+            :class="{ 'finder__opt--on': finder.wholeWord }"
+            title="Whole word"
+            :aria-pressed="finder.wholeWord"
+            @click="changeOption(() => (finder.wholeWord = !finder.wholeWord))"
+          >
+            ab
+          </button>
+        </div>
+        <div class="finder__kinds" role="group" aria-label="Object types to search">
+          <button
+            v-for="kind in MODULE_KINDS"
+            :key="kind"
+            class="finder__kind"
+            :class="{ 'finder__kind--on': finder.kinds.includes(kind) }"
+            :aria-pressed="finder.kinds.includes(kind)"
+            @click="changeOption(() => finder.toggleKind(kind))"
+          >
+            {{ KIND_LABELS[kind] }}
+          </button>
+        </div>
+      </div>
+
+      <div class="sidebar__scroll">
+        <div v-if="finder.question" class="finder__summary">
+          <span class="truncate">
+            <template v-if="finder.question.mode === 'references'">
+              References to
+              <span class="mono finder__target">
+                {{ finder.question.schema }}.{{ finder.question.name }}
+              </span>
+            </template>
+            <template v-else>
+              <span class="mono finder__target">“{{ finder.question.text }}”</span>
+            </template>
+          </span>
+          <button class="finder__clear" title="Clear results" aria-label="Clear results" @click="finder.clear()">
+            <AppIcon name="x" :size="13" />
+          </button>
+        </div>
+
+        <div v-if="finder.loading" class="sidebar__loading">
+          <span class="spinner"></span>
+          {{ finder.question?.mode === 'references' ? 'Finding references…' : 'Searching…' }}
+        </div>
+        <div v-else-if="finder.error" class="sidebar__empty error-text">{{ finder.error }}</div>
+
+        <template v-else-if="finder.result">
+          <div class="finder__count muted">{{ resultSummary }}</div>
+
+          <section
+            v-for="match in finder.result.matches"
+            :key="`${match.schema}.${match.name}`"
+            class="finder__object"
+          >
+            <button
+              class="item item--flush"
+              :class="{ 'item--active': isActive(match.schema, match.name) }"
+              :title="`Open ${match.schema}.${match.name}`"
+              @click="openMatch(match)"
+            >
+              <AppIcon class="item__icon item__icon--routine" :name="moduleIcon(match.type)" :size="14" />
+              <span class="item__name truncate">{{ match.schema }}.{{ match.name }}</span>
+              <span v-if="match.lines.length" class="item__count">
+                {{ match.lines.length + match.moreLines }}
+              </span>
+            </button>
+            <button
+              v-for="line in match.lines"
+              :key="line.line"
+              class="finder__line"
+              :title="`Line ${line.line}`"
+              @click="openMatch(match, line)"
+            >
+              <span class="finder__num mono">{{ line.line }}</span>
+              <span class="finder__text mono"
+                ><template v-for="(part, index) in segments(line)" :key="index"
+                  ><mark v-if="part.hit" class="finder__hit">{{ part.text }}</mark
+                  ><template v-else>{{ part.text }}</template></template
+                ></span
+              >
+            </button>
+            <div v-if="match.moreLines" class="finder__more muted">
+              and {{ lineCountLabel(match.moreLines) }} more
+            </div>
+          </section>
+
+          <div v-if="finder.result.truncated" class="finder__note muted">
+            Only the first {{ finder.result.matches.length }} objects are listed. Narrow the search
+            to see the rest.
+          </div>
+
+          <section v-if="finder.result.unsearchable.length" class="finder__object">
+            <div class="group__head group__head--pinned" title="Encrypted: the server does not show their definitions">
+              <AppIcon class="group__chevron" name="lock" :size="12" />
+              Can’t be searched
+              <span class="group__count">{{ finder.result.unsearchable.length }}</span>
+            </div>
+            <div
+              v-for="module in finder.result.unsearchable"
+              :key="`u-${module.schema}.${module.name}`"
+              class="item item--flush item--static"
+              title="Encrypted: the server does not show its definition"
+            >
+              <AppIcon class="item__icon" :name="moduleIcon(module.type)" :size="14" />
+              <span class="item__name truncate">{{ module.schema }}.{{ module.name }}</span>
+            </div>
+          </section>
+        </template>
+
+        <div v-else class="sidebar__empty muted finder__hint">
+          Find text in every procedure, function, view and trigger in this database. Press Enter
+          to search. To see what uses a table, right-click it in Schema and choose Find
+          references.
+        </div>
       </div>
     </template>
 
@@ -969,5 +1217,171 @@ defineExpose({ focusFilter, refresh })
 .saved__del:hover {
   background: color-mix(in srgb, var(--danger) 15%, transparent);
   color: var(--danger);
+}
+/* --- definition search ----------------------------------------------------- */
+/* Match case and whole word: toggles inside the box, the way an editor's find
+   bar has them. */
+.finder__opt {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background-color var(--transition),
+    color var(--transition);
+}
+.finder__opt + .finder__opt {
+  margin-left: -6px;
+}
+.finder__opt--word {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.finder__opt:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+.finder__opt--on,
+.finder__opt--on:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent-fg);
+}
+.finder__kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+.finder__kind {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color var(--transition),
+    border-color var(--transition),
+    color var(--transition);
+}
+.finder__kind:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+.finder__kind--on,
+.finder__kind--on:hover {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent-fg);
+}
+.finder__summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 0 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.finder__target {
+  color: var(--text-primary);
+}
+.finder__clear {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.finder__clear:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+.finder__count {
+  padding: 2px 14px 8px;
+  font-size: 11px;
+}
+.finder__object + .finder__object {
+  margin-top: 6px;
+}
+.finder__line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: calc(100% - 12px);
+  margin: 0 6px;
+  padding: 3px 8px 3px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--transition),
+    color var(--transition);
+}
+.finder__line:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+.finder__num {
+  flex: 0 0 auto;
+  min-width: 28px;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.finder__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  text-overflow: ellipsis;
+}
+.finder__hit {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--warning) 28%, transparent);
+  color: var(--text-primary);
+}
+.finder__more,
+.finder__note {
+  padding: 2px 14px 2px 54px;
+  font-size: 11px;
+}
+.finder__note {
+  padding: 10px 14px;
+}
+.finder__hint {
+  display: block;
+  line-height: 1.5;
+}
+.item--static {
+  cursor: default;
+}
+.item--static:hover {
+  background: transparent;
+  color: var(--text-secondary);
 }
 </style>

@@ -11,6 +11,8 @@ import type {
   AppliedChanges,
   ConnectionConfig,
   DatabaseSummary,
+  DefinitionSearchRequest,
+  DefinitionSearchResult,
   RoutineObject,
   SchemaObject,
   SchemaObjectType,
@@ -93,6 +95,9 @@ export interface SessionRunOptions extends ExecuteOptions {
   pinnedDatabase?: string
 }
 
+/** A definition search, once it has reached the connection it runs on. */
+export type DefinitionSearch = Omit<DefinitionSearchRequest, 'connectionId'>
+
 export interface DbClient {
   readonly isConnected: boolean
   /** Local port of the SSH tunnel, when one is in use. */
@@ -146,6 +151,10 @@ export interface DbClient {
   getTableStructure(schema: string, table: string): Promise<TableStructure>
   getInboundForeignKeys(schema: string, table: string): Promise<TableForeignKey[]>
   getAutocompleteSchema(): Promise<Record<string, string[]>>
+  /** Text in the current database's procedures, functions, views and triggers. */
+  searchDefinitions(search: DefinitionSearch): Promise<DefinitionSearchResult>
+  /** The procedures, functions, views and triggers that use an object. */
+  findReferences(schema: string, name: string): Promise<DefinitionSearchResult>
 
   fetchTableData(request: TableDataRequest): Promise<TableDataResponse>
   applyChanges(changeSet: TableChangeSet): Promise<AppliedChanges>

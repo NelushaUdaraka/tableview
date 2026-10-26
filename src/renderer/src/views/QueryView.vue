@@ -238,6 +238,20 @@ watch(
   }
 )
 
+/**
+ * A search result asked for a line: shown once this tab's editor is on screen,
+ * which for a tab just opened or selected is after it has mounted.
+ */
+watch(
+  [() => props.tab.revealLine, editor],
+  ([reveal, view]) => {
+    if (!reveal || !view) return
+    view.revealLine(reveal.line, reveal.find)
+    tabs.update<QueryTab>(props.tab.id, { revealLine: undefined })
+  },
+  { flush: 'post', immediate: true }
+)
+
 function onCursor(offset: number): void {
   cursor.value = offset
   tabs.update<QueryTab>(props.tab.id, { cursor: offset })

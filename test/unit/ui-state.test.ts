@@ -47,6 +47,10 @@ describe('normalizeUiState', () => {
     })
   })
 
+  it('keeps the Search panel', () => {
+    expect(normalizeUiState({ sidebarPanel: 'search' }).sidebarPanel).toBe('search')
+  })
+
   it('refuses a panel that does not exist', () => {
     expect(normalizeUiState({ sidebarPanel: 'tables' }).sidebarPanel).toBe('objects')
   })

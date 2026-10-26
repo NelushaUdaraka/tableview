@@ -12,7 +12,22 @@ Finding a table in the schema tree, reading what is in it, and changing it.
 - **Tables open where they stand** into what is in them — `columns`, `keys`, `foreign keys`,
   `indexes`, each with its count — so "what was that column called" costs a twisty rather than a tab
 - Context menu: open data, open structure, generate `SELECT`/`INSERT`/`UPDATE`/`DELETE`/`CREATE TABLE`,
-  copy qualified name, show routine definition, truncate, drop
+  find references, copy qualified name, show routine definition, truncate, drop
+
+### Where a table is used
+
+*Find references* on a table, a view or a routine lists the procedures, functions, views and
+triggers that use it, in the sidebar's *Search* panel — the same list a
+[definition search](query-editor.md#searching-definitions) fills, with the lines that name it under
+each one, and a click opening the definition at that line. It reads
+`sys.sql_expression_dependencies`, the dependencies SQL Server recorded when each module was
+created: a reference it could resolve then carries the object's id, and one it could not — a name
+written without its schema in a procedure, which SQL Server only resolves when the procedure runs —
+carries just the name, so those are matched by name (and by schema, when one was written).
+What it cannot see is SQL put together at run time (`EXEC (@sql)`, `sp_executesql`); a text search
+for the name finds those. A module that uses the object but never spells its name — through a
+synonym, say — is still listed, with no lines under it. Encrypted modules are listed as *can't be
+searched*, since their text is not shown, though SQL Server still knows what they use.
 
 ### A table, opened in the tree
 

@@ -29,7 +29,7 @@ import { useConnectionStore } from '../stores/connections'
 import { useReadOnlyStore } from '../stores/readOnly'
 import { useSchemaStore } from '../stores/schema'
 import { useSettingsStore } from '../stores/settings'
-import { useTabStore } from '../stores/tabs'
+import { useTabStore, type QueryTab, type RevealLine } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
 import { useUiStateStore } from '../stores/uiState'
 import { onMenuAction } from '../lib/menuBus'
@@ -158,14 +158,23 @@ function newQueryTab(): void {
  * database instead of failing on the object that is already there — and kept
  * as what is stored, so the editor can mark every change made to it. A routine
  * that is already open is shown where it is, without asking the server again.
+ *
+ * `reveal` is a line to scroll to, from a search result. Views and triggers
+ * open the same way: their definitions are edited like a routine's.
  */
-async function openRoutine(schemaName: string, name: string): Promise<void> {
+async function openRoutine(schemaName: string, name: string, reveal?: RevealLine): Promise<void> {
   const id = connectionId.value
   if (!id) return
   const database = connections.activeStatus?.currentDatabase || undefined
-  const open = tabs.routineTab(id, { schema: schemaName, name, database })
+  const routine = { schema: schemaName, name, database }
+  const showLine = (): void => {
+    const tab = tabs.routineTab(id, routine)
+    if (reveal && tab) tabs.update<QueryTab>(tab.id, { revealLine: { ...reveal } })
+  }
+  const open = tabs.routineTab(id, routine)
   if (open) {
     await tabs.select(open.id)
+    showLine()
     return
   }
 
@@ -186,6 +195,7 @@ async function openRoutine(schemaName: string, name: string): Promise<void> {
       database,
       baseline: asCreateOrAlter(definition)
     })
+    showLine()
   } catch (error) {
     toasts.fromError(`Could not read the definition of ${schemaName}.${name}`, error)
   }

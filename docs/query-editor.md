@@ -65,6 +65,46 @@ nothing of the kind to lose, the next run starts the new session and goes ahead.
 *Reconnect* after a drop the app gave up on is no different: the tabs' sessions do not come back
 with the connection, and each tab's next run is held to the same rule.
 
+## Searching definitions
+
+The sidebar's *Search* panel finds text across every procedure, function, view and trigger in the
+current database, and shows the lines it is on, grouped by object:
+
+```
+ orders_total                                  Aa ab
+ [Procedures] [Functions] [Views] [Triggers]
+
+ "orders_total"                                    ✕
+ 5 lines in 2 objects
+ ▫ sales.usp_month_end                            3
+     12  UPDATE m SET orders_total = s.total
+     18  WHERE orders_total > 0
+     40  RETURN @orders_total
+ ◉ sales.v_customer_totals                        2
+      3  SUM(o.total) AS orders_total,
+      …
+```
+
+Enter runs it. **Aa** matches case and **ab** whole words only — a word stops at anything that is
+not part of a T-SQL name, so `orders` does not find `@orders` or `orders_archive` but does find
+`[orders]` and `dbo.orders`. The chips narrow it to some kinds of object; changing any of them
+searches again. Clicking a line opens the object's definition at that line with the match
+selected, through the same path as clicking a routine in the tree, so it opens as `CREATE OR ALTER`
+with its changes marked (below); views and triggers open the same way. A routine already open is
+shown where it is, scrolled to the line.
+
+It is one catalog query: `sys.sql_modules` joined to `sys.objects`, `definition LIKE @pattern
+ESCAPE '\'`, with the text bound as a parameter and its wildcards escaped, so `%`, `_` and `[` mean
+themselves. The collation is spelled out (`Latin1_General_100_CI_AS`, or `_CS_AS` to match case),
+so case means the same whatever the database's own collation is. The server narrows it to the
+objects that contain the text; the lines, and whole-word matching, are worked out in the main
+process, and only the lines cross to the window — never whole definitions. At most 500 objects
+and 50 lines per object are listed; the rest are counted. Encrypted modules have no definition to
+search, so they are listed under *Can't be searched* rather than left out. Results belong to the
+database they were found in, and go when the sidebar switches database. Both this and *Find
+references* (see [tables](tables.md#where-a-table-is-used)) only read the catalog, so they work on
+read-only connections.
+
 ## Editing a stored procedure
 
 Clicking a procedure or function in the tree opens its definition as `CREATE OR ALTER`, so running

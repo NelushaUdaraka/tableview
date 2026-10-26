@@ -119,7 +119,7 @@ and flips `AllowTcpForwarding` on, which the `linuxserver/openssh-server` image 
 ### End-to-end
 
 ```bash
-scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | table-tools | routines | auto-refresh | unsaved | read-only | confirm-writes | ssm-form
+scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | table-tools | routines | auto-refresh | unsaved | read-only | confirm-writes | workbench | ssm-form
 ```
 
 On a headless box it starts Xvfb itself. It needs Electron's usual Linux libraries:
@@ -205,6 +205,19 @@ The suites:
   in a table asks too, listing the `UPDATE` it sends, and so does *Truncate* from the tree. Last the switch: off asks first
   (*Keep confirming* has the focus, Escape keeps it), after which a write runs without a question;
   on does not ask; and read-only turned on and off again lands back on confirming without asking
+- **workbench** — `Ctrl+P` opens quick open with the focus in it; typing finds the table, Enter
+  opens it, Escape closes the box, and `Shift+Enter` opens a table's structure. Selecting rows puts
+  their figures in the footer — a decimal column's sum to its places, a bigint's past 2^53 exact,
+  a text column's distinct count — and in a query's results bar. A transaction left open on one
+  session blocks a read on another: the activity monitor, opened from the View menu, shows them as
+  a chain with the head blocker first and marks its own session; *Kill* asks, ends the head, and
+  the read finishes with the value rolled back. A CSV file dropped on a table's rows opens the
+  import dialog with its columns matched by name and the bad row named by its line; staging puts
+  the rows in the grid and *Apply* sends them as one multi-row `INSERT`. `Ctrl+V` pastes a
+  tab-separated range over two rows, then past the last row as new ones. `Ctrl+L` shows an
+  estimated plan, `Ctrl+M` an actual one beside the rows, and the run after them is an ordinary one.
+  The call a long query's notification goes through returns quietly where there is no notification
+  daemon
 - **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block
   with *Paste from clipboard* (after checking that something else on the clipboard never reaches
   the box), fetches the account's instances and picks the bastion from the list (including the

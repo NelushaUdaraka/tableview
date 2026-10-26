@@ -12,7 +12,16 @@
  */
 import fs from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
-import { BrowserWindow, IpcMainInvokeEvent, app, clipboard, dialog, ipcMain, shell } from 'electron'
+import {
+  BrowserWindow,
+  IpcMainInvokeEvent,
+  Notification,
+  app,
+  clipboard,
+  dialog,
+  ipcMain,
+  shell
+} from 'electron'
 import {
   AppSettings,
   AppliedChanges,
@@ -38,6 +47,7 @@ import {
   DetachRequest,
   DetachedTab,
   IpcResult,
+  QueryNotice,
   TabDropRequest,
   TabDropResult,
   WindowChromeState
@@ -589,7 +599,44 @@ export function registerIpcHandlers(context: IpcContext): void {
   })
 
   handle(CHANNELS.shellOpenExternal, (_call, url: string) => shell.openExternal(url))
+
+  // -- notifications -----------------------------------------------------------
+  // A long query that finished while its window was behind another says so on
+  // the desktop. The window decides whether a run is worth it; this shows it,
+  // and a click brings that window and the tab forward.
+
+  handle(CHANNELS.notifyQueryFinished, (call, notice: QueryNotice) => {
+    // Linux needs a notification daemon; where there is none, say nothing.
+    if (!Notification.isSupported()) return
+    const window = call.window
+    try {
+      const notification = new Notification({ title: notice.title, body: notice.body })
+      // Held until it is done with: a notification that is collected loses
+      // its click handler on some desktops.
+      liveNotifications.add(notification)
+      const release = (): void => {
+        liveNotifications.delete(notification)
+      }
+      notification.on('click', () => {
+        release()
+        if (!window || window.isDestroyed()) return
+        if (window.isMinimized()) window.restore()
+        window.show()
+        window.focus()
+        window.webContents.send(CHANNELS.eventNotificationClicked, notice.tabId)
+      })
+      notification.on('close', release)
+      notification.on('failed', release)
+      notification.show()
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn('[notify] could not show a notification:', error)
+    }
+  })
 }
+
+/** Notifications on screen, kept from the garbage collector until they go. */
+const liveNotifications = new Set<Notification>()
 
 /** Set by main/index.ts so the renderer can ask for another window. */
 let newWindowFactory: ((position?: { x: number; y: number }) => BrowserWindow | null) | null = null

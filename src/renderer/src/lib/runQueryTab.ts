@@ -10,6 +10,7 @@
 import { markRaw } from 'vue'
 import { api } from './api'
 import { scriptWrites } from './confirmWrites'
+import { runNotice, shouldNotify, type RunOutcome } from './runNotice'
 import { useBusyStore } from '../stores/busy'
 import { useConfirmWritesStore } from '../stores/confirmWrites'
 import { useConnectionStore } from '../stores/connections'
@@ -87,6 +88,20 @@ export async function runQueryTab(tabId: string, text?: string): Promise<boolean
   // it was all of it, which a selection covering the whole tab also is.
   const script = tab.sql
   const whole = body === script.trim()
+  const startedAt = Date.now()
+
+  /**
+   * A run that took a while, in a window that is behind another, says it has
+   * ended on the desktop. With no document to ask — the unit tests — the
+   * window counts as watched.
+   */
+  const notifyIfAway = (outcome: Omit<RunOutcome, 'elapsedMs'>): void => {
+    const run = { ...outcome, elapsedMs: Date.now() - startedAt }
+    const focused = globalThis.document?.hasFocus?.() ?? true
+    if (!shouldNotify(run, focused, settings.settings)) return
+    const title = tabs.tabs.find((entry) => entry.id === tabId)?.title ?? tab.title
+    void api.notifyQueryFinished({ ...runNotice(title, run), tabId }).catch(() => undefined)
+  }
 
   try {
     const result = await api.runQuery({
@@ -127,10 +142,12 @@ export async function runQueryTab(tabId: string, text?: string): Promise<boolean
     if (failed?.error && !offerCredentialFix(failed.error)) {
       toasts.error('Query failed', failed.error.message)
     }
+    notifyIfAway({ result })
     void library.loadHistory()
     return ranInFull
   } catch (error) {
     tabs.update<QueryTab>(tabId, { running: false, executionId: null })
+    notifyIfAway({ error: error instanceof Error ? error.message : String(error) })
     if (!offerCredentialFix(error)) toasts.fromError('Query failed', error)
     return false
   } finally {

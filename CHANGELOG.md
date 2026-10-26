@@ -6,6 +6,10 @@ not there yet is the next release, still being prepared.
 
 ## 0.4.0
 
+- A query that runs longer than ten seconds and finishes while TableView is in the background now
+  says so with a desktop notification: which tab, how long it took, and how many rows came back or
+  what the error was. Clicking it brings that window and tab forward. Turn it off, or change the ten
+  seconds, in Settings.
 - Select two rows or more in a table or in query results and the footer adds up the focused
   column for you, as a spreadsheet does: count, sum, average, minimum and maximum for a number
   column, the count and how many distinct values for anything else, with NULLs counted apart. It

@@ -67,6 +67,7 @@ const api: RendererApi = {
   answerCloseRequest: (proceed) => invoke(CHANNELS.windowCloseAnswer, proceed),
   runMenuRole: (role) => invoke(CHANNELS.windowMenuRole, role),
   openExternal: (url) => invoke(CHANNELS.shellOpenExternal, url),
+  notifyQueryFinished: (notice) => invoke(CHANNELS.notifyQueryFinished, notice),
 
   connect: (connectionId, password) => invoke(CHANNELS.dbConnect, connectionId, password),
   disconnect: (connectionId) => invoke(CHANNELS.dbDisconnect, connectionId),
@@ -141,7 +142,9 @@ const api: RendererApi = {
   onUpdateState: (handler: (state: UpdateState) => void) =>
     subscribe(CHANNELS.eventUpdateState, handler as (payload: never) => void),
   onSessionChanged: (handler: (event: SessionEvent) => void) =>
-    subscribe(CHANNELS.eventSessionChanged, handler as (payload: never) => void)
+    subscribe(CHANNELS.eventSessionChanged, handler as (payload: never) => void),
+  onNotificationClicked: (handler: (tabId: string) => void) =>
+    subscribe(CHANNELS.eventNotificationClicked, handler as (payload: never) => void)
 }
 
 contextBridge.exposeInMainWorld('api', api)

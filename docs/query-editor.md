@@ -13,6 +13,23 @@
 - **Each tab keeps a session of its own**, so a temp table, a setting or a transaction is still
   there for the tab's next run; an open transaction is shown, and asked about before anything
   ends it — see below
+- **A long query says when it is done** — see below
+
+## When a long query finishes
+
+A query that has been running for a while and finishes while its window is not the one in front
+sends a desktop notification: which tab ran, how long it took, and how many rows came back (or
+were affected), or the error it stopped on, cut to its first line. Clicking it brings that window
+forward with the tab showing. A quick run, a run in the window you are looking at, and a run you
+cancelled never notify.
+
+*Settings → Notify when a query that ran longer than … seconds finishes in the background* turns it
+off and sets the threshold (10 seconds to begin with, one at the least). The window decides
+whether a run is worth a word (`lib/runNotice.ts`), from how long it took by the clock and whether
+the document has the focus; the main process shows it with Electron's `Notification`. On Windows
+that needs the app's AppUserModelID to be the installer's `appId` (`com.tableview.app`), which the
+main process sets as it starts. On Linux it needs a notification daemon, and where there is none
+nothing is shown and nothing complains.
 
 ## Each tab has a session of its own
 

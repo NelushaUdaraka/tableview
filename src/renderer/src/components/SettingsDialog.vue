@@ -9,6 +9,8 @@ import {
   updateInProgress,
   updateSummary
 } from '../lib/updateStatus'
+import { MIN_NOTIFY_SECONDS } from '../lib/runNotice'
+import { DEFAULT_SETTINGS } from '@shared/types'
 import { useSettingsStore } from '../stores/settings'
 import { useUpdateStore } from '../stores/updates'
 
@@ -36,6 +38,16 @@ function runUpdateAction(): void {
       updates.download()
       break
   }
+}
+
+/** A threshold below a second would notify for every run; blank goes back to the default. */
+function setNotifyAfter(value: string): void {
+  const seconds = Math.round(Number(value))
+  void settings.update({
+    notifyAfterSeconds: Number.isFinite(seconds) && value.trim() !== ''
+      ? Math.min(3600, Math.max(MIN_NOTIFY_SECONDS, seconds))
+      : DEFAULT_SETTINGS.notifyAfterSeconds
+  })
 }
 
 const THEMES: { value: 'dark' | 'light' | 'system'; label: string; icon: IconName }[] = [
@@ -161,6 +173,27 @@ const THEMES: { value: 'dark' | 'light' | 'system'; label: string; icon: IconNam
         />
         <span>Reopen a connection’s tabs when connecting to it again</span>
       </label>
+      <div class="settings__notify">
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            :checked="settings.settings.notifyLongQueries"
+            @change="settings.update({ notifyLongQueries: ($event.target as HTMLInputElement).checked })"
+          />
+          <span>Notify when a query that ran longer than</span>
+        </label>
+        <input
+          class="input settings__seconds"
+          type="number"
+          :min="MIN_NOTIFY_SECONDS"
+          max="3600"
+          aria-label="Seconds a query runs before its end is notified"
+          :disabled="!settings.settings.notifyLongQueries"
+          :value="settings.settings.notifyAfterSeconds"
+          @change="setNotifyAfter(($event.target as HTMLInputElement).value)"
+        />
+        <span class="settings__notify-tail">seconds finishes in the background</span>
+      </div>
 
       <hr class="rule" />
 
@@ -224,6 +257,19 @@ const THEMES: { value: 'dark' | 'light' | 'system'; label: string; icon: IconNam
 .settings__row {
   display: flex;
   gap: 16px;
+}
+.settings__notify {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.settings__seconds {
+  width: 72px;
+  height: var(--h-control);
+}
+.settings__notify-tail {
+  font-size: 13px;
 }
 .settings__seg-opt {
   height: calc(var(--h-control-lg) - 6px);

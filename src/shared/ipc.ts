@@ -172,6 +172,7 @@ export const CHANNELS = {
   windowCloseAnswer: 'window:closeAnswer',
 
   shellOpenExternal: 'shell:openExternal',
+  notifyQueryFinished: 'notify:queryFinished',
 
   dbConnect: 'db:connect',
   dbDisconnect: 'db:disconnect',
@@ -230,7 +231,8 @@ export const CHANNELS = {
   eventAttachTab: 'event:attachTab',
   eventCloseRequested: 'event:closeRequested',
   eventUpdateState: 'event:updateState',
-  eventSessionChanged: 'event:sessionChanged'
+  eventSessionChanged: 'event:sessionChanged',
+  eventNotificationClicked: 'event:notificationClicked'
 } as const
 
 /**
@@ -251,6 +253,14 @@ export interface AppInfo {
   platform: string
   secretsAreOsBacked: boolean
   userDataPath: string
+}
+
+/** A desktop notification that a query tab's long run has ended. */
+export interface QueryNotice {
+  title: string
+  body: string
+  /** The tab that ran, brought forward when the notification is clicked. */
+  tabId: string
 }
 
 /** What an export wrote, and where. */
@@ -312,6 +322,11 @@ export interface RendererApi {
   /** Runs a menu item the renderer cannot: clipboard, zoom, dev tools, quit. */
   runMenuRole(role: MenuRole): Promise<void>
   openExternal(url: string): Promise<void>
+  /**
+   * Shows a desktop notification for a query that finished in the
+   * background. Where the desktop has no way to show one, nothing happens.
+   */
+  notifyQueryFinished(notice: QueryNotice): Promise<void>
 
   connect(connectionId: string, password?: string): Promise<ConnectionStatus>
   disconnect(connectionId: string): Promise<void>
@@ -419,6 +434,8 @@ export interface RendererApi {
   onUpdateState(handler: (state: UpdateState) => void): () => void
   /** A query tab's session moved with the sidebar's database, or was lost. */
   onSessionChanged(handler: (event: SessionEvent) => void): () => void
+  /** A query notification was clicked: its window is in front, and this is its tab. */
+  onNotificationClicked(handler: (tabId: string) => void): () => void
 }
 
 declare global {

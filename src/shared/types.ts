@@ -743,6 +743,12 @@ export interface AppSettings {
    * restarts included. Off forgets the ones already kept.
    */
   restoreTabs: boolean
+  /**
+   * Say on the desktop when a query that ran a while finishes while its
+   * window is in the background, and after how many seconds a run counts.
+   */
+  notifyLongQueries: boolean
+  notifyAfterSeconds: number
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -760,7 +766,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   connectionSort: 'created',
   connectionSortDirection: 'desc',
   autoUpdate: true,
-  restoreTabs: true
+  restoreTabs: true,
+  notifyLongQueries: true,
+  notifyAfterSeconds: 10
 }
 
 export const DEFAULT_SQLSERVER_OPTIONS: SqlServerOptions = {

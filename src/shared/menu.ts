@@ -32,6 +32,7 @@ export type MenuAction =
   | 'query:format'
   | 'results:export'
   | 'results:copy'
+  | 'view:quick-open'
   | 'view:toggle-sidebar'
   | 'view:toggle-row-panel'
   | 'view:split-tab'
@@ -190,6 +191,8 @@ export function buildMenuModel(platform: string): MenuModel[] {
     {
       label: 'View',
       items: [
+        { label: 'Quick Open…', accelerator: 'CmdOrCtrl+P', action: 'view:quick-open' },
+        SEPARATOR,
         { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', action: 'view:toggle-sidebar' },
         { label: 'Toggle Row Panel', accelerator: 'CmdOrCtrl+I', action: 'view:toggle-row-panel' },
         { label: 'Split Tab Right', accelerator: 'CmdOrCtrl+\\', action: 'view:split-tab' },

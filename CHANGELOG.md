@@ -6,6 +6,10 @@ not there yet is the next release, still being prepared.
 
 ## 0.4.0
 
+- Quick open: press `Ctrl+P` from anywhere, type part of a name, and press Enter to open that
+  table, view, procedure, function or saved query. Pinned tables and what you had open lately come
+  first; `Shift+Enter` opens a table's structure instead. It works in a window holding a single
+  dragged-out tab too, which has no schema tree.
 - A query that runs longer than ten seconds and finishes while TableView is in the background now
   says so with a desktop notification: which tab, how long it took, and how many rows came back or
   what the error was. Clicking it brings that window and tab forward. Turn it off, or change the ten

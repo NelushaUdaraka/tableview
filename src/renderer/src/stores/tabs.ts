@@ -416,8 +416,27 @@ export const useTabStore = defineStore('tabs', () => {
   /**
    * Always a new tab, even with a blank one already open: `+` and Ctrl+T are
    * how a second scratch query gets started beside the first.
+   *
+   * A saved query opened by `savedQueryId` is the exception: it is tied to
+   * that saved query, so saving the tab saves it, and one already open on
+   * this connection is shown where it is rather than opened twice.
    */
-  async function openQuery(connectionId: string, sql = '', title = 'Query'): Promise<void> {
+  async function openQuery(
+    connectionId: string,
+    sql = '',
+    title = 'Query',
+    options: { savedQueryId?: string } = {}
+  ): Promise<void> {
+    if (options.savedQueryId) {
+      const open = tabs.value.find(
+        (tab) =>
+          tab.kind === 'query' &&
+          tab.connectionId === connectionId &&
+          tab.savedQueryId === options.savedQueryId
+      )
+      if (open) return select(open.id)
+    }
+
     // The new tab takes the focused pane's slot, so what is there now goes.
     if (!(await canLeave(focusedPane.value?.activeTabId))) return
 
@@ -435,6 +454,7 @@ export const useTabStore = defineStore('tabs', () => {
         activeResultIndex: 0,
         dirty: false,
         statementLine: null,
+        ...(options.savedQueryId ? { savedQueryId: options.savedQueryId } : {}),
         ...openingDefaults()
       },
       focusedPaneId.value

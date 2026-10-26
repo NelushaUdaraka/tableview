@@ -59,6 +59,7 @@ const GROUPS = [
   {
     title: 'App',
     items: [
+      ['Ctrl+P', 'Open a table, view, routine or saved query by name'],
       ['Ctrl+B', 'Toggle the sidebar'],
       ['Ctrl+I', 'Toggle the row panel'],
       ['Ctrl+F', 'Focus the filter box'],

@@ -333,6 +333,13 @@ export interface QueryExecutionResult {
   session?: SessionState
   /** Set when the tab's previous session had been lost before this run. */
   sessionLost?: SessionLoss
+  /**
+   * Showplan XML the run returned, lifted out of the result sets: one per
+   * batch for an estimated plan, one per statement for an actual one.
+   */
+  plans?: string[]
+  /** Which kind of plan was asked for, if one was. */
+  plan?: PlanKind
 }
 
 export interface RunQueryRequest {
@@ -352,7 +359,15 @@ export interface RunQueryRequest {
   pinnedDatabase?: string
   /** The user was shown what this script writes and said to run it. */
   confirmedWrites?: boolean
+  /**
+   * Ask for the execution plan: `estimated` compiles the script without
+   * running it, `actual` runs it and returns the plan each statement used.
+   * Query tabs only — it needs the tab's own session.
+   */
+  plan?: PlanKind
 }
+
+export type PlanKind = 'estimated' | 'actual'
 
 // ---------------------------------------------------------------------------
 // Server activity

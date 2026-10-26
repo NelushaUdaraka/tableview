@@ -402,6 +402,12 @@ function handleAction(action: string): void {
     case 'query:cancel':
       focusedView.value?.cancel()
       break
+    case 'query:estimated-plan':
+      focusedView.value?.plan('estimated')
+      break
+    case 'query:actual-plan':
+      focusedView.value?.plan('actual')
+      break
     case 'query:format':
       focusedView.value?.format()
       break

@@ -11,6 +11,8 @@ import { markRaw } from 'vue'
 import { api } from './api'
 import { scriptWrites } from './confirmWrites'
 import { runNotice, shouldNotify, type RunOutcome } from './runNotice'
+import { compilesOnly } from '@shared/showplan'
+import type { PlanKind } from '@shared/types'
 import { useBusyStore } from '../stores/busy'
 import { useConfirmWritesStore } from '../stores/confirmWrites'
 import { useConnectionStore } from '../stores/connections'
@@ -23,8 +25,16 @@ import { useToastStore } from '../stores/toasts'
 /**
  * Resolves true when the whole script ran without an error — which, for a
  * routine's tab, is what saves the routine.
+ *
+ * `plan` asks for the execution plan as well: `estimated` compiles the script
+ * without running it — so it saves nothing — and `actual` runs it and brings
+ * back the plan each statement used.
  */
-export async function runQueryTab(tabId: string, text?: string): Promise<boolean> {
+export async function runQueryTab(
+  tabId: string,
+  text?: string,
+  options: { plan?: PlanKind } = {}
+): Promise<boolean> {
   const tabs = useTabStore()
   const toasts = useToastStore()
   const busy = useBusyStore()
@@ -60,7 +70,10 @@ export async function runQueryTab(tabId: string, text?: string): Promise<boolean
   // again, and refuses a write that does not come marked as confirmed.
   let confirmedWrites = false
   const confirmWrites = useConfirmWritesStore()
-  if (confirmWrites.asking()) {
+  // An estimated plan runs none of the script, so there is nothing to confirm
+  // — unless the script turns compiling-only off itself.
+  const runsNothing = options.plan === 'estimated' && compilesOnly(body)
+  if (confirmWrites.asking() && !runsNothing) {
     const database =
       tab.session?.database ??
       tab.routine?.database ??
@@ -113,7 +126,8 @@ export async function runQueryTab(tabId: string, text?: string): Promise<boolean
       // stays in the database the routine lives in.
       sessionId: tab.id,
       pinnedDatabase: tab.routine?.database,
-      confirmedWrites
+      confirmedWrites,
+      ...(options.plan ? { plan: options.plan } : {})
     })
     // markRaw keeps the (potentially huge) result set out of the reactivity
     // graph; it is only ever replaced, never mutated field by field.
@@ -126,7 +140,9 @@ export async function runQueryTab(tabId: string, text?: string): Promise<boolean
     })
 
     const failed = result.statements.find((statement) => statement.error)
-    const ranInFull = whole && !failed && !result.cancelled && result.statements.length > 0
+    // A plan that was only estimated ran nothing, so it saved no routine.
+    const ranInFull =
+      whole && !failed && !result.cancelled && result.statements.length > 0 && !runsNothing
     // Running the whole tab without an error is what saves a routine — its
     // `CREATE OR ALTER` replaces the stored definition — so from then on the
     // changes worth marking are the ones made since. A selection, a single

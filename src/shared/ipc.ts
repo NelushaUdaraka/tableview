@@ -262,6 +262,9 @@ export interface AppInfo {
   userDataPath: string
 }
 
+/** What a text file is saved as: a script, or an execution plan SSMS can open. */
+export type SaveKind = 'sql' | 'sqlplan'
+
 /** A desktop notification that a query tab's long run has ended. */
 export interface QueryNotice {
   title: string
@@ -435,7 +438,8 @@ export interface RendererApi {
 
   openFile(filters?: { name: string; extensions: string[] }[]): Promise<string | null>
   readTextFile(filePath: string): Promise<string>
-  saveTextFile(text: string, defaultPath?: string): Promise<string | null>
+  /** `kind` names the dialog and its filter: SQL unless said otherwise. */
+  saveTextFile(text: string, defaultPath?: string, kind?: SaveKind): Promise<string | null>
 
   onStatusChanged(handler: (status: ConnectionStatus) => void): () => void
   onMenuAction(handler: (action: string) => void): () => void

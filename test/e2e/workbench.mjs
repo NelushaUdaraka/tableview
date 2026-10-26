@@ -82,7 +82,7 @@ const shot = async (name) => {
   const r = await send('Page.captureScreenshot', { format: 'png' })
   writeFileSync(`${SHOTS}/${name}.png`, Buffer.from(r.data, 'base64'))
 }
-const KEY_CODES = { Escape: 27, ArrowRight: 39, ArrowDown: 40, Enter: 13, F5: 116, c: 67, p: 80, t: 84, v: 86 }
+const KEY_CODES = { Escape: 27, ArrowRight: 39, ArrowDown: 40, Enter: 13, F5: 116, c: 67, l: 76, m: 77, p: 80, t: 84, v: 86 }
 const press = async (key, modifiers = 0) => {
   const code = key.length === 1 ? `Key${key.toUpperCase()}` : key
   const base = { key, code, windowsVirtualKeyCode: KEY_CODES[key], modifiers }
@@ -266,7 +266,13 @@ await ev(`[...document.querySelectorAll('.titlebar__menu')].find(b => b.textCont
 await waitFor(`!!document.querySelector('.titlebar__dropdown')`, 'the View menu')
 await ev(`[...document.querySelectorAll('.titlebar__dropdown .titlebar__item')].find(i => i.textContent.includes('Activity Monitor')).click()`)
 await waitFor(`!!document.querySelector('.activity .sessions tbody tr[data-session]')`, 'the sessions')
-await waitFor(`!!document.querySelector('.chain')`, 'a blocking chain', 20000)
+// The waiting read opens a session of its own first, so it may not be blocked
+// yet when the monitor first reads; Refresh until it is.
+for (let tries = 0; tries < 20 && !(await ev(`!!document.querySelector('.chain')`)); tries += 1) {
+  await delay(500)
+  await ev(`[...document.querySelectorAll('.activity__toolbar .btn')].find(b => b.textContent.trim() === 'Refresh').click()`)
+}
+await waitFor(`!!document.querySelector('.chain')`, 'a blocking chain', 5000)
 steps.push({
   step: 'activity',
   counts: await ev(`document.querySelector('.activity__counts').textContent.replace(/\\s+/g, ' ').trim()`),
@@ -354,7 +360,47 @@ await shot('07-pasted')
 await ev(`[...document.querySelectorAll('.data__toolbar .btn')].find(b => b.textContent.trim() === 'Discard').click()`)
 await waitFor(`document.querySelectorAll('.grid__row').length === 7`, 'the paste discarded')
 
-// --- 6. a notification goes quietly where there is no daemon -----------------------
+// --- 6. execution plans -------------------------------------------------------------
+await ev(`document.querySelector('.tabbar__new').click()`)
+await waitFor(`document.querySelectorAll('.cm-content').length > 0 && document.querySelector('.tab--active')?.textContent.includes('Query')`, 'a new query tab')
+await ev(`document.querySelector('.cm-content').focus()`)
+await send('Input.insertText', { text: "SELECT label, SUM(amount) FROM dbo.e2e_figures WHERE label = N'a' GROUP BY label" })
+await press('l', 2)
+await waitFor(`!!document.querySelector('.plan .ops__row')`, 'the estimated plan', 20000)
+steps.push({
+  step: 'estimated plan',
+  heading: await ev(`document.querySelector('.plan__doc-head .caps').textContent.trim()`),
+  operators: await ev(`[...document.querySelectorAll('.plan .ops__row')].map(r => r.dataset.op)`),
+  columns: await ev(`[...document.querySelectorAll('.plan .ops th')].map(t => t.textContent.trim())`),
+  warnings: await ev(`[...document.querySelectorAll('.stmt__warnings li')].map(l => l.textContent.trim())`),
+  planTab: await ev(`document.querySelector('.results__tab--active')?.textContent.trim()`)
+})
+check(steps.at(-1).heading === 'Estimated plan', 'the plan does not say it is estimated')
+check(steps.at(-1).columns.join('|') === 'Operator|Cost|Est. rows', 'an estimated plan shows actual columns')
+check(steps.at(-1).planTab === 'Plan', 'the results did not open on the plan')
+await ev(`document.querySelectorAll('.toast button[aria-label="Dismiss"]').forEach(b => b.click())`)
+await delay(300)
+await shot('08-estimated-plan')
+
+await ev(`document.querySelector('.cm-content').focus()`)
+await press('m', 2)
+await waitFor(`document.querySelector('.plan__doc-head .caps')?.textContent.trim() === 'Actual plan'`, 'the actual plan', 20000)
+steps.push({
+  step: 'actual plan',
+  columns: await ev(`[...document.querySelectorAll('.plan .ops th')].map(t => t.textContent.trim())`),
+  actualRows: await ev(`[...document.querySelectorAll('.plan .ops__row')].map(r => r.children[3]?.textContent.trim())`),
+  resultTabs: await ev(`[...document.querySelectorAll('.results__tab')].map(t => t.textContent.replace(/\\s+/g, ' ').trim())`)
+})
+check(steps.at(-1).columns.includes('Actual rows'), 'the actual plan has no actual rows')
+check(steps.at(-1).resultTabs.some((t) => t.startsWith('Result 1')), 'the query rows did not come back beside the plan')
+await ev(`document.querySelectorAll('.toast button[aria-label="Dismiss"]').forEach(b => b.click())`)
+await delay(300)
+await shot('09-actual-plan')
+// The session is not left compiling only: a plain run returns rows and no plan.
+await press('Enter', 2)
+await waitFor(`!document.querySelector('.plan') && [...document.querySelectorAll('.results__tab')].every(t => !t.textContent.includes('Plan'))`, 'a plain run after the plans')
+
+// --- 7. a notification goes quietly where there is no daemon -----------------------
 steps.push({
   step: 'notify',
   result: await ev(`window.api.notifyQueryFinished({ title: 'Q finished', body: 'Finished in 12 s', tabId: 'none' }).then(() => 'ok', (e) => e.message)`)

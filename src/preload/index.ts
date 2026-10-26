@@ -131,7 +131,8 @@ const api: RendererApi = {
 
   openFile: (filters) => invoke(CHANNELS.dialogOpenFile, filters),
   readTextFile: (filePath) => invoke('file:readText', filePath),
-  saveTextFile: (text, defaultPath) => invoke(CHANNELS.dialogSaveFile, text, defaultPath),
+  saveTextFile: (text, defaultPath, kind) =>
+    invoke(CHANNELS.dialogSaveFile, text, defaultPath, kind),
 
   onStatusChanged: (handler: (status: ConnectionStatus) => void) =>
     subscribe(CHANNELS.eventStatusChanged, handler as (payload: never) => void),

@@ -48,6 +48,7 @@ defineExpose({
   run: () => queryView.value?.run(),
   runSelection: () => queryView.value?.runSelection(),
   runCurrent: () => queryView.value?.runCurrent(),
+  plan: (kind: 'estimated' | 'actual') => queryView.value?.plan(kind),
   cancel: () => void queryView.value?.cancel(),
   format: () => queryView.value?.format(),
   save: () => void queryView.value?.save(),

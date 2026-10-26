@@ -45,6 +45,7 @@ src/
 │   ├── export.ts             CSV/JSON/SQL/Markdown
 │   ├── csv.ts                reading delimited text, and a file's text whatever it was saved as
 │   ├── import.ts             a file's rows as rows a table takes, and what is wrong with each
+│   ├── xml.ts, showplan.ts   an execution plan's XML read into statements and operators
 │   ├── updates.ts            the update state both sides share, and where releases live
 │   └── ipcSerialize.ts       strips Vue proxies before they hit contextBridge
 └── renderer/src/             Vue 3 + Pinia
@@ -81,8 +82,10 @@ src/
     ├── components/           title bar, grid, row panel (and its JSON tree),
     │                         editor, sidebar (and its structure tree), dialogs
     │                         (OpenTransactionDialog: the question before a tab's
-    │                         transaction would end), the toolbar's drop-down panels
-    │                         (a choice menu, the column picker)
+    │                         transaction would end; ImportDialog: a CSV file before
+    │                         it is staged), the toolbar's drop-down panels (a choice
+    │                         menu, the column picker), QuickOpen, and PlanView —
+    │                         the Plan tab's tree
     └── views/                connection screen, workspace, pane, query, table, activity
 ```
 

@@ -66,6 +66,8 @@ const emit = defineEmits<{
   (event: 'run'): void
   (event: 'run-selection'): void
   (event: 'run-current'): void
+  /** Ctrl+L and Ctrl+M, as in SSMS: the estimated plan, and a run with the actual one. */
+  (event: 'plan', kind: 'estimated' | 'actual'): void
   (event: 'save'): void
   /** How many separate changes the document has against `baseline`. */
   (event: 'changes', count: number): void
@@ -301,7 +303,10 @@ onMounted(() => {
     { key: 'Mod-Enter', preventDefault: true, run: () => (emit('run'), true) },
     { key: 'Mod-Shift-Enter', preventDefault: true, run: () => (emit('run-selection'), true) },
     { key: 'Mod-Alt-Enter', preventDefault: true, run: () => (emit('run-current'), true) },
-    { key: 'Mod-s', preventDefault: true, run: () => (emit('save'), true) }
+    { key: 'Mod-s', preventDefault: true, run: () => (emit('save'), true) },
+    // Ahead of the default keymap, whose Mod-l selects the line.
+    { key: 'Mod-l', preventDefault: true, run: () => (emit('plan', 'estimated'), true) },
+    { key: 'Mod-m', preventDefault: true, run: () => (emit('plan', 'actual'), true) }
   ])
 
   const state = EditorState.create({

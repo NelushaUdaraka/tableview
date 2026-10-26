@@ -48,6 +48,7 @@ import {
   DetachedTab,
   IpcResult,
   QueryNotice,
+  SaveKind,
   TabDropRequest,
   TabDropResult,
   WindowChromeState
@@ -57,6 +58,7 @@ import { MenuRole } from '../../shared/menu'
 import { EXPORT_EXTENSIONS, exportRows } from '../../shared/export'
 import { tablePlusUrlFromClipboard } from '../../shared/tableplus'
 import { decodeText } from '../../shared/csv'
+import { liftPlans } from '../../shared/showplan'
 import type { UiStatePatch } from '../../shared/uiState'
 import {
   credentialsFromClipboard,
@@ -457,10 +459,14 @@ export function registerIpcHandlers(context: IpcContext): void {
     const run: SessionRun = request.sessionId
       ? await client.runInSession(request.sessionId, request.sql, {
           ...options,
-          pinnedDatabase: request.pinnedDatabase
+          pinnedDatabase: request.pinnedDatabase,
+          plan: request.plan
         })
       : { statements: await client.runScript(request.sql, options), session: null }
-    const { statements } = run
+    // Plans go to the Plan tab rather than being shown as rows of XML.
+    const { statements, plans } = liftPlans(run.statements, {
+      estimated: request.plan === 'estimated'
+    })
 
     const rowCount = statements.reduce(
       (total, statement) =>
@@ -488,7 +494,9 @@ export function registerIpcHandlers(context: IpcContext): void {
       totalDurationMs: Date.now() - started,
       cancelled: false,
       session: run.session ?? undefined,
-      sessionLost: run.lost
+      sessionLost: run.lost,
+      ...(plans.length > 0 ? { plans } : {}),
+      ...(request.plan ? { plan: request.plan } : {})
     }
   })
 
@@ -599,12 +607,13 @@ export function registerIpcHandlers(context: IpcContext): void {
   // Windows-1252 rather than UTF-8 — it arrives as text.
   handle('file:readText', async (_call, filePath: string) => decodeText(await fs.readFile(filePath)))
 
-  handle(CHANNELS.dialogSaveFile, async (call, text: string, defaultPath?: string) => {
+  handle(CHANNELS.dialogSaveFile, async (call, text: string, defaultPath?: string, kind?: SaveKind) => {
+    const what = SAVE_KINDS[kind ?? 'sql'] ?? SAVE_KINDS.sql
     const result = await showSaveDialog(call, {
-      title: 'Save SQL',
-      defaultPath: defaultPath ?? 'query.sql',
+      title: what.title,
+      defaultPath: defaultPath ?? `query.${what.extension}`,
       filters: [
-        { name: 'SQL', extensions: ['sql'] },
+        { name: what.name, extensions: [what.extension] },
         { name: 'All files', extensions: ['*'] }
       ]
     })
@@ -648,6 +657,12 @@ export function registerIpcHandlers(context: IpcContext): void {
       console.warn('[notify] could not show a notification:', error)
     }
   })
+}
+
+/** What a text file is being saved as, which names the dialog and its filter. */
+const SAVE_KINDS: Record<SaveKind, { title: string; name: string; extension: string }> = {
+  sql: { title: 'Save SQL', name: 'SQL', extension: 'sql' },
+  sqlplan: { title: 'Save execution plan', name: 'Execution plan', extension: 'sqlplan' }
 }
 
 /** Notifications on screen, kept from the garbage collector until they go. */

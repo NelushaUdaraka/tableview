@@ -59,6 +59,14 @@ procedure called by name at the head of a batch — which SQL Server runs withou
 refused outright, whatever they would have done. A raw `WHERE` in the filter bar is checked the
 same way, since a `;` ends the `SELECT` there as readily as anywhere.
 
+**An estimated plan is not a run.** *Estimated plan* (`Ctrl+L`) sends the script under
+`SET SHOWPLAN_XML ON`, when SQL Server compiles each statement and runs none of them, so a read-only
+connection gives the plan of a `DELETE` as readily as of a `SELECT`, and a confirm-writes one does
+not ask. The one exception is a script that changes those options itself — `SHOWPLAN`, `NOEXEC`,
+`PARSEONLY`, `FMTONLY`, `STATISTICS XML` or `PROFILE` anywhere in it, comments included — since
+turning showplan off would let what follows run: that is checked like any run. *Run with actual
+plan* (`Ctrl+M`) runs the script, and is checked like any run.
+
 The check sits in the main process, beside the code that sends the SQL, so the grid not offering
 an edit is a courtesy rather than the protection: an edit, a truncate or a drop that reaches the
 main process for a read-only connection is refused there too. The window takes its lock from the

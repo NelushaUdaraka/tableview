@@ -6,6 +6,12 @@ not there yet is the next release, still being prepared.
 
 ## 0.4.0
 
+- Execution plans: *Plan* in the query toolbar (or `Ctrl+L` / `Ctrl+M`) shows how SQL Server runs a
+  query — the estimated plan without running it, or the actual plan after running it — as a tree of
+  operators with each one's share of the cost, estimated against actual rows (big gaps marked),
+  warnings such as implicit conversions and spills, and missing-index hints as a `CREATE INDEX`
+  statement to copy. Save a plan as `.sqlplan` to open it in SSMS too. An estimated plan runs
+  nothing, so it works on read-only connections as well.
 - Import a CSV file into a table — *Import* in the table's toolbar, *Import CSV…* on its menu in
   the tree, or drop the file on the rows. A preview matches the file's columns to the table's by
   name, lets you choose whether empty cells are NULL or empty text, and lists every row with a

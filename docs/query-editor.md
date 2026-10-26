@@ -14,6 +14,57 @@
   there for the tab's next run; an open transaction is shown, and asked about before anything
   ends it — see below
 - **A long query says when it is done** — see below
+- **Execution plans**, estimated (`Ctrl+L`) or actual (`Ctrl+M`), drawn as a tree of operators with
+  their costs, row counts, warnings and missing-index hints — see below
+
+## Execution plans
+
+**Plan** in the query toolbar, or the Query menu, shows how SQL Server runs the selection — or the
+whole tab, when nothing is selected:
+
+- **Estimated plan** (`Ctrl+L`) compiles it without running it: the tab's session is put under
+  `SET SHOWPLAN_XML ON`, the script is sent batch by batch, and SQL Server answers each batch with
+  its plan instead of its rows. Nothing runs, so nothing changes — which is why a read-only
+  connection allows it for a write too (see [read-only](read-only.md#how-a-script-is-checked)).
+- **Run with actual plan** (`Ctrl+M`) runs it under `SET STATISTICS XML ON`, so each statement's
+  rows come back as usual with its plan beside them, carrying the rows each operator really
+  produced.
+
+Either way the option is turned off again after the script, whether it succeeded or not — in the
+same turn on the tab's session, so nothing else (a heartbeat, a move with the sidebar) is let in
+between — and the tab's next run is an ordinary one. Plans are lifted out of the results (any result
+set of one `Microsoft SQL Server 2005 XML Showplan` column is one, so a script that sets
+`STATISTICS XML` itself gets the same tab) and the results open on the **Plan** tab:
+
+```
+ ACTUAL PLAN                                              Copy XML   Save as .sqlplan
+ SELECT  100% of the batch · cost 0.122 · 4 ms elapsed, 4 ms CPU
+ ⚠ Implicit conversion CONVERT_IMPLICIT(nvarchar(20),[b].[code],0)=N'C12' may affect the use of an index seek
+ ⓘ Missing index · SQL Server estimates it would improve this statement by 96%      Copy
+   CREATE NONCLUSTERED INDEX [IX_plan_big_code]
+   ON [shop].[dbo].[plan_big] ([code]);
+ Operator                                   Cost        Est. rows  Actual rows  Executions
+ ▾ Sort                                     ██  9%           3.66            1           1
+   ▾ Stream Aggregate  Aggregate               0%           3.66            1           1
+     ▾ Nested Loops  Inner Join             ▏  1%             3.7            5           1
+         Clustered Index Scan  [dbo].[plan_big].[PK_…] [b]   ████ 88%   3.7    5    1
+```
+
+- **Cost**: each operator's own share of its statement's estimated cost — its subtree's cost less
+  its children's — with a bar, and each statement's share of the batch.
+- **Rows**: estimated rows, over every execution, against the actual rows from an actual plan; an
+  operator ten times or more off its estimate either way is marked, since that is most often why a
+  plan is poor. Hovering says how it was counted.
+- **Warnings**: implicit conversions that stop a seek or skew estimates, columns with no
+  statistics, spills to tempdb, a join with no predicate, memory-grant warnings and waits — on the
+  statement or on the operator they belong to.
+- **Missing indexes**: each hint as the `CREATE NONCLUSTERED INDEX` it suggests — equality
+  columns, then inequality ones, then `INCLUDE` — with its estimated improvement, to copy.
+  Treat it as a hint: SQL Server suggests it for this statement alone.
+- **Save as .sqlplan** writes the plan XML as it came, which SSMS also opens; **Copy XML** copies it.
+
+The tree folds at each operator. The XML is read in the window by a small parser of its own
+(`shared/xml.ts`, `shared/showplan.ts`), the same in the app and in the unit tests.
 
 ## When a long query finishes
 

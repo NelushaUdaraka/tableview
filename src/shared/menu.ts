@@ -29,6 +29,8 @@ export type MenuAction =
   | 'query:run-selection'
   | 'query:run-current'
   | 'query:cancel'
+  | 'query:estimated-plan'
+  | 'query:actual-plan'
   | 'query:format'
   | 'results:export'
   | 'results:copy'
@@ -185,6 +187,17 @@ export function buildMenuModel(platform: string): MenuModel[] {
           action: 'query:run-current'
         },
         { label: 'Cancel', accelerator: 'Escape', action: 'query:cancel' },
+        SEPARATOR,
+        {
+          label: 'Estimated Plan',
+          accelerator: 'CmdOrCtrl+L',
+          action: 'query:estimated-plan'
+        },
+        {
+          label: 'Run with Actual Plan',
+          accelerator: 'CmdOrCtrl+M',
+          action: 'query:actual-plan'
+        },
         SEPARATOR,
         { label: 'Copy Results', accelerator: 'CmdOrCtrl+Shift+C', action: 'results:copy' }
       ]

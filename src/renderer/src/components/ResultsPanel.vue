@@ -20,6 +20,7 @@ import AppIcon from './AppIcon.vue'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
 import RowDetailPanel, { type RowField } from './RowDetailPanel.vue'
 import SelectionFigures from './SelectionFigures.vue'
+import PlanView from './PlanView.vue'
 import SplitPane from './SplitPane.vue'
 import { exportRows } from '@shared/export'
 import { columnMenuItems } from '../lib/columnMenu'
@@ -45,6 +46,9 @@ const settings = useSettingsStore()
 const toasts = useToastStore()
 const activeIndex = ref(0)
 const showMessages = ref(false)
+/** The Plan tab is showing, rather than a result set or the messages. */
+const showPlan = ref(false)
+const plans = computed(() => props.result?.plans ?? [])
 const menu = ref<{ kind: 'row' | 'header'; x: number; y: number; row: number; col: number } | null>(
   null
 )
@@ -153,6 +157,15 @@ watch(panels, () => {
   // Surface messages automatically when there is nothing else to show.
   showMessages.value = panels.value.length === 0 && (messages.value.length > 0 || errors.value.length > 0)
 })
+
+// A run that asked for a plan opens on it, unless it failed before there was one.
+watch(
+  () => props.result,
+  (result) => {
+    showPlan.value = Boolean(result?.plan && result.plans?.length)
+    if (showPlan.value) showMessages.value = false
+  }
+)
 
 // A different result set has different columns, so an order named on the last
 // one means nothing here.
@@ -311,8 +324,8 @@ function durationLabel(ms: number): string {
           v-for="(panel, index) in panels"
           :key="panel.key"
           class="results__tab"
-          :class="{ 'results__tab--active': !showMessages && activeIndex === index }"
-          @click="((activeIndex = index), (showMessages = false))"
+          :class="{ 'results__tab--active': !showMessages && !showPlan && activeIndex === index }"
+          @click="((activeIndex = index), (showMessages = false), (showPlan = false))"
         >
           {{ panel.label }}
           <span class="results__tab-count">{{ panel.rowCount }}</span>
@@ -321,13 +334,22 @@ function durationLabel(ms: number): string {
           v-if="messages.length || errors.length"
           class="results__tab"
           :class="{
-            'results__tab--active': showMessages,
+            'results__tab--active': showMessages && !showPlan,
             'results__tab--error': errors.length > 0
           }"
-          @click="showMessages = true"
+          @click="((showMessages = true), (showPlan = false))"
         >
           Messages
           <span class="results__tab-count">{{ messages.length }}</span>
+        </button>
+        <button
+          v-if="plans.length"
+          class="results__tab"
+          :class="{ 'results__tab--active': showPlan }"
+          @click="showPlan = true"
+        >
+          <AppIcon name="plan" :size="13" />
+          Plan
         </button>
       </div>
 
@@ -337,7 +359,7 @@ function durationLabel(ms: number): string {
         </span>
         <template v-else-if="result">
           <SelectionFigures
-            v-if="figures && !showMessages"
+            v-if="figures && !showMessages && !showPlan"
             class="results__cell results__figures"
             :figures="figures.figures"
             :column="figures.column"
@@ -369,7 +391,8 @@ function durationLabel(ms: number): string {
     </div>
 
     <div class="results__body">
-      <div v-if="showMessages" class="messages">
+      <PlanView v-if="showPlan && plans.length" :plans="plans" />
+      <div v-else-if="showMessages" class="messages">
         <div v-for="(error, index) in errors" :key="`e-${index}`" class="message message--error">
           <!-- A script a read-only connection turned down has no server
                message number: nothing of it reached the server. -->

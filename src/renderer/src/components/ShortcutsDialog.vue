@@ -11,6 +11,8 @@ const GROUPS = [
       ['Ctrl+Shift+Enter', 'Run the selection'],
       ['Ctrl+Alt+Enter', 'Run the statement under the cursor'],
       ['Escape', 'Cancel the running query'],
+      ['Ctrl+L', 'Show the estimated plan, without running'],
+      ['Ctrl+M', 'Run, and show the actual plan'],
       ['Ctrl+Shift+F', 'Format SQL'],
       ['Ctrl+S', 'Save query'],
       ['Ctrl+O', 'Open a .sql file']

@@ -13,6 +13,7 @@ import type {
   DatabaseSummary,
   DefinitionSearchRequest,
   DefinitionSearchResult,
+  PlanKind,
   RoutineObject,
   ServerActivity,
   SchemaObject,
@@ -94,6 +95,8 @@ export type SessionChangeListener = (change: SessionChange) => void
 export interface SessionRunOptions extends ExecuteOptions {
   /** A routine's tab: the database its session opens in, and stays in. */
   pinnedDatabase?: string
+  /** Compile without running (`estimated`), or run and return each plan (`actual`). */
+  plan?: PlanKind
 }
 
 /** A definition search, once it has reached the connection it runs on. */

@@ -70,6 +70,7 @@ import { buildMssqlConfig } from './config'
 import { isTransportFailure } from './errors'
 import { QuerySession } from './session'
 import { serverActivity, validSessionId, type ActivityMeta } from './activity'
+import { compilesOnly } from '../../../shared/showplan'
 import { planReconnect } from '../reconnect'
 import type {
   ClientStateListener,
@@ -140,6 +141,12 @@ const FORWARD_ERROR_GRACE_MS = 1500
 const DEFAULT_KEEPALIVE_MS = DEFAULT_SQLSERVER_OPTIONS.keepAliveIntervalMs
 
 /** Attaches a code so the renderer can offer the fix rather than a toast. */
+/** The session option each kind of plan is read with. */
+const PLAN_SWITCHES = {
+  estimated: 'SET SHOWPLAN_XML',
+  actual: 'SET STATISTICS XML'
+} as const
+
 function codedError(message: string, code: string): Error {
   return Object.assign(new Error(message), { code })
 }
@@ -912,9 +919,12 @@ export class SqlServerClient implements DbClient {
    * script refused halfway through has done the first half, which is harder
    * to reason about than a script that has done nothing.
    */
-  private refusalFor(text: string, options: ExecuteOptions): StatementResult | null {
+  private refusalFor(text: string, options: SessionRunOptions): StatementResult | null {
     const readOnly = this.config.readOnly === true
     if (!readOnly && (!this.config.confirmWrites || options.confirmedWrites)) return null
+    // An estimated plan compiles the script and runs none of it — unless the
+    // script turns that off, when it is checked like any run.
+    if (options.plan === 'estimated' && compilesOnly(text)) return null
     const write = options.asSingleBatch ? findWrite(text) : findWriteInScript(text)
     if (!write) return null
     return readOnly ? readOnlyRefusal(text, write) : unconfirmedRefusal(text, write)
@@ -1006,22 +1016,24 @@ export class SqlServerClient implements DbClient {
       }
 
       const results: StatementResult[] = []
-      for (const statement of statements) {
-        let result: StatementResult
-        if (run.cancelled) {
-          // Cancelled before this batch was sent: it never is.
-          result = unsentStatement(statement.text, cancelledBeforeSending())
-        } else {
-          try {
-            current.lastBatch = statement.text
-            result = await this.executeOne(statement.text, [], options, current)
-          } catch (error) {
-            // The session went between batches: nothing of this one was sent.
-            result = unsentStatement(statement.text, error)
-          }
+      // A plan is a session setting, switched on around the script and off
+      // again whatever the script came to — or the tab's next run would be
+      // compiled without running too.
+      const planSwitch = options.plan ? PLAN_SWITCHES[options.plan] : null
+      if (planSwitch) {
+        const on = await this.executeOne(`${planSwitch} ON`, [], {}, current).catch(
+          (error: unknown) => unsentStatement(`${planSwitch} ON`, error)
+        )
+        if (on.error) {
+          return { statements: [on], session: current.lost ? null : current.state, lost }
         }
-        results.push(result)
-        if (result.error) break
+      }
+      try {
+        await this.runStatements(current, statements, options, run, results)
+      } finally {
+        if (planSwitch && !current.lost) {
+          await this.executeOne(`${planSwitch} OFF`, [], {}, current).catch(() => undefined)
+        }
       }
       // Whatever the run came to — finished, failed, cancelled — the tab is
       // told where its session now stands. A read that fails because the
@@ -1029,6 +1041,33 @@ export class SqlServerClient implements DbClient {
       if (!current.lost) await current.readState().catch(() => undefined)
       return { statements: results, session: current.lost ? null : current.state, lost }
     })
+  }
+
+  /** A run's batches down a tab's session, in order, stopping at the first error. */
+  private async runStatements(
+    current: QuerySession,
+    statements: Array<{ text: string }>,
+    options: SessionRunOptions,
+    run: { cancelled: boolean },
+    results: StatementResult[]
+  ): Promise<void> {
+    for (const statement of statements) {
+      let result: StatementResult
+      if (run.cancelled) {
+        // Cancelled before this batch was sent: it never is.
+        result = unsentStatement(statement.text, cancelledBeforeSending())
+      } else {
+        try {
+          current.lastBatch = statement.text
+          result = await this.executeOne(statement.text, [], options, current)
+        } catch (error) {
+          // The session went between batches: nothing of this one was sent.
+          result = unsentStatement(statement.text, error)
+        }
+      }
+      results.push(result)
+      if (result.error) break
+    }
   }
 
   /**

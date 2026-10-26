@@ -1534,14 +1534,17 @@ export class SqlServerClient implements DbClient {
       throw error
     }
 
-    const total = (from: number, count: number): number =>
-      affected.slice(from, from + count).reduce((sum, rows) => sum + rows, 0)
+    const total = (from: number, count?: number): number =>
+      affected
+        .slice(from, count === undefined ? undefined : from + count)
+        .reduce((sum, rows) => sum + rows, 0)
     const deletes = changeSet.deletes.length
     const updates = changeSet.updates.length
     return {
       deleted: total(0, deletes),
       updated: total(deletes, updates),
-      inserted: total(deletes + updates, changeSet.inserts.length),
+      // Inserts may share statements, so they are whatever came after.
+      inserted: total(deletes + updates),
       statements: built.map((query) => query.sql)
     }
   }

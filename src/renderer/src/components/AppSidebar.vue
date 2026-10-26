@@ -32,6 +32,7 @@ const emit = defineEmits<{
   (event: 'open-sql', sql: string, title?: string): void
   (event: 'open-routine', schema: string, name: string, reveal?: RevealLine): void
   (event: 'generate', kind: string, schema: string, table: string): void
+  (event: 'import', schema: string, table: string): void
 }>()
 
 const connections = useConnectionStore()
@@ -137,6 +138,12 @@ const objectMenuItems = computed<MenuEntry[]>(() => {
     { label: 'DELETE statement', action: 'delete' },
     { label: 'CREATE TABLE script', action: 'ddl' },
     { separator: true, label: '' },
+    {
+      label: 'Import CSV…',
+      action: 'import',
+      disabled: locked || menu.value?.type === 'view',
+      hint
+    },
     { label: 'Find references', action: 'references' },
     { label: 'Copy qualified name', action: 'copy-name' },
     { label: 'Pin / unpin', action: 'pin' },
@@ -166,6 +173,9 @@ async function onMenuSelect(action: string): Promise<void> {
         break
       case 'structure':
         emit('open-structure', target.schema, target.name, target.type as 'table' | 'view')
+        break
+      case 'import':
+        emit('import', target.schema, target.name)
         break
       case 'copy-name':
         await api.copyToClipboard(qualified)

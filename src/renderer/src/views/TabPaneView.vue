@@ -59,6 +59,7 @@ defineExpose({
   },
   focusFilter: () => tableView.value?.focusFilter(),
   exportRows: () => tableView.value?.exportRows(),
+  importFile: () => tableView.value?.importFile(),
   // Both kinds of tab have one, so whichever is mounted takes it.
   toggleRowPanel: () => {
     queryView.value?.toggleRowPanel()

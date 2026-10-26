@@ -292,7 +292,69 @@ steps.push({ step: 'the read went on', waited })
 check(JSON.stringify(waited) === JSON.stringify([[['a']]]), 'the blocked read did not finish with the rolled-back value')
 await waitFor(`!document.querySelector('.chain')`, 'the chain to go')
 
-// --- 4. a notification goes quietly where there is no daemon -----------------------
+// --- 4. importing a CSV file, dropped on the rows ---------------------------------
+await ev(`[...document.querySelectorAll('.tab')].find(t => t.textContent.includes('e2e_figures')).click()`)
+await waitFor(`document.querySelectorAll('.grid__row').length === 4`, 'the table again')
+await ev(`(() => {
+  const csv = 'Id,Label,Amount\\r\\n10,ten,10.50\\r\\n11,eleven,abc\\r\\n12,,\\r\\n13,thirteen,13\\r\\n'
+  const transfer = new DataTransfer()
+  transfer.items.add(new File([csv], 'people.csv', { type: 'text/csv' }))
+  const target = document.querySelector('.data__grid')
+  target.dispatchEvent(new DragEvent('dragover', { dataTransfer: transfer, bubbles: true, cancelable: true }))
+  target.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }))
+  return true
+})()`)
+await waitFor(`!!document.querySelector('.import')`, 'the import dialog')
+await delay(400)
+steps.push({
+  step: 'import dialog',
+  title: await ev(`document.querySelector('.modal__title').textContent.trim()`),
+  subtitle: await ev(`document.querySelector('.modal__subtitle').textContent.trim()`),
+  mapping: await ev(`[...document.querySelectorAll('.mapping tr')].map(r => r.querySelector('.mapping__name').textContent.trim() + ' <- ' + r.querySelector('select').selectedOptions[0].textContent.trim())`),
+  problems: await ev(`[...document.querySelectorAll('.problems li')].map(l => l.textContent.replace(/\\s+/g, ' ').trim())`),
+  stage: await ev(`[...document.querySelectorAll('.modal__foot .btn')].at(-1).textContent.trim()`)
+})
+await shot('06-import')
+check(steps.at(-1).mapping.join('|') === 'id <- 1. Id|label <- 2. Label|amount <- 3. Amount|big <- — leave out —', 'the columns were not matched by name')
+check(steps.at(-1).problems.length === 1 && steps.at(-1).problems[0].includes('Line 3'), 'the bad amount was not reported on line 3')
+check(steps.at(-1).stage === 'Stage 3 rows, leave out 1', 'the stage button does not say what it stages')
+await ev(`[...document.querySelectorAll('.modal__foot .btn')].at(-1).click()`)
+await waitFor(`document.querySelectorAll('.grid__row').length === 7`, 'the staged rows in the grid')
+check(
+  await ev(`[...document.querySelectorAll('.data__toolbar .btn')].some(b => b.textContent.replace(/\\s+/g, '') === 'Apply3')`),
+  'Apply does not count the three staged rows'
+)
+await ev(`[...document.querySelectorAll('.data__toolbar .btn')].find(b => b.textContent.includes('Apply')).click()`)
+await waitFor(`!!document.querySelector('.statement__sql')`, 'the review before Apply')
+steps.push({ step: 'review', statements: await ev(`[...document.querySelectorAll('.statement__sql')].map(e => e.textContent.trim())`) })
+check(steps.at(-1).statements.length === 1 && steps.at(-1).statements[0].includes('(12, NULL, NULL)'), 'the three rows are not one multi-row insert')
+await ev(`[...document.querySelectorAll('.modal__foot .btn')].find(b => b.textContent.trim() === 'Apply').click()`)
+await waitFor(`[...document.querySelectorAll('.toast')].some(t => t.textContent.includes('3 inserted'))`, 'the apply toast')
+await waitFor(`document.querySelectorAll('.grid__row').length === 7 && !document.querySelector('.grid__row--inserted')`, 'the applied rows read back')
+
+// --- 5. pasting a range from a spreadsheet ---------------------------------------------
+const labelCol = await columnIndex('label')
+await clickCell(0, labelCol)
+await ev(`document.querySelector('.grid__viewport').focus()`)
+await ev(`window.api.copyToClipboard('label\\tamount\\nP1\\t1.25\\nP2\\t2.50\\n')`)
+await press('v', 2)
+await waitFor(`[...document.querySelectorAll('.toast')].some(t => t.textContent.includes('Pasted: 2 rows changed'))`, 'the paste over two rows')
+const cellText = (row, col) => ev(`document.querySelectorAll('.grid__row')[${row}].querySelectorAll('.grid__cell')[${col}].textContent.trim()`)
+steps.push({ step: 'paste over rows', first: await cellText(0, labelCol), second: await cellText(1, amount) })
+check(steps.at(-1).first === 'P1' && steps.at(-1).second === '2.5', 'the pasted values are not in the cells')
+
+// Past the last row, the rest become new rows.
+await clickCell(6, labelCol)
+await ev(`document.querySelector('.grid__viewport').focus()`)
+await ev(`window.api.copyToClipboard('Q1\\nQ2\\nQ3')`)
+await press('v', 2)
+await waitFor(`[...document.querySelectorAll('.toast')].some(t => t.textContent.includes('1 row changed, 2 rows added'))`, 'the paste past the end')
+check((await ev(`document.querySelectorAll('.grid__row').length`)) === 9, 'the pasted rows were not added')
+await shot('07-pasted')
+await ev(`[...document.querySelectorAll('.data__toolbar .btn')].find(b => b.textContent.trim() === 'Discard').click()`)
+await waitFor(`document.querySelectorAll('.grid__row').length === 7`, 'the paste discarded')
+
+// --- 6. a notification goes quietly where there is no daemon -----------------------
 steps.push({
   step: 'notify',
   result: await ev(`window.api.notifyQueryFinished({ title: 'Q finished', body: 'Finished in 12 s', tabId: 'none' }).then(() => 'ok', (e) => e.message)`)

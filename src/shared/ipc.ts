@@ -225,6 +225,7 @@ export const CHANNELS = {
   exportToClipboard: 'export:toClipboard',
   clipboardAwsCredentials: 'clipboard:awsCredentials',
   clipboardTablePlusUrl: 'clipboard:tablePlusUrl',
+  clipboardReadText: 'clipboard:readText',
 
   dialogOpenFile: 'dialog:openFile',
   dialogSaveFile: 'dialog:saveFile',
@@ -429,6 +430,8 @@ export interface RendererApi {
    * database's URL and its password included, reaches the window.
    */
   readTablePlusUrlFromClipboard(): Promise<string>
+  /** The text on the clipboard, for a paste into a table's grid the user asked for. */
+  readClipboardText(): Promise<string>
 
   openFile(filters?: { name: string; extensions: string[] }[]): Promise<string | null>
   readTextFile(filePath: string): Promise<string>

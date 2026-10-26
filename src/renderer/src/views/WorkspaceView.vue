@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { DetachedTab } from '@shared/ipc'
 import type {
   CellValue,
@@ -246,6 +246,16 @@ async function openRoutine(schemaName: string, name: string, reveal?: RevealLine
   } catch (error) {
     toasts.fromError(`Could not read the definition of ${schemaName}.${name}`, error)
   }
+}
+
+/** The tree's Import CSV…: the table's rows, and the file picker over them. */
+async function importInto(schemaName: string, table: string): Promise<void> {
+  if (!connectionId.value) return
+  await tabs.openTable(connectionId.value, schemaName, table, 'table', 'data')
+  const tab = tabs.activeTableTab
+  if (tab?.schema !== schemaName || tab.table !== table || tab.view !== 'data') return
+  await nextTick()
+  focusedView.value?.importFile()
 }
 
 /** Sidebar "generate statement" actions. */
@@ -603,6 +613,7 @@ onBeforeUnmount(() => {
           @open-sql="openSql"
           @open-routine="openRoutine"
           @generate="generate"
+          @import="importInto"
         />
       </template>
 

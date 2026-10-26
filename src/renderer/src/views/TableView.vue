@@ -15,6 +15,7 @@ const emit = defineEmits<{
 const dataView = ref<InstanceType<typeof TableDataView> | null>(null)
 
 defineExpose({
+  importFile: () => dataView.value?.importFile(),
   refresh: () => dataView.value?.refresh(),
   focusFilter: () => dataView.value?.focusFilter(),
   exportRows: () => dataView.value?.exportRows(),

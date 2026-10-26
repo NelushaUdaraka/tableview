@@ -175,6 +175,53 @@ rather than opening a query that would match nothing.
 - Rows are addressed by primary key; a keyless table falls back to matching every column and the UI
   says so — the review before Apply warns that such a statement may touch more than one row
 - Identity and computed columns are excluded from inserts; `rowversion` is read-only
+- **Import a CSV file, or paste a range from a spreadsheet** — rows arrive staged, like rows added
+  by hand, and go up with Apply; see below
+
+### Importing a CSV file
+
+*Import* in the table's toolbar, *Import CSV…* on a table's menu in the tree, or a file dropped on
+the rows opens the file in a dialog before anything happens to it:
+
+- **Separated by** comma, semicolon, tab or pipe — worked out from the first lines, and changeable.
+  Quoted fields may hold the separator, line breaks and doubled quotes. The file may be UTF-8 (with
+  or without a byte-order mark), UTF-16 with one — Excel's *Unicode text* — or, failing UTF-8,
+  Windows-1252, which is what Excel's plain CSV is on most Western machines.
+- **The first row names the columns** — ticked when it names any of the table's, and then file
+  columns are matched to table columns by name, ignoring case, spaces and underscores; without a
+  header they are taken in order. Each table column picks its file column, or is left out and takes
+  its default. Identity, computed and `rowversion` columns are not offered: the server fills them.
+- **An empty cell is** NULL, or an empty string in a text column. An empty cell in a `NOT NULL`
+  column with a default leaves the column out of that row, so it takes the default — an explicit
+  NULL would not.
+- **Every problem before anything is sent**, by line and column: a number that is not one, an
+  integer out of its type's range, a decimal too large for its precision, a date that is not one,
+  text longer than its column, a `NOT NULL` column left empty — and, once for the whole file, a
+  required column nothing fills. The preview marks the cells.
+
+*Stage* puts the rows that passed into the grid as staged inserts — the dialog says how many it
+leaves out — to be looked over, edited and applied in one transaction like any other edit, or
+discarded. Values are converted in the window (`shared/import.ts`) the way the server would
+read them, and the ones that would lose digits as JS numbers — decimals, money, integers past
+2^53 — and dates, which a time zone could move, go up as their text for SQL Server to convert.
+
+**Thousands of rows** go up as multi-row `INSERT … VALUES (…), (…)` statements: consecutive inserts
+into the same columns are gathered, as many to a statement as SQL Server takes (1000 rows, and
+under its 2100 parameters), with every value still bound. A file of a few thousand rows is a few
+statements, not one round trip a row, inside the same transaction — one bad row and none of them
+land. The review before Apply shows the same statements, and *Copy as script* writes them out.
+
+### Pasting from a spreadsheet
+
+`Ctrl+V` with the grid focused pastes what is on the clipboard — a range copied from Excel or
+Google Sheets arrives tab-separated, and a single value is a range of one — from the focused cell
+across the columns on show and down the rows. Over rows that are there it stages updates; past the
+last row it stages new rows; with nothing focused every line is a new row. A header row copied
+with the range is recognised by its names and skipped, one value pasted over several selected rows
+goes into each of them, and identity, computed and read-only columns are left as they are. Each
+value is read as if it had been typed into its cell. A toast says how many rows changed and how
+many were added; all of it is staged, so *Discard* takes it back. Neither works on a read-only
+connection, any more than any other edit does.
 
 ## Structure and export
 

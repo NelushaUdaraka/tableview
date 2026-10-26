@@ -50,6 +50,7 @@ const GROUPS = [
       ['Delete', 'Set the cell to NULL'],
       ['Ctrl+C', 'Copy the cell'],
       ['Ctrl+Shift+C', 'Copy the row'],
+      ['Ctrl+V', 'Paste a range from a spreadsheet: changes rows, adds them past the end'],
       ['Click the › arrow', 'Open the row a foreign key points at'],
       ['Double-click a divider', 'Fit the column to its contents'],
       ['Shift+click a header', 'Add a secondary sort'],

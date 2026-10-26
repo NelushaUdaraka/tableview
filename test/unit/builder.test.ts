@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ParamBag,
   buildChangeSetStatements,
+  buildInsertStatements,
   buildCountQuery,
   buildCreateTableDdl,
   buildDeleteStatement,
@@ -349,6 +350,45 @@ describe('mutation builders', () => {
       'INSERT INTO [dbo].[t] ([name]) VALUES (@p0)'
     ])
     expect(built.map((query) => query.params.map((p) => p.value))).toEqual([[1], [3], ['b', 2], ['c']])
+  })
+
+  it('gathers inserts into the same columns into multi-row statements', () => {
+    const built = buildChangeSetStatements({
+      connectionId: 'c1',
+      schema: 'dbo',
+      table: 't',
+      inserts: [
+        { tempId: 'new-0', values: { a: 1, b: 'x' } },
+        { tempId: 'new-1', values: { a: 2, b: 'y' } },
+        { tempId: 'new-2', values: { a: 3 } },
+        { tempId: 'new-3', values: {} },
+        { tempId: 'new-4', values: { a: 4 } }
+      ],
+      updates: [],
+      deletes: []
+    })
+    expect(built.map((query) => query.sql)).toEqual([
+      'INSERT INTO [dbo].[t] ([a], [b]) VALUES\n  (@p0, @p1),\n  (@p2, @p3)',
+      'INSERT INTO [dbo].[t] ([a]) VALUES (@p0)',
+      'INSERT INTO [dbo].[t] DEFAULT VALUES',
+      'INSERT INTO [dbo].[t] ([a]) VALUES (@p0)'
+    ])
+    expect(built[0].params.map((p) => p.value)).toEqual([1, 'x', 2, 'y'])
+  })
+
+  it('splits a long run of inserts to stay under the parameter and row limits', () => {
+    const rows = (count: number, width: number) =>
+      Array.from({ length: count }, (_, row) =>
+        Object.fromEntries(Array.from({ length: width }, (_, col) => [`c${col}`, row]))
+      )
+    // 2000 parameters at most: 400 rows of five columns.
+    expect(buildInsertStatements('dbo', 't', rows(1000, 5)).map((q) => q.params.length)).toEqual([
+      2000, 2000, 1000
+    ])
+    // 1000 rows at most, however narrow.
+    expect(buildInsertStatements('dbo', 't', rows(2500, 1)).map((q) => q.params.length)).toEqual([
+      1000, 1000, 500
+    ])
   })
 })
 

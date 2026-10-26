@@ -43,6 +43,8 @@ src/
 │   │                         after losing one is refused, and what the tab says
 │   ├── serialize.ts          driver values ⇄ IPC-safe cell values
 │   ├── export.ts             CSV/JSON/SQL/Markdown
+│   ├── csv.ts                reading delimited text, and a file's text whatever it was saved as
+│   ├── import.ts             a file's rows as rows a table takes, and what is wrong with each
 │   ├── updates.ts            the update state both sides share, and where releases live
 │   └── ipcSerialize.ts       strips Vue proxies before they hit contextBridge
 └── renderer/src/             Vue 3 + Pinia

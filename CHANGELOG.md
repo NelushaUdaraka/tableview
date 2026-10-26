@@ -6,6 +6,13 @@ not there yet is the next release, still being prepared.
 
 ## 0.4.0
 
+- Import a CSV file into a table — *Import* in the table's toolbar, *Import CSV…* on its menu in
+  the tree, or drop the file on the rows. A preview matches the file's columns to the table's by
+  name, lets you choose whether empty cells are NULL or empty text, and lists every row with a
+  problem before anything is sent. The rows arrive staged, to look over and Apply in one
+  transaction; thousands of them go up in a few statements.
+- Paste a range copied from Excel or Google Sheets into a table's grid with `Ctrl+V`: over existing
+  rows it stages changes, and past the last row it adds new ones.
 - An activity monitor (View → Activity Monitor): every session on the server, what it is running,
   what it is waiting on and for how long, and who is blocking whom — shown as chains with the head
   blocker first. Kill ends a session once you say so, and is refused on a read-only connection.

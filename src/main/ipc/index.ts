@@ -56,6 +56,7 @@ import { exportFileName, type ImportSummary } from '../../shared/connectionTrans
 import { MenuRole } from '../../shared/menu'
 import { EXPORT_EXTENSIONS, exportRows } from '../../shared/export'
 import { tablePlusUrlFromClipboard } from '../../shared/tableplus'
+import { decodeText } from '../../shared/csv'
 import type { UiStatePatch } from '../../shared/uiState'
 import {
   credentialsFromClipboard,
@@ -573,6 +574,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     tablePlusUrlFromClipboard(await clipboard.readText())
   )
 
+  // Ctrl+V on a table's grid: the one place the window asks for whatever text
+  // is there, because the user has just asked to paste it.
+  handle(CHANNELS.clipboardReadText, () => clipboard.readText())
+
   handle(
     CHANNELS.dialogOpenFile,
     async (call, filters?: { name: string; extensions: string[] }[]): Promise<string | null> => {
@@ -590,7 +595,9 @@ export function registerIpcHandlers(context: IpcContext): void {
     }
   )
 
-  handle('file:readText', (_call, filePath: string) => fs.readFile(filePath, 'utf8'))
+  // Whatever the file was saved as — a CSV out of Excel is often UTF-16 or
+  // Windows-1252 rather than UTF-8 — it arrives as text.
+  handle('file:readText', async (_call, filePath: string) => decodeText(await fs.readFile(filePath)))
 
   handle(CHANNELS.dialogSaveFile, async (call, text: string, defaultPath?: string) => {
     const result = await showSaveDialog(call, {

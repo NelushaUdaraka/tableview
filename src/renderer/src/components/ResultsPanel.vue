@@ -19,10 +19,12 @@ import DataGrid from './DataGrid.vue'
 import AppIcon from './AppIcon.vue'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
 import RowDetailPanel, { type RowField } from './RowDetailPanel.vue'
+import SelectionFigures from './SelectionFigures.vue'
 import SplitPane from './SplitPane.vue'
 import { exportRows } from '@shared/export'
 import { columnMenuItems } from '../lib/columnMenu'
 import { sortRows, type SortDirection } from '../lib/sortRows'
+import { selectionFigures } from '../lib/selectionFigures'
 import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toasts'
 import { api } from '../lib/api'
@@ -48,6 +50,8 @@ const menu = ref<{ kind: 'row' | 'header'; x: number; y: number; row: number; co
 )
 const grid = ref<InstanceType<typeof DataGrid> | null>(null)
 const selection = ref<{ rowIndex: number; columnIndex: number } | null>(null)
+/** Rows the grid has picked out, as indexes into the rows in the order shown. */
+const selectedRows = ref<number[]>([])
 
 /** Flattens every batch's result sets into one tab strip. */
 interface Panel {
@@ -110,6 +114,20 @@ const rows = computed<CellValue[][]>(() => {
   if (!current) return panel.rows
   const index = panel.columns.findIndex((column) => column.name === current.column)
   return index < 0 ? panel.rows : sortRows(panel.rows, index, current.direction)
+})
+
+/**
+ * Count, sum and the rest for the focused column over the selected rows —
+ * the rows that came back, which a capped result says is not all of them.
+ */
+const figures = computed(() => {
+  const focused = selection.value
+  const panel = active.value
+  if (!focused || !panel || selectedRows.value.length < 2) return null
+  const column = panel.columns[focused.columnIndex]
+  if (!column) return null
+  const values = selectedRows.value.map((row) => rows.value[row]?.[focused.columnIndex] ?? null)
+  return { column: column.name, figures: selectionFigures(values, column.jsKind) }
 })
 
 /** What the grid's header draws its arrow from. */
@@ -318,6 +336,13 @@ function durationLabel(ms: number): string {
           <span class="spinner"></span> Running…
         </span>
         <template v-else-if="result">
+          <SelectionFigures
+            v-if="figures && !showMessages"
+            class="results__cell results__figures"
+            :figures="figures.figures"
+            :column="figures.column"
+            :scope="active?.truncated ? 'the rows kept' : undefined"
+          />
           <span
             v-if="active?.truncated"
             class="results__cell results__warn"
@@ -393,6 +418,7 @@ function durationLabel(ms: number): string {
             empty-message="The statement returned no rows"
             @sort="toggleSort"
             @selection="selection = $event"
+            @rows-selected="selectedRows = $event"
             @row-context="
               menu = {
                 kind: 'row',
@@ -541,7 +567,12 @@ function durationLabel(ms: number): string {
   display: flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
   white-space: nowrap;
+}
+.results__figures {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .results__cell {
   display: flex;

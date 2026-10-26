@@ -115,6 +115,24 @@ rather than folding it away.
   nothing the field did not
 - **Follow a foreign key**: a `›` at the end of a referencing cell opens the referenced table in its
   own tab, filtered to the row it points at — composite keys included
+- **Figures for the selected rows** — select two rows or more (Shift, Ctrl, or a drag) and the
+  footer says what the focused column holds over them, the way a spreadsheet's status bar does:
+  `amount · 12 rows on this page · Count 12 · Sum 4,310.50 · Avg 359.21 · Min 9.99 · Max 1,200.00`.
+  A column that is not numeric gets its count and how many distinct values it has. NULLs are left
+  out of the figures and counted on their own. They are over the rows that are loaded — a table's
+  current page, staged edits included — and say so; query results show the same figures in their
+  bar, over the rows that came back. See below
+
+### Figures for the selected rows
+
+They are worked out in the window from the rows it already has (`lib/selectionFigures.ts`), so
+selecting costs nothing and the figures are only ever as wide as the page. The sums are done on
+decimal digits, not floats: a `bigint` crosses from the main process as text so it keeps every digit,
+and a `decimal` or `money` arrives as a number whose shortest text is the value the server holds, so
+adding those as floats would turn `0.1 + 0.2` into `0.30000000000000004`. The sum, minimum and
+maximum keep the column's places; the average has two at least. A `float` too fine to spell out
+in digits is added as a float. A cell typed into but not applied is counted as what it now says,
+and a numeric column with text typed into it is counted as text rather than added up wrongly.
 
 ### Following a foreign key
 

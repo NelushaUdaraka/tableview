@@ -37,6 +37,7 @@ import DataGrid, { type RowState } from '../components/DataGrid.vue'
 import FilterBuilder from '../components/FilterBuilder.vue'
 import ContextMenu, { type MenuEntry } from '../components/ContextMenu.vue'
 import RowDetailPanel, { type RowField } from '../components/RowDetailPanel.vue'
+import SelectionFigures from '../components/SelectionFigures.vue'
 import SplitPane from '../components/SplitPane.vue'
 import TableViewSwitch from '../components/TableViewSwitch.vue'
 import { exportRows } from '@shared/export'
@@ -57,6 +58,7 @@ import {
 import { sameColumns, sameRows } from '../lib/tableCache'
 import { readsFiltered } from '../lib/tableFilters'
 import { reindexStagedEdits } from '../lib/stagedRows'
+import { selectionFigures } from '../lib/selectionFigures'
 import { useRowPanel } from '../lib/rowPanel'
 import { foreignKeyFilterValue, foreignKeyFilters, foreignKeyTargets } from '@shared/foreignKeys'
 import { changeSetScript, changeSetStatements } from '@shared/sql/changeScript'
@@ -192,6 +194,24 @@ const rowStates = computed<RowState[]>(() => {
     deletedRows.value.has(index) ? 'deleted' : 'normal'
   )
   return [...states, ...newRows.value.map(() => 'inserted' as RowState)]
+})
+
+/**
+ * Count, sum and the rest for the focused column over the selected rows, as
+ * the grid shows them — staged edits included. Only for two rows or more:
+ * the figures of one value are the value. They are over the page that is
+ * loaded, never the whole table, and the footer says so.
+ */
+const figures = computed(() => {
+  const focused = selection.value
+  if (!focused || selectedRows.value.length < 2) return null
+  const column = columns.value[focused.columnIndex]
+  if (!column) return null
+  const values = selectedRows.value.map((row) => {
+    const key = `${row}:${focused.columnIndex}`
+    return key in edits ? edits[key] : (allRows.value[row]?.[focused.columnIndex] ?? null)
+  })
+  return { column: column.name, figures: selectionFigures(values, column.jsKind) }
 })
 
 const pendingCount = computed(() => {
@@ -1751,11 +1771,22 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       </select>
 
       <div class="data__spacer"></div>
-      <span class="data__ms">{{ durationMs }} ms</span>
-      <div class="divider-v data__foot-rule"></div>
-      <span class="mono truncate data__sql" :title="lastSql">
-        {{ lastSql.replace(/\s+/g, ' ') }}
-      </span>
+      <!-- A selection of rows says what is in them, in the statement's
+           place; the statement comes back once one row is selected again. -->
+      <SelectionFigures
+        v-if="figures"
+        class="data__figures"
+        :figures="figures.figures"
+        :column="figures.column"
+        scope="this page"
+      />
+      <template v-else>
+        <span class="data__ms">{{ durationMs }} ms</span>
+        <div class="divider-v data__foot-rule"></div>
+        <span class="mono truncate data__sql" :title="lastSql">
+          {{ lastSql.replace(/\s+/g, ' ') }}
+        </span>
+      </template>
     </div>
 
     <ContextMenu
@@ -2005,6 +2036,9 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
 }
 .data__foot-rule {
   height: 14px;
+}
+.data__figures {
+  flex: 0 1 auto;
 }
 .data__sql {
   max-width: 44%;

@@ -6,6 +6,10 @@ not there yet is the next release, still being prepared.
 
 ## 0.4.0
 
+- Select two rows or more in a table or in query results and the footer adds up the focused
+  column for you, as a spreadsheet does: count, sum, average, minimum and maximum for a number
+  column, the count and how many distinct values for anything else, with NULLs counted apart. It
+  covers the rows that are loaded — a table's current page — and says so.
 - Search inside stored procedures: the sidebar's new *Search* panel finds text across every
   procedure, function, view and trigger in the database and shows the lines it is on, with options
   to match case, match whole words and pick which kinds of object to search. Clicking a line opens

@@ -59,6 +59,7 @@ import { readsFiltered } from '../lib/tableFilters'
 import { reindexStagedEdits } from '../lib/stagedRows'
 import { useRowPanel } from '../lib/rowPanel'
 import { foreignKeyFilterValue, foreignKeyFilters, foreignKeyTargets } from '@shared/foreignKeys'
+import { changeSetScript, changeSetStatements } from '@shared/sql/changeScript'
 import { useBusyStore } from '../stores/busy'
 import { useSettingsStore } from '../stores/settings'
 import { useSchemaStore } from '../stores/schema'
@@ -66,7 +67,6 @@ import { useTabStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
 import { useConnectionStore } from '../stores/connections'
 import { useConfirmWritesStore } from '../stores/confirmWrites'
-import { changeSetWrites } from '../lib/confirmWrites'
 import { useCredentialsStore } from '../stores/credentials'
 import { useUiStateStore } from '../stores/uiState'
 import type { LeaveReason, TableTab } from '../stores/tabs'
@@ -1136,28 +1136,33 @@ async function apply(): Promise<boolean> {
     ? ''
     : 'This table has no primary key, so rows are matched on every column. More than one row may be affected.'
 
-  // A connection that confirms its writes asks here instead of the setting's
-  // plainer question — once is enough — and the main process will not apply
-  // edits that do not say they were confirmed.
-  if (confirmWrites.asking()) {
-    const proceed = await confirmWrites.askAbout(
-      changeSetWrites(changeSet, connections.activeStatus?.currentDatabase ?? ''),
-      { title: 'Apply these edits?', action: 'Apply anyway', note: noKeyNote || undefined }
-    )
-    if (!proceed) return false
-    changeSet.confirmed = true
-  } else if (settings.settings.confirmBeforeApply) {
-    const summary = [
-      changeSet.inserts.length ? `${changeSet.inserts.length} insert` : '',
-      changeSet.updates.length ? `${changeSet.updates.length} update` : '',
-      changeSet.deletes.length ? `${changeSet.deletes.length} delete` : ''
-    ]
-      .filter(Boolean)
-      .join(', ')
-    const warning = noKeyNote ? `\n\n${noKeyNote}` : ''
-    if (!confirm(`Apply ${summary} to ${props.tab.schema}.${props.tab.table}?${warning}`)) {
+  // One review, with the statements Apply would send: asked whenever the
+  // setting says so, and always on a connection that confirms its writes —
+  // whose main process will not apply edits that do not say they were confirmed.
+  const guarded = confirmWrites.asking()
+  if (guarded || settings.settings.confirmBeforeApply) {
+    let statements: string[]
+    let script: string
+    try {
+      statements = changeSetStatements(changeSet)
+      script = changeSetScript(changeSet)
+    } catch (error) {
+      // The builders refuse what the main process would refuse — a row with no key.
+      toasts.fromError('Could not apply the changes — nothing was committed', error)
       return false
     }
+    const proceed = await confirmWrites.askAbout([], {
+      kicker: guarded ? undefined : 'Apply edits',
+      title: 'Apply these edits?',
+      action: guarded ? 'Apply anyway' : 'Apply',
+      note: noKeyNote || undefined,
+      statements,
+      script,
+      database: connections.activeStatus?.currentDatabase ?? '',
+      routine: !guarded
+    })
+    if (!proceed) return false
+    if (guarded) changeSet.confirmed = true
   }
 
   applying.value = true

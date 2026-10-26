@@ -6,6 +6,12 @@ not there yet is the next release, still being prepared.
 
 ## 0.4.0
 
+- *Apply* in a table now shows the statements it is about to run, in the order it runs them,
+  values written in, instead of only counting them. *Copy as script* puts the same statements on
+  the clipboard wrapped in one transaction, to keep for a change ticket or to run on another
+  server. Turn the review off with *Confirm before applying a change set* in Settings.
+- Truncate, Drop and deleting a connection now ask in the app's own dialog rather than the
+  system's, which froze the window until it was answered.
 - A connection can now confirm its writes: a setting between read-only and writable, for the
   production connection you do sometimes need to change. Turn on *Confirm writes* (beside
   *Read-only* in the status bar, in the connection list's ⋮ menu, or on the connection's General

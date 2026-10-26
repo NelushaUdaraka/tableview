@@ -247,6 +247,33 @@ check('another row re-anchors it', await menuAnchor('Local dev'), {
 await clickOn(menuOf('Local dev'), 'the ⋮ once more')
 await waitFor(`!document.querySelector('.menu')`, 'the menu closed again')
 
+// Delete asks in the app, not through the browser's confirm(): Cancel has the
+// focus, and cancelling leaves the connection where it was.
+await rowMenu('Local dev', 'Delete')
+await waitFor(`[...document.querySelectorAll('.modal__title')].some((t) => t.textContent.includes('Local dev'))`, 'the delete question')
+const deleteQuestion = await ev(`
+  (() => {
+    const m = [...document.querySelectorAll('.modal')].at(-1)
+    return JSON.stringify({
+      kicker: m.querySelector('.kicker')?.textContent.trim(),
+      title: m.querySelector('.modal__title')?.textContent.trim(),
+      buttons: [...m.querySelectorAll('.modal__foot .btn')].map((b) => b.textContent.trim()),
+      focused: document.activeElement?.textContent.trim()
+    })
+  })()
+`).then(JSON.parse)
+steps.push({ step: 'delete asks', ...deleteQuestion })
+check('Delete asks in the app, Cancel focused', deleteQuestion, {
+  kicker: 'Connection',
+  title: 'Delete \u201cLocal dev\u201d?',
+  buttons: ['Cancel', 'Delete'],
+  focused: 'Cancel'
+})
+await shot('01c-delete-question')
+await ev(`[...document.querySelectorAll('.modal__foot .btn')].find((b) => b.textContent.trim() === 'Cancel').click()`)
+await waitFor(`!document.querySelector('.modal')`, 'the delete question gone')
+check('Cancel keeps the connection', await ev(`${ROWS}.length`), 2)
+
 // Duplicate from the list. The copy opens in the form with its name selected,
 // because renaming it is the first thing anyone does next.
 await rowMenu('Production reporting', 'Duplicate')

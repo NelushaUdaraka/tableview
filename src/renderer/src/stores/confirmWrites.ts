@@ -6,6 +6,9 @@
  * tree's menu — and answered by one dialog over the window. Whatever the
  * answer, the main process still checks: a write that does not come marked as
  * confirmed is refused there.
+ *
+ * A table's Apply asks it on any connection while *Confirm before applying* is
+ * on, with the statements it would send: it is the one review of staged edits.
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
@@ -13,6 +16,8 @@ import type { WriteItem } from '../lib/confirmWrites'
 import { useConnectionStore } from './connections'
 
 export interface WriteQuestion {
+  /** Above the title; `Confirm writes` when not given. */
+  kicker?: string
   /** The question, as the dialog's title: `Run this script?` */
   title: string
   /** The button that goes ahead: `Run anyway`. */
@@ -23,6 +28,17 @@ export interface WriteQuestion {
   items: WriteItem[]
   /** Anything else worth knowing before saying yes. */
   note?: string
+  /** The exact statements, in the order they run, values written in. */
+  statements?: string[]
+  /** The same statements as a script to keep: what *Copy as script* copies. */
+  script?: string
+  /** The database the statements run in. */
+  database?: string
+  /**
+   * Asked because a setting says to, not because the connection guards its
+   * writes: the button that goes ahead is the ordinary one, and has the focus.
+   */
+  routine?: boolean
 }
 
 export interface PendingWriteQuestion extends WriteQuestion {
@@ -48,7 +64,7 @@ export const useConfirmWritesStore = defineStore('confirmWrites', () => {
   /** Asks about `items` on the open connection. */
   function askAbout(
     items: WriteItem[],
-    wording: { title: string; action: string; note?: string }
+    wording: Omit<WriteQuestion, 'connection' | 'server' | 'items'>
   ): Promise<boolean> {
     const connection = connections.active
     return ask({

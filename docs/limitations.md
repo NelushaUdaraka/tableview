@@ -11,8 +11,6 @@ Deliberately out of scope for phase 1, in rough priority order for phase 2:
 - **No schema editing UI.** You can drop and truncate from the sidebar and run any DDL you like in
   the editor, but there is no visual "add column" / "create index" builder.
 - **No backup/restore, import, or diff tooling.**
-- **Confirmations use native `window.confirm`.** Functional, but it blocks the renderer and does not
-  match the app's styling; an in-app modal would be better.
 - **Named instances cannot be used through an SSH tunnel** — SQL Browser resolves them over UDP 1434,
   which a TCP forward cannot carry. Give an explicit port instead. The app ignores `instanceName`
   when tunnelling rather than failing confusingly.

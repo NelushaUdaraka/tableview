@@ -11,6 +11,7 @@ import {
   TableFilter,
   TableForeignKey,
   TableIndex,
+  TableChangeSet,
   TableSort,
   TableStructure
 } from '../types'
@@ -297,6 +298,20 @@ export function buildDeleteStatement(
   const target = qualify(schema, table)
   const predicate = buildKeyPredicate(key, params)
   return { sql: `DELETE FROM ${target} WHERE ${predicate}`, params: params.all() }
+}
+
+/**
+ * Staged grid edits as the statements Apply sends, in the order it sends them:
+ * deletes, then updates, then inserts. The main process runs these; the review
+ * before Apply shows the same ones (`changeScript.ts`).
+ */
+export function buildChangeSetStatements(changeSet: TableChangeSet): BuiltQuery[] {
+  const { schema, table } = changeSet
+  return [
+    ...changeSet.deletes.map((item) => buildDeleteStatement(schema, table, item.key)),
+    ...changeSet.updates.map((item) => buildUpdateStatement(schema, table, item.key, item.changes)),
+    ...changeSet.inserts.map((item) => buildInsertStatement(schema, table, item.values))
+  ]
 }
 
 // ---------------------------------------------------------------------------

@@ -33,9 +33,10 @@ src/
 │   ├── copyName.ts           what a duplicated connection is called
 │   ├── connectionTransfer.ts the connection export file, and what it leaves out
 │   ├── tableplus.ts          a connection copied out of TablePlus as a URL, and what it fills in
-│   ├── sql/                  identifier escaping, T-SQL lexer, query builders, and
+│   ├── sql/                  identifier escaping, T-SQL lexer, query builders,
 │   │                         readOnly.ts — what a read-only connection refuses to send,
-│   │                         and every write a confirm-writes one asks about
+│   │                         and every write a confirm-writes one asks about — and
+│   │                         changeScript.ts, staged edits as the statements Apply sends
 │   ├── writeMode.ts          read-only and confirm writes, and which switch asks first
 │   ├── sessions.ts           a query tab's session: when it follows the sidebar, when a run
 │   │                         after losing one is refused, and what the tab says
@@ -66,7 +67,9 @@ src/
     ├── stores/               connections, schema, tabs (and panes), library,
     │                         settings, toasts, busy (the window's progress bar),
     │                         read-only (the question before one may write freely again),
-    │                         confirmWrites (the question before a write is sent),
+    │                         confirmWrites (the question before a write is sent, and
+│                         the review before a table's Apply), confirm (every
+│                         other yes-or-no question, in place of confirm()),
     │                         updates (what a window says about a new release)
     ├── components/           title bar, grid, row panel (and its JSON tree),
     │                         editor, sidebar (and its structure tree), dialogs

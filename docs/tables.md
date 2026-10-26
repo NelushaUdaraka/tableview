@@ -130,8 +130,17 @@ rather than opening a query that would match nothing.
   The question says which of those it is
 - One `Apply` sends the whole change set, executed **inside a transaction**: either all of it lands
   or none of it does
+- **Apply shows the statements first** — every one it will send, in the order it sends them:
+  deletes, then updates, then inserts. They are built from the same change set by the same builders
+  the main process uses, so what is shown is what is sent; values are written in as literals to be
+  read, while Apply still binds them as parameters. *Copy as script* puts the same statements on the
+  clipboard as a script that runs on its own — `SET XACT_ABORT ON`, `BEGIN TRANSACTION` …
+  `COMMIT TRANSACTION`, all or nothing like Apply — for a change ticket, or to repeat on another
+  server. The focus starts on *Apply*, so Enter goes ahead and Escape doesn't. *Confirm before
+  applying a change set* in Settings turns the review off; on a
+  [confirm-writes](read-only.md#confirm-writes) connection it is always shown
 - Rows are addressed by primary key; a keyless table falls back to matching every column and the UI
-  says so
+  says so — the review before Apply warns that such a statement may touch more than one row
 - Identity and computed columns are excluded from inserts; `rowversion` is read-only
 
 ## Structure and export

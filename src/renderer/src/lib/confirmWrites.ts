@@ -6,7 +6,6 @@
  * `stores/confirmWrites.ts`.
  */
 import { findWritesInScript } from '@shared/sql/readOnly'
-import type { TableChangeSet } from '@shared/types'
 
 export interface WriteItem {
   /** 1-based line in the script, when it came from one. */
@@ -30,35 +29,6 @@ export function scriptWrites(sql: string, database: string): WriteItem[] {
     database: write.database ?? database,
     danger: write.danger
   }))
-}
-
-function rows(count: number): string {
-  return count === 1 ? '1 row' : `${count} rows`
-}
-
-/** Staged grid edits, as the statements they will be sent as. */
-export function changeSetWrites(changeSet: TableChangeSet, database: string): WriteItem[] {
-  const table = `${changeSet.schema}.${changeSet.table}`
-  const items: WriteItem[] = []
-  if (changeSet.inserts.length > 0) {
-    items.push({
-      description: `INSERT adds ${rows(changeSet.inserts.length)} to ${table}`,
-      database
-    })
-  }
-  if (changeSet.updates.length > 0) {
-    items.push({
-      description: `UPDATE changes ${rows(changeSet.updates.length)} of ${table}`,
-      database
-    })
-  }
-  if (changeSet.deletes.length > 0) {
-    items.push({
-      description: `DELETE removes ${rows(changeSet.deletes.length)} from ${table}`,
-      database
-    })
-  }
-  return items
 }
 
 /** Truncate from the tree: it cannot be taken back, so the table's name is typed. */

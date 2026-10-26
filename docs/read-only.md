@@ -82,9 +82,10 @@ asks, in a dialog over the window:
   `WHERE` — also wants its table's name (or the database's, for `DROP DATABASE`) typed before the
   button wakes up. Case and the space around it do not matter; the whole name does. A temp table or
   a table variable is scratch and does not ask for its name.
-- **Staged table edits** list what *Apply* would send (*UPDATE changes 2 rows of dbo.orders*) and
-  wait for *Apply anyway*. This replaces the *Confirm before applying* question rather than adding
-  a second one, and says so when the table has no primary key.
+- **Staged table edits** show the statements *Apply* would send, values written in, with *Copy as
+  script* beside them (see [Editing a table](tables.md#editing-a-table)), and wait for *Apply
+  anyway*. It is the same review *Confirm before applying* turns on elsewhere, asked whatever that
+  setting says, with the focus on *Cancel*; it says so when the table has no primary key.
 - ***Truncate table…* and *Drop…*** from the tree ask the same question, with the name to type, in
   place of their usual one.
 

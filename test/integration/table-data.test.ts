@@ -1,6 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { SqlServerClient } from '../../src/main/db/sqlserver/client'
-import { READ_ONLY_CONNECTION, type TableDataRequest } from '../../src/shared/types'
+import { changeSetScript } from '../../src/shared/sql/changeScript'
+import {
+  READ_ONLY_CONNECTION,
+  type TableChangeSet,
+  type TableDataRequest
+} from '../../src/shared/types'
 import { connectedClient, createTestDatabase, seedTestDatabase } from './helpers'
 
 let client: SqlServerClient
@@ -376,6 +381,74 @@ describe('editing table data', () => {
       deletes: []
     })
     expect(applied.updated).toBe(1)
+  })
+
+  it('sends deletes, then updates, then inserts, and counts each', async () => {
+    await client.applyChanges({
+      connectionId: 'test-connection',
+      schema: 'dbo',
+      table: 'customers',
+      inserts: [
+        { tempId: 'a', values: { email: 'mixed-delete@example.com', credit_limit: 1 } },
+        { tempId: 'b', values: { email: 'mixed-update@example.com', credit_limit: 1 } }
+      ],
+      updates: [],
+      deletes: []
+    })
+    const before = await client.fetchTableData(
+      request({ filters: [{ column: 'email', operator: 'starts with', value: 'mixed-' }] })
+    )
+    const idOf = (email: string): unknown =>
+      before.rows.find((row) => row[indexOf(before.columns, 'email')] === email)?.[0]
+
+    const applied = await client.applyChanges({
+      connectionId: 'test-connection',
+      schema: 'dbo',
+      table: 'customers',
+      inserts: [{ tempId: 'c', values: { email: 'mixed-insert@example.com', credit_limit: 1 } }],
+      updates: [
+        { key: { customer_id: idOf('mixed-update@example.com') as number }, changes: { display_name: 'Mixed' } }
+      ],
+      deletes: [{ key: { customer_id: idOf('mixed-delete@example.com') as number } }]
+    })
+    expect(applied).toMatchObject({ deleted: 1, updated: 1, inserted: 1 })
+    expect(applied.statements.map((statement) => statement.split(' ')[0])).toEqual([
+      'DELETE',
+      'UPDATE',
+      'INSERT'
+    ])
+  })
+
+  it('makes the same change from the copied script as Apply would', async () => {
+    await client.applyChanges({
+      connectionId: 'test-connection',
+      schema: 'dbo',
+      table: 'customers',
+      inserts: [{ tempId: 't', values: { email: 'script@example.com', credit_limit: 1 } }],
+      updates: [],
+      deletes: []
+    })
+    const before = await client.fetchTableData(
+      request({ filters: [{ column: 'email', operator: '=', value: 'script@example.com' }] })
+    )
+    const id = before.rows[0][indexOf(before.columns, 'customer_id')] as number
+
+    const changeSet: TableChangeSet = {
+      connectionId: 'test-connection',
+      schema: 'dbo',
+      table: 'customers',
+      inserts: [],
+      updates: [{ key: { customer_id: id }, changes: { display_name: "O'Brien", credit_limit: 12.5 } }],
+      deletes: []
+    }
+    const results = await client.runScript(changeSetScript(changeSet))
+    expect(results.map((result) => result.error)).toEqual(results.map(() => undefined))
+
+    const after = await client.fetchTableData(
+      request({ filters: [{ column: 'customer_id', operator: '=', value: String(id) }] })
+    )
+    expect(after.rows[0][indexOf(after.columns, 'display_name')]).toBe("O'Brien")
+    expect(after.rows[0][indexOf(after.columns, 'credit_limit')]).toBe(12.5)
   })
 
   it('refuses to build a statement with no key columns', async () => {

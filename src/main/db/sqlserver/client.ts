@@ -48,11 +48,9 @@ import { serializeRow, deserializeCell } from '../../../shared/serialize'
 import { qualify } from '../../../shared/sql/identifiers'
 import {
   SqlParam,
+  buildChangeSetStatements,
   buildCountQuery,
-  buildDeleteStatement,
-  buildInsertStatement,
   buildSelectQuery,
-  buildUpdateStatement,
   renderColumnType
 } from '../../../shared/sql/builder'
 import { splitBatches } from '../../../shared/sql/statements'
@@ -1378,38 +1376,17 @@ export class SqlServerClient implements DbClient {
   async applyChanges(changeSet: TableChangeSet): Promise<AppliedChanges> {
     this.refuseUnlessAllowed('staged edits cannot be applied', changeSet.confirmed)
     const pool = this.requirePool()
-    const statements: string[] = []
-    let inserted = 0
-    let updated = 0
-    let deleted = 0
+    // Deletes, then updates, then inserts — the order the review before Apply shows.
+    const built = buildChangeSetStatements(changeSet)
+    const affected: number[] = []
 
     const transaction = new sql.Transaction(pool)
     await transaction.begin()
 
     try {
-      for (const item of changeSet.deletes) {
-        const built = buildDeleteStatement(changeSet.schema, changeSet.table, item.key)
-        deleted += await this.runInTransaction(transaction, built.sql, built.params)
-        statements.push(built.sql)
+      for (const query of built) {
+        affected.push(await this.runInTransaction(transaction, query.sql, query.params))
       }
-
-      for (const item of changeSet.updates) {
-        const built = buildUpdateStatement(
-          changeSet.schema,
-          changeSet.table,
-          item.key,
-          item.changes
-        )
-        updated += await this.runInTransaction(transaction, built.sql, built.params)
-        statements.push(built.sql)
-      }
-
-      for (const item of changeSet.inserts) {
-        const built = buildInsertStatement(changeSet.schema, changeSet.table, item.values)
-        inserted += await this.runInTransaction(transaction, built.sql, built.params)
-        statements.push(built.sql)
-      }
-
       await transaction.commit()
     } catch (error) {
       try {
@@ -1420,7 +1397,16 @@ export class SqlServerClient implements DbClient {
       throw error
     }
 
-    return { inserted, updated, deleted, statements }
+    const total = (from: number, count: number): number =>
+      affected.slice(from, from + count).reduce((sum, rows) => sum + rows, 0)
+    const deletes = changeSet.deletes.length
+    const updates = changeSet.updates.length
+    return {
+      deleted: total(0, deletes),
+      updated: total(deletes, updates),
+      inserted: total(deletes + updates, changeSet.inserts.length),
+      statements: built.map((query) => query.sql)
+    }
   }
 
   private async runInTransaction(

@@ -3,7 +3,6 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  changeSetWrites,
   dropWrite,
   namesIt,
   scriptWrites,
@@ -27,27 +26,6 @@ describe('scriptWrites', () => {
         danger: { name: 't', reason: 'has no WHERE, so it deletes every row of t' }
       }
     ])
-  })
-})
-
-describe('changeSetWrites', () => {
-  it('lists each kind of staged edit, with its count', () => {
-    expect(
-      changeSetWrites(
-        {
-          connectionId: 'c1',
-          schema: 'dbo',
-          table: 'orders',
-          inserts: [{ tempId: 'n1', values: {} }],
-          updates: [
-            { key: { id: 1 }, changes: { a: 1 } },
-            { key: { id: 2 }, changes: { a: 2 } }
-          ],
-          deletes: []
-        },
-        'sales'
-      ).map((item) => item.description)
-    ).toEqual(['INSERT adds 1 row to dbo.orders', 'UPDATE changes 2 rows of dbo.orders'])
   })
 })
 

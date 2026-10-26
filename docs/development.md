@@ -101,7 +101,7 @@ Three layers, all runnable on Linux:
 
 | Command | What it covers |
 | --- | --- |
-| `npm test` | 1156 unit tests — SQL building, T-SQL lexing, the read-only check and what confirm writes lists, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh, the columns a table shows, TablePlus URLs, when the app updates itself |
+| `npm test` | 1165 unit tests — SQL building, T-SQL lexing, the read-only check and what confirm writes lists, the statements Apply shows, value serialisation, exporters, credential vault, storage, driver config, a routine's change tracking, auto refresh, the columns a table shows, TablePlus URLs, when the app updates itself |
 | `npm run test:integration` | 72 tests against a **real SQL Server 2022** and a **real sshd** |
 | `npm run test:e2e` | Boots the actual Electron app and drives the UI over the DevTools protocol |
 
@@ -135,7 +135,8 @@ The suites:
   as real `Error`s, and a saved password never appears in renderer-visible data
 - **connections** — duplicates a saved connection from the list and from inside the form, checks
   the copy opens ready to edit with the secrets carried over, that the original comes through
-  untouched either way, and that a copy of a copy is numbered rather than suffixed twice. Then
+  untouched either way, and that a copy of a copy is numbered rather than suffixed twice; that
+  *Delete* in a row's ⋮ asks in the app, Cancel focused, and Cancel keeps the connection. Then
   the TablePlus import: the ⋮ menu's *Import from TablePlus…* opens a new connection with its
   steps showing and editing one shows no panel; a paste of anything but a SQL Server URL from
   TablePlus leaves the form as it was, and the real one replaces every field — the password
@@ -145,8 +146,10 @@ The suites:
   database: nothing in it connects.
 - **workspace** — connects to the container, loads the schema tree, opens a table, reads the grid,
   checks the structure tab, types and runs a JOIN in the editor, provokes a SQL error, toggles theme
-- **editing** — edits a cell, stages an insert, applies the change set, verifies the rows in the
-  database, deletes through the context menu, and drives the filter builder
+- **editing** — edits a cell, stages an insert, checks the review before Apply lists the `UPDATE`
+  and the `INSERT` with their values, in that order, with the focus on *Apply* and *Copy as script*
+  beside it; applies the change set, verifies the rows in the database, deletes through the context
+  menu (the review shows the `DELETE`), and drives the filter builder
 - **table-ui** — opens the title bar's View menu, reads the selected row out of the row panel, edits
   a field there and applies it to the database, follows a foreign key into the referenced table and
   checks the filter and the row it lands on, opens the expanding cell editor, and hides the panel
@@ -199,7 +202,7 @@ The suites:
   `UPDATE` with no `WHERE` keeps *Run anyway* asleep until the table's name is typed, in any case
   but not in part. The same writes sent straight to the main process without the mark — a script,
   staged edits, truncate, drop, a raw filter — are each refused, and the rows are counted. *Apply*
-  in a table and *Truncate* from the tree ask the same question. Last the switch: off asks first
+  in a table asks too, listing the `UPDATE` it sends, and so does *Truncate* from the tree. Last the switch: off asks first
   (*Keep confirming* has the focus, Escape keeps it), after which a write runs without a question;
   on does not ask; and read-only turned on and off again lands back on confirming without asking
 - **ssm-form** — drives the tunnel picker, validates the instance ID, pastes a credentials block
@@ -242,8 +245,8 @@ production connection. It is dropped and built again before every scene, from a 
 scene recorded on its own looks the same as one recorded with the rest. The scenes themselves are in
 `scripts/readme-gifs/record.mjs`. Three things there work around filming on a display with no
 window manager: the recorder gives the window the keyboard itself, or nothing typed reaches the page;
-applying edits does not ask first, since the system's confirmation box would land unstyled in a
-corner; and no scene opens a native `<select>`, whose list does not appear at all.
+applying edits skips the review of its statements, which keeps the scene on the edit itself; and
+no scene opens a native `<select>`, whose list does not appear at all.
 
 ## Working on the UI
 

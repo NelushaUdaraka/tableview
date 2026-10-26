@@ -141,6 +141,7 @@ const question = () =>
         database: w.querySelector('.write__db')?.textContent.trim(),
         danger: !!w.querySelector('.write__input')
       })),
+      statements: [...m.querySelectorAll('.statement__sql')].map(s => s.textContent),
       buttons: [...m.querySelectorAll('.modal__foot .btn')].map(b => ({ label: b.textContent.trim(), disabled: b.disabled })),
       focused: document.activeElement?.textContent.trim() ?? null
     }
@@ -304,7 +305,7 @@ await waitFor(confirming, 'the question before Apply')
 steps.push({ step: 'apply asks', ...(await question()) })
 check(steps.at(-1).title === 'Apply these edits?', 'Apply did not ask')
 check(
-  steps.at(-1).items[0]?.what === `UPDATE changes 1 row of dbo.${TABLE}`,
+  steps.at(-1).statements.length === 1 && steps.at(-1).statements[0].startsWith(`UPDATE [dbo].[${TABLE}] SET`),
   'the question does not say what Apply would send'
 )
 await shot('06-apply-question')

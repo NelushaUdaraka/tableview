@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   ParamBag,
+  buildChangeSetStatements,
   buildCountQuery,
   buildCreateTableDdl,
   buildDeleteStatement,
@@ -330,6 +331,24 @@ describe('mutation builders', () => {
     expect(sql).toBe(
       "UPDATE [odd name].[weird ]] table] SET [v's] = @p0 WHERE [id ]] col] = @p1"
     )
+  })
+
+  it('builds a change set as deletes, then updates, then inserts', () => {
+    const built = buildChangeSetStatements({
+      connectionId: 'c1',
+      schema: 'dbo',
+      table: 't',
+      inserts: [{ tempId: 'new-0', values: { name: 'c' } }],
+      updates: [{ key: { id: 2 }, changes: { name: 'b' } }],
+      deletes: [{ key: { id: 1 } }, { key: { id: 3 } }]
+    })
+    expect(built.map((query) => query.sql)).toEqual([
+      'DELETE FROM [dbo].[t] WHERE [id] = @p0',
+      'DELETE FROM [dbo].[t] WHERE [id] = @p0',
+      'UPDATE [dbo].[t] SET [name] = @p0 WHERE [id] = @p1',
+      'INSERT INTO [dbo].[t] ([name]) VALUES (@p0)'
+    ])
+    expect(built.map((query) => query.params.map((p) => p.value))).toEqual([[1], [3], ['b', 2], ['c']])
   })
 })
 

@@ -7,6 +7,7 @@ import BaseModal from '../components/BaseModal.vue'
 import BrandMark from '../components/BrandMark.vue'
 import ConnectionForm from '../components/ConnectionForm.vue'
 import ContextMenu, { type MenuEntry } from '../components/ContextMenu.vue'
+import { useConfirmStore } from '../stores/confirm'
 import { useConnectionStore } from '../stores/connections'
 import { useCredentialsStore } from '../stores/credentials'
 import { useReadOnlyStore } from '../stores/readOnly'
@@ -19,6 +20,7 @@ import { groupConnections, hasGroups } from '../lib/connectionGroups'
 import { api } from '../lib/api'
 
 const connections = useConnectionStore()
+const confirmQuestion = useConfirmStore()
 const credentials = useCredentialsStore()
 const readOnly = useReadOnlyStore()
 const settings = useSettingsStore()
@@ -201,7 +203,13 @@ async function open(connection: SavedConnection, password?: string): Promise<voi
 }
 
 async function remove(connection: SavedConnection): Promise<void> {
-  if (!confirm(`Delete the connection “${connection.name}”? This cannot be undone.`)) return
+  const proceed = await confirmQuestion.ask({
+    kicker: 'Connection',
+    title: `Delete “${connection.name}”?`,
+    message: 'It goes from the list, with anything saved for it. This cannot be undone.',
+    action: 'Delete'
+  })
+  if (!proceed) return
   await connections.remove(connection.id)
   toasts.info('Connection deleted')
 }

@@ -47,8 +47,8 @@ const SERVER = {
 }
 
 const SETTINGS = {
-  // With no window manager, the system's confirmation box lands unstyled in a
-  // corner of the display; applying straight away keeps it out of the film.
+  // Applying straight away keeps the scene on the edit rather than on the
+  // review of the statements Apply sends.
   confirmBeforeApply: false,
   autoUpdate: false,
   // Opened in the scene that is about it, so the others show a wide grid.

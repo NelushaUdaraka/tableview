@@ -7,6 +7,7 @@ import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
 import ObjectStructureTree from './ObjectStructureTree.vue'
 import { useConnectionStore } from '../stores/connections'
 import { useConfirmWritesStore } from '../stores/confirmWrites'
+import { useConfirmStore } from '../stores/confirm'
 import { dropWrite, truncateWrite } from '../lib/confirmWrites'
 import { useLibraryStore } from '../stores/library'
 import { useSchemaStore } from '../stores/schema'
@@ -26,6 +27,7 @@ const emit = defineEmits<{
 
 const connections = useConnectionStore()
 const confirmWrites = useConfirmWritesStore()
+const confirmQuestion = useConfirmStore()
 const schema = useSchemaStore()
 const library = useLibraryStore()
 const tabs = useTabStore()
@@ -167,7 +169,14 @@ async function onMenuSelect(action: string): Promise<void> {
           if (!(await confirmWrites.askAbout([item], { title, action: 'Truncate anyway' }))) {
             return
           }
-        } else if (!confirm(`Delete every row from ${qualified}? This cannot be undone.`)) {
+        } else if (
+          !(await confirmQuestion.ask({
+            kicker: 'Table',
+            title: `Truncate ${target.schema}.${target.name}?`,
+            message: 'Every row in it is deleted. This cannot be undone.',
+            action: 'Truncate'
+          }))
+        ) {
           return
         }
         await api.truncateTable(id, target.schema, target.name, confirmed)
@@ -181,7 +190,14 @@ async function onMenuSelect(action: string): Promise<void> {
           const item = dropWrite(target.schema, target.name, type, currentDatabase.value)
           const title = `Drop ${target.schema}.${target.name}?`
           if (!(await confirmWrites.askAbout([item], { title, action: 'Drop anyway' }))) return
-        } else if (!confirm(`Drop ${qualified}? This cannot be undone.`)) {
+        } else if (
+          !(await confirmQuestion.ask({
+            kicker: type === 'view' ? 'View' : 'Table',
+            title: `Drop ${target.schema}.${target.name}?`,
+            message: `The ${type} and everything in it go. This cannot be undone.`,
+            action: 'Drop'
+          }))
+        ) {
           return
         }
         await api.dropObject(id, target.schema, target.name, type, confirmed)

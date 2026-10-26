@@ -120,7 +120,6 @@ await waitFor(`!!document.querySelector('.row')`, 'connection row')
 await ev(`[...document.querySelectorAll('.row__buttons .btn')].find(b=>b.textContent.includes('Connect')).click()`)
 await waitFor(`!!document.querySelector('.workspace')`, 'workspace', 45000)
 await waitFor(`document.querySelectorAll('.sidebar .item').length > 0`, 'sidebar')
-await ev(`window.confirm = () => true; true`)
 
 // The suite edits one row; put it back to its seeded value first so a rerun
 // (or a run after a failed one) stages a real change.
@@ -194,6 +193,9 @@ steps.push({
 await shot('03-panel-edit')
 
 await ev(`[...document.querySelectorAll('.data__toolbar .btn')].find(b=>b.textContent.includes('Apply')).click()`)
+// The review before Apply, answered.
+await waitFor(`!!document.querySelector('.statement__sql')`, 'the review before Apply')
+await ev(`[...document.querySelectorAll('.modal__foot .btn')].find(b => b.textContent.trim() === 'Apply').click()`)
 await waitFor(`[...document.querySelectorAll('.toast')].some(t => t.textContent.includes('Changes applied'))`, 'apply toast', 30000)
 await delay(1000)
 steps.push({

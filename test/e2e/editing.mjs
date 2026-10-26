@@ -101,8 +101,19 @@ await ev(`[...document.querySelectorAll('.row__buttons .btn')].find(b=>b.textCon
 await waitFor(`!!document.querySelector('.workspace')`, 'workspace', 45000)
 await waitFor(`document.querySelectorAll('.sidebar .item').length > 0`, 'sidebar')
 
-// Native confirm() would block the renderer; auto-accept it for the test.
-await ev(`window.confirm = () => true; true`)
+/** The review Apply opens: the statements it lists, and its buttons. */
+const review = () =>
+  ev(`(() => {
+    const m = [...document.querySelectorAll('.modal')].at(-1)
+    return m && {
+      title: m.querySelector('.modal__title')?.textContent.trim(),
+      statements: [...m.querySelectorAll('.statement__sql')].map(s => s.textContent),
+      buttons: [...m.querySelectorAll('.modal__foot .btn')].map(b => b.textContent.trim()),
+      focused: document.activeElement?.textContent.trim() ?? null
+    }
+  })()`)
+const answer = (label) =>
+  ev(`[...[...document.querySelectorAll('.modal')].at(-1).querySelectorAll('.modal__foot .btn')].find(b => b.textContent.trim() === ${JSON.stringify(label)}).click()`)
 
 // Open the table.
 await ev(`
@@ -178,8 +189,26 @@ steps.push({
 })
 await shot('02-row-staged')
 
-// --- 3. apply -------------------------------------------------------------
+// --- 3. apply: the review lists what will run, then it runs ----------------
 await ev(`[...document.querySelectorAll('.data__toolbar .btn')].find(b=>b.textContent.includes('Apply')).click()`)
+await waitFor(`!!document.querySelector('.statement__sql')`, 'the review before Apply')
+steps.push({ step: 'review', ...(await review()) })
+{
+  const { title, statements, buttons, focused } = steps.at(-1)
+  if (title !== 'Apply these edits?') bail(`the review is titled ${title}`)
+  if (!/^UPDATE \[dbo\]\.\[customers\] SET .* WHERE \[customer_id\] = 2;$/.test(statements[0] ?? '')) {
+    bail(`the review does not start with the UPDATE: ${statements[0]}`)
+  }
+  if (!statements.some((s) => s.startsWith('INSERT INTO [dbo].[customers]') && s.includes("N'inserted-by-test@example.com'"))) {
+    bail('the review does not show the INSERT with its values')
+  }
+  if (!buttons.includes('Copy as script')) bail('the review offers no script to copy')
+  if (focused !== 'Apply') bail(`the focus is on ${focused}, not Apply`)
+}
+await shot('03-review')
+await answer('Copy as script')
+await waitFor(`[...document.querySelectorAll('.toast')].some(t => t.textContent.includes('Copied the script'))`, 'the script to copy')
+await answer('Apply')
 await waitFor(`[...document.querySelectorAll('.toast')].some(t => t.textContent.includes('Changes applied'))`, 'apply toast', 30000)
 await delay(1200)
 steps.push({
@@ -219,6 +248,9 @@ await waitFor(`!!document.querySelector('.grid__row--deleted')`, 'row marked del
 await shot('04-row-marked-deleted')
 
 await ev(`[...document.querySelectorAll('.data__toolbar .btn')].find(b=>b.textContent.includes('Apply')).click()`)
+await waitFor(`!!document.querySelector('.statement__sql')`, 'the review before the delete')
+if (!(await review()).statements[0]?.startsWith('DELETE FROM [dbo].[customers] WHERE')) bail('the review does not show the DELETE')
+await answer('Apply')
 await waitFor(`[...document.querySelectorAll('.toast')].some(t => t.textContent.includes('Changes applied'))`, 'delete toast', 30000)
 await delay(1000)
 steps.push({

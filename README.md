@@ -26,8 +26,8 @@ the connections where a mistake would hurt. It is built with Electron, Vue 3 and
 **Connections**
 - SQL Server logins, Windows (NTLM) and Azure AD password sign-in, with TLS options and named
   instances
-- SSH tunnels, and AWS SSM port forwarding that starts the session for you and can find the bastion
-  by its Name tag
+- SSH tunnels, and AWS SSM port forwarding that starts the session for you, can find the bastion
+  by its Name tag, and signs you in to AWS SSO again when the session has run out
 - Connections filed under groups, each with its own colour; duplicate, export and import them
   (passwords stay out of the file), or bring them over from TablePlus
 - Passwords encrypted at rest; idle connections kept alive, and dropped ones reopened
@@ -46,7 +46,8 @@ the connections where a mistake would hurt. It is built with Electron, Vue 3 and
 ![Filtering the orders with a raw WHERE, marking three of them shipped in the grid, and applying the three changes](docs/images/edit.gif)
 
 **Queries**
-- A T-SQL editor with completion from the live schema, and formatting
+- A T-SQL editor with completion from the live schema — the columns of the tables a statement
+  reads included — snippets of your own with placeholders, and formatting
 - Run everything, a selection or the statement under the cursor; scripts split on `GO`, as in SSMS
 - Several result sets per batch, messages, and errors with their line numbers; saved queries and
   history

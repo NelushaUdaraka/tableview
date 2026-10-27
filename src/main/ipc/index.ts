@@ -76,6 +76,7 @@ import { runMenuRole } from '../menu'
 import { chromeState } from '../window'
 import { closeGuard } from '../closeGuard'
 import { checkSsmPrerequisites } from '../tunnel/ssmPreflight'
+import { SsoLogin, SsoLoginCancelled } from '../tunnel/ssoLogin'
 import { listSsmInstances } from '../tunnel/ec2Instances'
 import { UpdateController } from '../updater'
 
@@ -326,6 +327,38 @@ export function registerIpcHandlers(context: IpcContext): void {
   handle(CHANNELS.ssmCheck, async (_call, config: SsmConfig, connectionId?: string) =>
     checkSsmPrerequisites(config, resolveCredentialEnv(config, connectionId, appData) ?? {})
   )
+
+  // An expired SSO session is fixed by signing in again, which the CLI does
+  // with the user's browser; the window is told what to show meanwhile.
+  handle(
+    CHANNELS.ssoLogin,
+    async (call, config: SsmConfig, loginId: string, deviceCode?: boolean): Promise<boolean> => {
+      const login = new SsoLogin(config, {
+        // Only a web page goes to the browser, whatever the CLI printed.
+        openUrl: (url) =>
+          /^https:\/\//i.test(url) ? shell.openExternal(url) : Promise.reject(new Error('not a web page')),
+        onPrompt: (prompt) => sendToWindow(call, CHANNELS.eventSsoLoginPrompt, { loginId, ...prompt })
+      })
+      ssoLogins.get(loginId)?.cancel()
+      ssoLogins.set(loginId, login)
+      // A window closed mid-sign-in leaves no one to finish it.
+      const stop = (): void => void login.cancel()
+      call.window?.once('closed', stop)
+      try {
+        await login.run(Boolean(deviceCode))
+        return true
+      } catch (error) {
+        if (error instanceof SsoLoginCancelled) return false
+        throw error
+      } finally {
+        call.window?.removeListener('closed', stop)
+        if (ssoLogins.get(loginId) === login) ssoLogins.delete(loginId)
+      }
+    }
+  )
+  handle(CHANNELS.ssoLoginCancel, async (_call, loginId: string) => {
+    await ssoLogins.get(loginId)?.cancel()
+  })
 
   // The bastion's ID changes with every deployment, so the form offers the
   // account's instances instead of asking the user to remember one.
@@ -717,6 +750,9 @@ let newWindowFactory: ((position?: { x: number; y: number }) => BrowserWindow | 
 let windowLocator:
   | ((point: { x: number; y: number }, exclude: BrowserWindow | null) => BrowserWindow | null)
   | null = null
+
+/** Sign-ins to AWS SSO under way, by the id the window gave them. */
+const ssoLogins = new Map<string, SsoLogin>()
 
 /** Tabs waiting for the window they were opened for to ask what it is showing. */
 const pendingTabs = new Map<number, DetachedTab>()

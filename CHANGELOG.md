@@ -14,6 +14,10 @@ not there yet is the next release, still being prepared.
   prefix — `tran` for a guarded transaction — then press Tab to move from one placeholder to the
   next. A starter set comes with the app; add, edit and delete your own under *Query → Snippets…*,
   and export them to a file to share with your team, or import theirs.
+- Sign in to AWS SSO from TableView: when an SSM connection fails because its SSO session has run
+  out, the dialog (and *Check prerequisites*) offers *Sign in with AWS SSO*. It opens the sign-in
+  page in your browser, waits for you to finish, and connects; with no browser to hand it shows a
+  page and a code to enter on any device instead.
 - Execution plans: *Plan* in the query toolbar (or `Ctrl+L` / `Ctrl+M`) shows how SQL Server runs a
   query — the estimated plan without running it, or the actual plan after running it — as a tree of
   operators with each one's share of the cost, estimated against actual rows (big gaps marked),

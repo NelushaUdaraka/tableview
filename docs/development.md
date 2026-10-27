@@ -119,7 +119,7 @@ and flips `AllowTcpForwarding` on, which the `linuxserver/openssh-server` image 
 ### End-to-end
 
 ```bash
-scripts/e2e.sh all          # or: smoke | connections | workspace | editing | editor | table-ui | table-tools | routines | auto-refresh | unsaved | read-only | confirm-writes | workbench | ssm-form
+scripts/e2e.sh all          # or: smoke | connections | workspace | editing | editor | table-ui | table-tools | routines | auto-refresh | unsaved | read-only | confirm-writes | workbench | ssm-form | ssm-sso
 ```
 
 On a headless box it starts Xvfb itself. It needs Electron's usual Linux libraries:
@@ -234,6 +234,14 @@ The suites:
   pastes a fresh block into the dialog a run-out one raises, and opens a second window.
   `scripts/e2e.sh` writes stand-ins for `aws` and `session-manager-plugin` into `.tmp/bin`, so it
   needs no AWS account.
+- **ssm-sso** — the same stand-ins, with an AWS SSO session that has run out until `aws sso login`
+  renews it (`FAKE_AWS_SCENARIO=sso-expired`; the stand-in's `sso login` prints what the real one
+  does with `--no-browser` and finishes a few seconds later). *Check prerequisites* fails the
+  credentials and offers *Sign in with AWS SSO*; the sign-in waits, switches to a code on *sign in
+  with a code* (`--use-device-code`, the page and code shown), and the check runs again and passes.
+  Then connecting raises the expired-credentials dialog with signing in as its action; *Cancel*
+  stops the CLI before it finishes, and a second sign-in retries the connection, which opens
+  through the stand-in's session to the test SQL Server — so this one needs the test environment.
 
 Screenshots land in `.tmp/`.
 

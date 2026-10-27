@@ -20,6 +20,7 @@ import { useReadOnlyStore } from '../stores/readOnly'
 import AppIcon from './AppIcon.vue'
 import AwsCredentialsBox from './AwsCredentialsBox.vue'
 import TablePlusPanel from './TablePlusPanel.vue'
+import SsoSignIn from './SsoSignIn.vue'
 
 const props = defineProps<{
   connection: SavedConnection | null
@@ -1001,6 +1002,13 @@ async function browseForKey(): Promise<void> {
                 {{ preflight[row.key].detail ?? preflight[row.key].error }}
               </span>
             </div>
+            <!-- An SSO session that ran out is one sign-in away; the check runs again after it. -->
+            <SsoSignIn
+              v-if="preflight.credentials.ssoExpired && !usesPastedCredentials"
+              class="preflight__sso"
+              :config="form.ssm!"
+              @signed-in="runSsmCheck"
+            />
           </div>
         </div>
       </fieldset>
@@ -1420,6 +1428,9 @@ async function browseForKey(): Promise<void> {
   min-height: 26px;
   font-size: 12px;
   min-width: 0;
+}
+.preflight__sso {
+  margin: 6px 0 4px;
 }
 .preflight__mark--ok {
   color: var(--success);

@@ -6,10 +6,13 @@
  * far more often than they are first set up. Sending the user back through the
  * connection form to fix that loses whatever they were doing; this takes the
  * paste, saves it against the connection, and retries the thing that failed.
+ * Credentials the CLI resolves have nothing to paste: for those it signs in to
+ * AWS SSO again, and retries once that is done.
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import AwsCredentialsBox from './AwsCredentialsBox.vue'
 import BaseModal from './BaseModal.vue'
+import SsoSignIn from './SsoSignIn.vue'
 import { checkCredentialBlock } from '@shared/aws/credentials'
 import { useConnectionStore } from '../stores/connections'
 import { useCredentialsStore } from '../stores/credentials'
@@ -71,11 +74,16 @@ async function save(): Promise<void> {
   }
 }
 
-/** For CLI-resolved credentials: the user refreshes outside, then retries. */
+/** For CLI-resolved credentials: refreshed by signing in here, or outside, then retried. */
 async function retryOnly(): Promise<void> {
   const current = prompt.value
   credentials.dismiss()
   await current?.retry?.()
+}
+
+function signedIn(): void {
+  toasts.success('Signed in to AWS')
+  void retryOnly()
 }
 </script>
 
@@ -102,7 +110,12 @@ async function retryOnly(): Promise<void> {
     <div v-else class="expired__cli">
       <p>
         This connection lets the AWS CLI resolve its credentials, so there is nothing to paste.
-        Refresh them and try again:
+        When they come from AWS SSO, sign in again and the connection is retried as soon as you are
+        done:
+      </p>
+      <SsoSignIn :config="prompt.connection.ssm" primary @signed-in="signedIn" />
+      <p class="expired__else">
+        Or refresh them another way, such as in a terminal, and press Retry:
       </p>
       <code class="expired__cmd mono">{{ profileHint }}</code>
     </div>
@@ -119,7 +132,7 @@ async function retryOnly(): Promise<void> {
         <span v-if="saving" class="spinner"></span>
         Save and retry
       </button>
-      <button v-else class="btn btn--primary" @click="retryOnly">Retry</button>
+      <button v-else class="btn" @click="retryOnly">Retry</button>
     </template>
   </BaseModal>
 </template>
@@ -136,6 +149,13 @@ async function retryOnly(): Promise<void> {
   font-size: 13px;
   line-height: 1.6;
   color: var(--text-secondary);
+}
+.expired__cli .sso {
+  margin-bottom: 16px;
+}
+.expired__cli p.expired__else {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 .expired__cmd {
   display: block;

@@ -17,6 +17,7 @@ import { SSM_CREDENTIALS_EXPIRED, type SsmConfig } from '../../shared/types'
 import { isLoopbackHost } from '../../shared/hosts'
 import { InstanceLookupError, resolveInstanceByName } from './ec2Instances'
 import { Tunnel, TunnelHandle, TunnelTarget, findFreePort, waitForPort } from './types'
+import { stopProcessTree } from './processTree'
 
 /** Resolves a bastion named by its Name tag; injected so tests can answer it. */
 export type InstanceResolver = (config: SsmConfig) => Promise<string>
@@ -426,38 +427,6 @@ export class SsmTunnel implements Tunnel {
 
     const child = this.child
     this.child = null
-    if (!child || child.exitCode !== null || child.signalCode !== null) return
-
-    // The CLI spawns session-manager-plugin as a grandchild. On POSIX a SIGTERM
-    // to the CLI is relayed and the session is terminated cleanly; on Windows
-    // there is no such relay, so the whole tree has to be taken down or the
-    // plugin keeps holding the local port.
-    if (process.platform === 'win32' && child.pid !== undefined) {
-      await new Promise<void>((resolve) => {
-        const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
-          windowsHide: true,
-          stdio: 'ignore'
-        })
-        killer.once('exit', () => resolve())
-        killer.once('error', () => {
-          child.kill('SIGKILL')
-          resolve()
-        })
-      })
-      return
-    }
-
-    child.kill('SIGTERM')
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        child.kill('SIGKILL')
-        resolve()
-      }, 3000)
-      timer.unref?.()
-      child.once('exit', () => {
-        clearTimeout(timer)
-        resolve()
-      })
-    })
+    if (child) await stopProcessTree(child)
   }
 }

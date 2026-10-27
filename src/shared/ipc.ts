@@ -113,7 +113,18 @@ export interface SsmCheckResult {
 export interface SsmPreflight {
   awsCli: SsmCheckResult
   plugin: SsmCheckResult
-  credentials: SsmCheckResult
+  /** `ssoExpired` when signing in to AWS SSO again would fix it. */
+  credentials: SsmCheckResult & { ssoExpired?: boolean }
+}
+
+/** What `aws sso login` asks the user to do, as `main/tunnel/ssoLogin` reads it. */
+export interface SsoLoginPrompt {
+  /** The page to sign in on. */
+  url: string
+  /** The device flow's code to enter there; null for the browser flow. */
+  code: string | null
+  /** The page as opened: with the code already filled in, where there is one. */
+  openUrl: string
 }
 
 /**
@@ -163,6 +174,8 @@ export const CHANNELS = {
   connectionsImport: 'connections:import',
   connectionsTest: 'connections:test',
   ssmCheck: 'ssm:check',
+  ssoLogin: 'ssm:ssoLogin',
+  ssoLoginCancel: 'ssm:ssoLoginCancel',
   ssmInstances: 'ssm:instances',
 
   windowNew: 'window:new',
@@ -245,7 +258,8 @@ export const CHANNELS = {
   eventCloseRequested: 'event:closeRequested',
   eventUpdateState: 'event:updateState',
   eventSessionChanged: 'event:sessionChanged',
-  eventNotificationClicked: 'event:notificationClicked'
+  eventNotificationClicked: 'event:notificationClicked',
+  eventSsoLoginPrompt: 'event:ssoLoginPrompt'
 } as const
 
 /**
@@ -303,6 +317,16 @@ export interface RendererApi {
   testConnection(input: Partial<ConnectionConfig>): Promise<ConnectionStatus>
   /** `connectionId` lets the check fall back to credentials already saved. */
   checkSsmPrerequisites(config: SsmConfig, connectionId?: string): Promise<SsmPreflight>
+  /**
+   * Runs `aws sso login` for the config's profile: true once the user has
+   * finished signing in, false when it was cancelled. `loginId` names it for
+   * `cancelSsoLogin` and for the `onSsoLoginPrompt` events it sends meanwhile.
+   * `deviceCode` asks for a code to enter on any device rather than a page to
+   * open on this one.
+   */
+  ssoLogin(config: SsmConfig, loginId: string, deviceCode?: boolean): Promise<boolean>
+  /** Stops a sign-in, whose `ssoLogin` call then answers false. Nothing happens for one already over. */
+  cancelSsoLogin(loginId: string): Promise<void>
   /** Instances in the configured region, so the bastion can be picked rather than typed. */
   listSsmInstances(config: SsmConfig, connectionId?: string): Promise<SsmInstanceList>
 
@@ -468,6 +492,7 @@ export interface RendererApi {
   onSessionChanged(handler: (event: SessionEvent) => void): () => void
   /** A query notification was clicked: its window is in front, and this is its tab. */
   onNotificationClicked(handler: (tabId: string) => void): () => void
+  onSsoLoginPrompt(handler: (event: SsoLoginPrompt & { loginId: string }) => void): () => void
 }
 
 declare global {

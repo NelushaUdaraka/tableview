@@ -14,9 +14,11 @@ import {
   useTabStore,
   type ClosePrompt,
   type LeaveReason,
+  type ActivityTab,
   type QueryTab,
   type TableTab
 } from '../../../src/renderer/src/stores/tabs'
+import { detachedTabFrom, openTabFrom } from '../../../src/renderer/src/lib/detach'
 import type { TableCache } from '../../../src/renderer/src/lib/tableCache'
 import type { SessionState } from '../../../src/shared/types'
 import { endSession, stopRun } from '../../../src/renderer/src/lib/tabSessions'
@@ -1189,5 +1191,57 @@ describe('ending a session with a transaction open', () => {
     expect(tabs.hasUnsavedWork).toBe(true)
     tabs.update<QueryTab>(id, { session: none, running: true })
     expect(tabs.hasUnsavedWork).toBe(true)
+  })
+})
+
+describe('the activity monitor tab', () => {
+  it('opens once per connection and is shown again rather than opened twice', async () => {
+    const tabs = useTabStore()
+    await tabs.openActivity('c1')
+    await tabs.openQuery('c1', 'SELECT 1')
+    await tabs.openActivity('c1')
+    expect(tabs.tabs.filter((tab) => tab.kind === 'activity')).toHaveLength(1)
+    expect(tabs.active?.kind).toBe('activity')
+    await tabs.openActivity('c2')
+    expect(tabs.tabs.filter((tab) => tab.kind === 'activity')).toHaveLength(2)
+  })
+
+  it('has no unsaved work, and comes back after a restart', async () => {
+    const tabs = useTabStore()
+    await tabs.openActivity('c1')
+    expect(tabs.hasUnsavedWork).toBe(false)
+    const saved = tabs.snapshot('c1')!
+    expect(saved.panes[0].tabs[0]).toMatchObject({ kind: 'activity', title: 'Activity' })
+
+    setActivePinia(createPinia())
+    const again = useTabStore()
+    expect(again.restore('c1', saved)).toBe(true)
+    expect(again.tabs[0]).toMatchObject({ kind: 'activity', connectionId: 'c1' })
+  })
+
+  it('takes its interval and idle setting into another window', async () => {
+    const tabs = useTabStore()
+    await tabs.openActivity('c1')
+    tabs.update<ActivityTab>(tabs.tabs[0].id, { autoRefresh: 5000, showIdle: true })
+    const described = detachedTabFrom(tabs.tabs[0])
+    expect(described).toEqual({
+      kind: 'activity',
+      connectionId: 'c1',
+      title: 'Activity',
+      autoRefresh: 5000,
+      showIdle: true
+    })
+
+    setActivePinia(createPinia())
+    await openTabFrom(described)
+    expect(useTabStore().tabs[0]).toMatchObject({ kind: 'activity', autoRefresh: 5000, showIdle: true })
+  })
+
+  it('splits into a second view of the same monitor', async () => {
+    const tabs = useTabStore()
+    await tabs.openActivity('c1')
+    await tabs.splitTab(tabs.tabs[0].id)
+    expect(tabs.tabs.map((tab) => tab.kind)).toEqual(['activity', 'activity'])
+    expect(tabs.isSplit).toBe(true)
   })
 })

@@ -29,9 +29,13 @@ export type MenuAction =
   | 'query:run-selection'
   | 'query:run-current'
   | 'query:cancel'
+  | 'query:estimated-plan'
+  | 'query:actual-plan'
   | 'query:format'
   | 'results:export'
   | 'results:copy'
+  | 'view:quick-open'
+  | 'view:activity'
   | 'view:toggle-sidebar'
   | 'view:toggle-row-panel'
   | 'view:split-tab'
@@ -184,18 +188,32 @@ export function buildMenuModel(platform: string): MenuModel[] {
         },
         { label: 'Cancel', accelerator: 'Escape', action: 'query:cancel' },
         SEPARATOR,
+        {
+          label: 'Estimated Plan',
+          accelerator: 'CmdOrCtrl+L',
+          action: 'query:estimated-plan'
+        },
+        {
+          label: 'Run with Actual Plan',
+          accelerator: 'CmdOrCtrl+M',
+          action: 'query:actual-plan'
+        },
+        SEPARATOR,
         { label: 'Copy Results', accelerator: 'CmdOrCtrl+Shift+C', action: 'results:copy' }
       ]
     },
     {
       label: 'View',
       items: [
+        { label: 'Quick Open…', accelerator: 'CmdOrCtrl+P', action: 'view:quick-open' },
+        SEPARATOR,
         { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', action: 'view:toggle-sidebar' },
         { label: 'Toggle Row Panel', accelerator: 'CmdOrCtrl+I', action: 'view:toggle-row-panel' },
         { label: 'Split Tab Right', accelerator: 'CmdOrCtrl+\\', action: 'view:split-tab' },
         { label: 'Close Split', accelerator: 'CmdOrCtrl+Shift+\\', action: 'view:close-split' },
         { label: 'Toggle Theme', accelerator: 'CmdOrCtrl+Shift+L', action: 'view:toggle-theme' },
         { label: 'Refresh Schema', accelerator: 'F5', action: 'schema:refresh' },
+        { label: 'Activity Monitor', action: 'view:activity' },
         SEPARATOR,
         { label: 'Next Tab', accelerator: 'Ctrl+Tab', action: 'tab:next' },
         { label: 'Previous Tab', accelerator: 'Ctrl+Shift+Tab', action: 'tab:previous' },

@@ -48,6 +48,17 @@ export class QuerySession {
   lost: SessionState | null = null
   /** When a heartbeat last went down the session's connection, as `Date.now()`. */
   lastHeartbeatAt: number | null = null
+  /**
+   * The server's number for the session (`@@SPID`), read with its state, so
+   * the activity monitor can say which tab a session is.
+   */
+  serverSessionId: number | null = null
+  /**
+   * The last batch the tab sent down it. The server's own idea of the last
+   * statement is the state read that follows every run, which says nothing
+   * about what the tab was doing.
+   */
+  lastBatch: string | null = null
 
   /** The end of the line of work waiting for the session; see `exclusive`. */
   private queue: Promise<unknown> = Promise.resolve()
@@ -175,6 +186,7 @@ export class QuerySession {
       throw error
     }
     const xact = Number(row?.transactionState)
+    if (row && row.spid !== undefined && row.spid !== null) this.serverSessionId = Number(row.spid)
     this.state = withTransactionSince(
       this.state,
       row && 'transactionCount' in row

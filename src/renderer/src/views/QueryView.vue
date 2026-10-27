@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { format as formatSql } from 'sql-formatter'
-import type { CellValue, ColumnMeta } from '@shared/types'
+import type { CellValue, ColumnMeta, PlanKind } from '@shared/types'
 import { statementAt, statementsInRange } from '@shared/sql/statements'
 import {
   COMMIT_SQL,
@@ -17,6 +17,7 @@ import SqlEditor from '../components/SqlEditor.vue'
 import ResultsPanel from '../components/ResultsPanel.vue'
 import SplitPane from '../components/SplitPane.vue'
 import NameDialog from '../components/NameDialog.vue'
+import ContextMenu, { type MenuEntry } from '../components/ContextMenu.vue'
 import type { QueryTab } from '../stores/tabs'
 import { useTabStore } from '../stores/tabs'
 import { useConnectionStore } from '../stores/connections'
@@ -166,6 +167,29 @@ function runCurrent(): void {
   void run(statement.text)
 }
 
+/**
+ * The plan of the selection, or of the whole tab when nothing is selected:
+ * `estimated` compiles it without running it, `actual` runs it and shows the
+ * plan each statement used.
+ */
+function plan(kind: PlanKind): void {
+  const selection = editor.value?.getSelection()
+  const text = selection && selection.text.trim() !== '' ? selection.text : undefined
+  void runQueryTab(props.tab.id, text, { plan: kind })
+}
+
+/** The Plan button's menu, hung from the button. */
+const planMenu = ref<{ x: number; y: number } | null>(null)
+const PLAN_MENU: MenuEntry[] = [
+  { label: 'Estimated plan', action: 'estimated', hint: 'Ctrl+L' },
+  { label: 'Run with actual plan', action: 'actual', hint: 'Ctrl+M' }
+]
+
+function openPlanMenu(event: MouseEvent): void {
+  const button = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  planMenu.value = { x: button.left, y: button.bottom + 4 }
+}
+
 async function cancel(): Promise<void> {
   if (!props.tab.executionId) return
   const cancelled = await api.cancelQuery(props.tab.connectionId, props.tab.executionId)
@@ -274,6 +298,7 @@ watch(
 
 defineExpose({
   run: () => run(),
+  plan,
   toggleRowPanel: () => {
     showRowPanel.value = !showRowPanel.value
   },
@@ -313,6 +338,18 @@ defineExpose({
               Run selection
             </button>
             <button class="btn" title="Ctrl+Alt+Enter" @click="runCurrent">Run statement</button>
+            <button
+              class="btn"
+              :disabled="tab.running"
+              title="How SQL Server runs it: the estimated plan (Ctrl+L), or a run with the actual one (Ctrl+M)"
+              aria-haspopup="menu"
+              :aria-expanded="!!planMenu"
+              @click="openPlanMenu"
+            >
+              <AppIcon name="plan" :size="13" />
+              Plan
+              <AppIcon name="chevron-down" :size="12" />
+            </button>
             <button v-if="tab.running" class="btn btn--danger" @click="cancel">
               <AppIcon name="stop" :size="12" />
               Cancel
@@ -450,6 +487,7 @@ defineExpose({
             @run="run()"
             @run-selection="runSelection"
             @run-current="runCurrent"
+            @plan="plan"
             @save="save"
           />
 
@@ -473,6 +511,15 @@ defineExpose({
         </div>
       </template>
     </SplitPane>
+
+    <ContextMenu
+      v-if="planMenu"
+      :x="planMenu.x"
+      :y="planMenu.y"
+      :items="PLAN_MENU"
+      @select="(action) => plan(action as PlanKind)"
+      @close="planMenu = null"
+    />
 
     <NameDialog
       v-if="naming"

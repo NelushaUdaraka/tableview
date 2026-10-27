@@ -34,6 +34,10 @@ if (!app.requestSingleInstanceLock()) {
   }
 }
 
+// Windows shows a notification only for an app whose AppUserModelID matches
+// the one its Start menu shortcut was installed with: the installer's appId.
+if (process.platform === 'win32') app.setAppUserModelId('com.tableview.app')
+
 const registry = new ConnectionRegistry()
 let windows: WindowManager | null = null
 let updates: UpdateController | null = null

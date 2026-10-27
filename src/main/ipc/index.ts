@@ -12,7 +12,16 @@
  */
 import fs from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
-import { BrowserWindow, IpcMainInvokeEvent, app, clipboard, dialog, ipcMain, shell } from 'electron'
+import {
+  BrowserWindow,
+  IpcMainInvokeEvent,
+  Notification,
+  app,
+  clipboard,
+  dialog,
+  ipcMain,
+  shell
+} from 'electron'
 import {
   AppSettings,
   AppliedChanges,
@@ -38,6 +47,8 @@ import {
   DetachRequest,
   DetachedTab,
   IpcResult,
+  QueryNotice,
+  SaveKind,
   TabDropRequest,
   TabDropResult,
   WindowChromeState
@@ -46,6 +57,8 @@ import { exportFileName, type ImportSummary } from '../../shared/connectionTrans
 import { MenuRole } from '../../shared/menu'
 import { EXPORT_EXTENSIONS, exportRows } from '../../shared/export'
 import { tablePlusUrlFromClipboard } from '../../shared/tableplus'
+import { decodeText } from '../../shared/csv'
+import { liftPlans } from '../../shared/showplan'
 import type { UiStatePatch } from '../../shared/uiState'
 import {
   credentialsFromClipboard,
@@ -392,6 +405,14 @@ export function registerIpcHandlers(context: IpcContext): void {
     registry.get(call.scope, id).findReferences(schema, name)
   )
 
+  // -- server activity --------------------------------------------------------
+
+  handle(CHANNELS.dbActivity, (call, id: string) => registry.get(call.scope, id).readActivity())
+
+  handle(CHANNELS.dbKillSession, (call, id: string, sessionId: number, confirmed?: boolean) =>
+    registry.get(call.scope, id).killSession(sessionId, confirmed)
+  )
+
   // -- table data -----------------------------------------------------------
 
   handle(CHANNELS.dbTableData, (call, request: TableDataRequest) =>
@@ -438,10 +459,14 @@ export function registerIpcHandlers(context: IpcContext): void {
     const run: SessionRun = request.sessionId
       ? await client.runInSession(request.sessionId, request.sql, {
           ...options,
-          pinnedDatabase: request.pinnedDatabase
+          pinnedDatabase: request.pinnedDatabase,
+          plan: request.plan
         })
       : { statements: await client.runScript(request.sql, options), session: null }
-    const { statements } = run
+    // Plans go to the Plan tab rather than being shown as rows of XML.
+    const { statements, plans } = liftPlans(run.statements, {
+      estimated: request.plan === 'estimated'
+    })
 
     const rowCount = statements.reduce(
       (total, statement) =>
@@ -469,7 +494,9 @@ export function registerIpcHandlers(context: IpcContext): void {
       totalDurationMs: Date.now() - started,
       cancelled: false,
       session: run.session ?? undefined,
-      sessionLost: run.lost
+      sessionLost: run.lost,
+      ...(plans.length > 0 ? { plans } : {}),
+      ...(request.plan ? { plan: request.plan } : {})
     }
   })
 
@@ -555,6 +582,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     tablePlusUrlFromClipboard(await clipboard.readText())
   )
 
+  // Ctrl+V on a table's grid: the one place the window asks for whatever text
+  // is there, because the user has just asked to paste it.
+  handle(CHANNELS.clipboardReadText, () => clipboard.readText())
+
   handle(
     CHANNELS.dialogOpenFile,
     async (call, filters?: { name: string; extensions: string[] }[]): Promise<string | null> => {
@@ -572,14 +603,17 @@ export function registerIpcHandlers(context: IpcContext): void {
     }
   )
 
-  handle('file:readText', (_call, filePath: string) => fs.readFile(filePath, 'utf8'))
+  // Whatever the file was saved as — a CSV out of Excel is often UTF-16 or
+  // Windows-1252 rather than UTF-8 — it arrives as text.
+  handle('file:readText', async (_call, filePath: string) => decodeText(await fs.readFile(filePath)))
 
-  handle(CHANNELS.dialogSaveFile, async (call, text: string, defaultPath?: string) => {
+  handle(CHANNELS.dialogSaveFile, async (call, text: string, defaultPath?: string, kind?: SaveKind) => {
+    const what = SAVE_KINDS[kind ?? 'sql'] ?? SAVE_KINDS.sql
     const result = await showSaveDialog(call, {
-      title: 'Save SQL',
-      defaultPath: defaultPath ?? 'query.sql',
+      title: what.title,
+      defaultPath: defaultPath ?? `query.${what.extension}`,
       filters: [
-        { name: 'SQL', extensions: ['sql'] },
+        { name: what.name, extensions: [what.extension] },
         { name: 'All files', extensions: ['*'] }
       ]
     })
@@ -589,7 +623,50 @@ export function registerIpcHandlers(context: IpcContext): void {
   })
 
   handle(CHANNELS.shellOpenExternal, (_call, url: string) => shell.openExternal(url))
+
+  // -- notifications -----------------------------------------------------------
+  // A long query that finished while its window was behind another says so on
+  // the desktop. The window decides whether a run is worth it; this shows it,
+  // and a click brings that window and the tab forward.
+
+  handle(CHANNELS.notifyQueryFinished, (call, notice: QueryNotice) => {
+    // Linux needs a notification daemon; where there is none, say nothing.
+    if (!Notification.isSupported()) return
+    const window = call.window
+    try {
+      const notification = new Notification({ title: notice.title, body: notice.body })
+      // Held until it is done with: a notification that is collected loses
+      // its click handler on some desktops.
+      liveNotifications.add(notification)
+      const release = (): void => {
+        liveNotifications.delete(notification)
+      }
+      notification.on('click', () => {
+        release()
+        if (!window || window.isDestroyed()) return
+        if (window.isMinimized()) window.restore()
+        window.show()
+        window.focus()
+        window.webContents.send(CHANNELS.eventNotificationClicked, notice.tabId)
+      })
+      notification.on('close', release)
+      notification.on('failed', release)
+      notification.show()
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn('[notify] could not show a notification:', error)
+    }
+  })
 }
+
+/** What a text file is being saved as, which names the dialog and its filter. */
+const SAVE_KINDS: Record<SaveKind, { title: string; name: string; extension: string }> = {
+  sql: { title: 'Save SQL', name: 'SQL', extension: 'sql' },
+  sqlplan: { title: 'Save execution plan', name: 'Execution plan', extension: 'sqlplan' }
+}
+
+/** Notifications on screen, kept from the garbage collector until they go. */
+const liveNotifications = new Set<Notification>()
 
 /** Set by main/index.ts so the renderer can ask for another window. */
 let newWindowFactory: ((position?: { x: number; y: number }) => BrowserWindow | null) | null = null

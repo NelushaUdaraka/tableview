@@ -42,6 +42,32 @@ read, so a query tab in that window still completes table and column names. `Ctr
 tree in for anyone who wants it, and it stays once it is there. Drag that tab back into the window
 it came from and the empty frame goes with it: the window *was* the tab.
 
+## Quick open
+
+`Ctrl+P` (View → Quick Open…) opens a box at the top of the window that finds any table, view,
+procedure, function or saved query by name, from wherever you are — including a window holding one
+dragged-out tab, which has no tree to find it in:
+
+```
+ ⌕ oi
+ ▤ order_items         dbo                         5.4k rows
+ ▤ orders              dbo                         1.2k rows
+ ◉ v_order_totals      sales
+ ↑↓ to move  Enter to open  Shift+Enter a table's structure  Esc to close
+```
+
+The letters typed only need to appear in order: a whole name comes first, then a name that starts
+with them, then one whose words start with them (`oi` is `order_items`), then one that has them
+together, then one that has them anywhere. Typing a dot matches the schema too (`sales.inv`).
+With nothing typed it lists pinned tables, then what this window had on screen most recently,
+then everything else. Each line shows the kind, the schema and a table's row estimate.
+
+Enter opens a table's or view's rows, a routine's definition (as clicking it in the tree does) or a
+saved query, tied to it so `Ctrl+S` saves it back — a saved query already open is shown where it is.
+`Shift+Enter` (or `Ctrl+Enter`, or a click with either) opens a table's structure instead. Escape
+closes it. Nothing is asked of the server: the names are the schema store's and the library's,
+already read for the tree and the sidebar (`lib/quickOpen.ts` does the matching and ranking).
+
 ## Windows and connections
 
 One connection is active per window, and **File → New Window** (`Ctrl+N`) opens as many as you like

@@ -75,6 +75,10 @@ const emit = defineEmits<{
   (event: 'rows-selected', rowIndexes: number[]): void
   (event: 'follow-key', payload: { rowIndex: number; columnIndex: number }): void
   (event: 'revert-cell', rowIndex: number, columnIndex: number): void
+  (
+    event: 'paste',
+    payload: { rowIndex: number | null; columnIndex: number | null; columns: number[]; text: string }
+  ): void
 }>()
 
 const ROW_HEIGHT = 30
@@ -682,6 +686,12 @@ function onCellKeydown(event: KeyboardEvent): void {
         void copySelection(event.shiftKey)
       }
       break
+    case 'v':
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && props.editable) {
+        event.preventDefault()
+        void pasteFromClipboard()
+      }
+      break
     case 'a':
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault()
@@ -709,6 +719,43 @@ function onCellKeydown(event: KeyboardEvent): void {
         event.preventDefault()
       }
   }
+}
+
+// --- pasting -------------------------------------------------------------------
+
+/**
+ * When the last paste was taken from the keyboard, so the paste event the
+ * Edit menu's Paste may raise for the same keypress is not taken twice.
+ */
+let pastedAt = 0
+
+/**
+ * Hands a pasted block to the parent, with where it lands: the focused cell,
+ * or nowhere when nothing is focused. What it means — changed cells, new
+ * rows — is the table's business, not the grid's.
+ */
+function handPaste(text: string): void {
+  if (!text || editing.value || !props.editable || busyOverRows.value) return
+  emit('paste', {
+    rowIndex: selected.value?.row ?? null,
+    columnIndex: selected.value?.col ?? null,
+    columns: [...shownColumns.value],
+    text
+  })
+}
+
+/** Ctrl+V on the grid: a page cannot read the clipboard itself, so it is asked for. */
+async function pasteFromClipboard(): Promise<void> {
+  pastedAt = Date.now()
+  handPaste(await api.readClipboardText())
+}
+
+/** Edit → Paste from the title bar raises a paste event rather than a key. */
+function onPaste(event: ClipboardEvent): void {
+  if (editing.value) return
+  event.preventDefault()
+  if (Date.now() - pastedAt < 500) return
+  handPaste(event.clipboardData?.getData('text/plain') ?? '')
 }
 
 function moveTo(row: number, col: number, extend = false): void {
@@ -845,6 +892,7 @@ defineExpose({
       :aria-busy="loading"
       @scroll.passive="onScroll"
       @keydown="onCellKeydown"
+      @paste="onPaste"
     >
       <!-- Only an empty grid gets the spinner in the middle: with rows on
            screen the window's progress bar says the same thing without

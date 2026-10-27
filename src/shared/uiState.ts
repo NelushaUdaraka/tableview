@@ -40,7 +40,7 @@ export interface UiState {
  * results and staged edits are not kept — a restored tab reads afresh.
  */
 export interface SavedTab {
-  kind: 'query' | 'table'
+  kind: 'query' | 'table' | 'activity'
   title: string
   showRowPanel?: boolean
   /** Query tabs: the text, where the cursor was, and the saved query it is. */
@@ -119,6 +119,7 @@ function savedTab(raw: unknown): SavedTab | null {
     title: text(tab.title) ? tab.title : '',
     ...(typeof tab.showRowPanel === 'boolean' ? { showRowPanel: tab.showRowPanel } : {})
   }
+  if (tab.kind === 'activity') return { kind: 'activity', ...common, title: common.title || 'Activity' }
   if (tab.kind === 'table') {
     if (!text(tab.schema) || !text(tab.table) || !tab.table) return null
     return {

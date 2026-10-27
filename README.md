@@ -38,6 +38,8 @@ the connections where a mistake would hurt. It is built with Electron, Vue 3 and
 - A virtualised grid with server-side paging and sorting, a filter builder or a raw `WHERE`, a column
   picker and optional auto refresh
 - Edit cells, add and delete rows — changes are staged, then applied in one transaction
+- Import a CSV file or paste a range from a spreadsheet, checked row by row and staged like any edit
+- Count, sum, average, minimum and maximum of the selected rows, as a spreadsheet shows them
 - A row panel that shows JSON as a tree, and foreign keys that open the row they point at
 - Export to CSV, TSV, JSON, JSON Lines, SQL `INSERT`s or Markdown
 
@@ -51,8 +53,13 @@ the connections where a mistake would hurt. It is built with Electron, Vue 3 and
 - Stored procedures and functions open as `CREATE OR ALTER`, with every change from the stored
   version marked, and each one revertible on its own
 - Search the text of every procedure, function, view and trigger, and find what uses a table
+- Estimated and actual execution plans, with costs, row estimates against actuals, warnings and
+  missing-index hints
+- A desktop notification when a long query finishes while you are in another window
 - Each tab keeps its own session, as an SSMS window does: temp tables, `USE` and transactions carry
   from one run to the next, and an open transaction is shown, and asked about before anything ends it
+- An activity monitor: the server's sessions, what each is running and waiting on, blocking chains
+  with the head blocker first, and Kill
 
 ![Typing a query that joins orders to customers, picking table names from the completion list, and running it to get revenue by country](docs/images/query.gif)
 
@@ -67,6 +74,7 @@ the connections where a mistake would hurt. It is built with Electron, Vue 3 and
 
 **Workspace**
 - Tabs, a side-by-side split, and tabs that drag out into windows of their own
+- Quick open (`Ctrl+P`): any table, view, routine or saved query by name
 - One connection per window, and as many windows as you like
 - Dark and light themes, and a full menu with keyboard shortcuts (`Ctrl+/` lists them)
 - The Windows installer and the Linux AppImage keep themselves up to date
@@ -107,6 +115,7 @@ name.
 - [Tables](docs/tables.md) — the schema tree, browsing, filtering, editing and export
 - [Query editor](docs/query-editor.md) — running scripts, and editing stored procedures
 - [The workspace](docs/workspace.md) — the title bar, panes, tabs and windows
+- [Activity monitor](docs/activity.md) — the server's sessions, what they run, and who blocks whom
 - [Installing and updating](docs/install-and-update.md)
 - [Known limitations](docs/limitations.md)
 

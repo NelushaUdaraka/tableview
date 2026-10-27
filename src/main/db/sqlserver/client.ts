@@ -6,6 +6,7 @@
  * integration tests against a real server.
  */
 import sql from 'mssql'
+import os from 'node:os'
 import { randomUUID } from 'node:crypto'
 import {
   AppliedChanges,
@@ -21,6 +22,7 @@ import {
   RoutineType,
   SchemaObject,
   SerializedError,
+  ServerActivity,
   ServerMessage,
   SessionLoss,
   SessionState,
@@ -67,6 +69,8 @@ import type { Tunnel, TunnelHandle } from '../../tunnel/types'
 import { buildMssqlConfig } from './config'
 import { isTransportFailure } from './errors'
 import { QuerySession } from './session'
+import { serverActivity, validSessionId, type ActivityMeta } from './activity'
+import { compilesOnly } from '../../../shared/showplan'
 import { planReconnect } from '../reconnect'
 import type {
   ClientStateListener,
@@ -135,6 +139,12 @@ const FORWARD_ERROR_GRACE_MS = 1500
 
 /** Used for connections saved before the option existed. */
 const DEFAULT_KEEPALIVE_MS = DEFAULT_SQLSERVER_OPTIONS.keepAliveIntervalMs
+
+/** The session option each kind of plan is read with. */
+const PLAN_SWITCHES = {
+  estimated: 'SET SHOWPLAN_XML',
+  actual: 'SET STATISTICS XML'
+} as const
 
 /** Attaches a code so the renderer can offer the fix rather than a toast. */
 function codedError(message: string, code: string): Error {
@@ -909,9 +919,12 @@ export class SqlServerClient implements DbClient {
    * script refused halfway through has done the first half, which is harder
    * to reason about than a script that has done nothing.
    */
-  private refusalFor(text: string, options: ExecuteOptions): StatementResult | null {
+  private refusalFor(text: string, options: SessionRunOptions): StatementResult | null {
     const readOnly = this.config.readOnly === true
     if (!readOnly && (!this.config.confirmWrites || options.confirmedWrites)) return null
+    // An estimated plan compiles the script and runs none of it — unless the
+    // script turns that off, when it is checked like any run.
+    if (options.plan === 'estimated' && compilesOnly(text)) return null
     const write = options.asSingleBatch ? findWrite(text) : findWriteInScript(text)
     if (!write) return null
     return readOnly ? readOnlyRefusal(text, write) : unconfirmedRefusal(text, write)
@@ -1003,21 +1016,24 @@ export class SqlServerClient implements DbClient {
       }
 
       const results: StatementResult[] = []
-      for (const statement of statements) {
-        let result: StatementResult
-        if (run.cancelled) {
-          // Cancelled before this batch was sent: it never is.
-          result = unsentStatement(statement.text, cancelledBeforeSending())
-        } else {
-          try {
-            result = await this.executeOne(statement.text, [], options, current)
-          } catch (error) {
-            // The session went between batches: nothing of this one was sent.
-            result = unsentStatement(statement.text, error)
-          }
+      // A plan is a session setting, switched on around the script and off
+      // again whatever the script came to — or the tab's next run would be
+      // compiled without running too.
+      const planSwitch = options.plan ? PLAN_SWITCHES[options.plan] : null
+      if (planSwitch) {
+        const on = await this.executeOne(`${planSwitch} ON`, [], {}, current).catch(
+          (error: unknown) => unsentStatement(`${planSwitch} ON`, error)
+        )
+        if (on.error) {
+          return { statements: [on], session: current.lost ? null : current.state, lost }
         }
-        results.push(result)
-        if (result.error) break
+      }
+      try {
+        await this.runStatements(current, statements, options, run, results)
+      } finally {
+        if (planSwitch && !current.lost) {
+          await this.executeOne(`${planSwitch} OFF`, [], {}, current).catch(() => undefined)
+        }
       }
       // Whatever the run came to — finished, failed, cancelled — the tab is
       // told where its session now stands. A read that fails because the
@@ -1025,6 +1041,33 @@ export class SqlServerClient implements DbClient {
       if (!current.lost) await current.readState().catch(() => undefined)
       return { statements: results, session: current.lost ? null : current.state, lost }
     })
+  }
+
+  /** A run's batches down a tab's session, in order, stopping at the first error. */
+  private async runStatements(
+    current: QuerySession,
+    statements: Array<{ text: string }>,
+    options: SessionRunOptions,
+    run: { cancelled: boolean },
+    results: StatementResult[]
+  ): Promise<void> {
+    for (const statement of statements) {
+      let result: StatementResult
+      if (run.cancelled) {
+        // Cancelled before this batch was sent: it never is.
+        result = unsentStatement(statement.text, cancelledBeforeSending())
+      } else {
+        try {
+          current.lastBatch = statement.text
+          result = await this.executeOne(statement.text, [], options, current)
+        } catch (error) {
+          // The session went between batches: nothing of this one was sent.
+          result = unsentStatement(statement.text, error)
+        }
+      }
+      results.push(result)
+      if (result.error) break
+    }
   }
 
   /**
@@ -1384,6 +1427,53 @@ export class SqlServerClient implements DbClient {
   }
 
   // -------------------------------------------------------------------------
+  // Server activity
+  // -------------------------------------------------------------------------
+
+  /**
+   * Every user session on the server and what it is running, for the activity
+   * monitor. One batch, so the session it reports as the monitor's own is the
+   * one that read the rest.
+   */
+  async readActivity(): Promise<ServerActivity> {
+    const request = this.requirePool().request()
+    try {
+      const result = await request.query(Q.SERVER_ACTIVITY)
+      const [meta, rows] = result.recordsets as unknown as [ActivityMeta[], Record<string, unknown>[]]
+      // Which of them are this window's query tabs, which the server only
+      // knows as connections that last ran the app's own state read.
+      const tabSessions: Record<number, string> = {}
+      const lastBatches: Record<number, string> = {}
+      for (const [tabId, session] of this.sessions) {
+        if (session.serverSessionId === null || session.lost) continue
+        tabSessions[session.serverSessionId] = tabId
+        if (session.lastBatch) lastBatches[session.serverSessionId] = session.lastBatch
+      }
+      return serverActivity(
+        meta?.[0] ?? ({} as ActivityMeta),
+        rows ?? [],
+        { pid: process.pid, host: os.hostname() },
+        { tabs: tabSessions, lastBatches }
+      )
+    } catch (error) {
+      this.noteTransportFailure(error)
+      throw this.explainTransportFailure(error)
+    }
+  }
+
+  /**
+   * Ends another session on the server. A read-only connection refuses it —
+   * the read-only check refuses `KILL` in a script for the same reason — and a
+   * confirm-writes one wants it confirmed; the window asks either way.
+   */
+  async killSession(sessionId: number, confirmed?: boolean): Promise<void> {
+    this.refuseUnlessAllowed('no session can be killed', confirmed)
+    const id = validSessionId(sessionId)
+    const result = await this.executeOne(Q.KILL_SESSION, [{ name: 'sessionId', value: id }], {})
+    if (result.error) throw Object.assign(new Error(result.error.message), result.error)
+  }
+
+  // -------------------------------------------------------------------------
   // Table data
   // -------------------------------------------------------------------------
 
@@ -1483,14 +1573,17 @@ export class SqlServerClient implements DbClient {
       throw error
     }
 
-    const total = (from: number, count: number): number =>
-      affected.slice(from, from + count).reduce((sum, rows) => sum + rows, 0)
+    const total = (from: number, count?: number): number =>
+      affected
+        .slice(from, count === undefined ? undefined : from + count)
+        .reduce((sum, rows) => sum + rows, 0)
     const deletes = changeSet.deletes.length
     const updates = changeSet.updates.length
     return {
       deleted: total(0, deletes),
       updated: total(deletes, updates),
-      inserted: total(deletes + updates, changeSet.inserts.length),
+      // Inserts may share statements, so they are whatever came after.
+      inserted: total(deletes + updates),
       statements: built.map((query) => query.sql)
     }
   }

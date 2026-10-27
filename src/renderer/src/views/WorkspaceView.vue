@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { DetachedTab } from '@shared/ipc'
 import type {
   CellValue,
@@ -24,6 +24,7 @@ import SettingsDialog from '../components/SettingsDialog.vue'
 import ShortcutsDialog from '../components/ShortcutsDialog.vue'
 import UnsavedRoutineDialog from '../components/UnsavedRoutineDialog.vue'
 import OpenTransactionDialog from '../components/OpenTransactionDialog.vue'
+import QuickOpen from '../components/QuickOpen.vue'
 import TabPaneView from './TabPaneView.vue'
 import { useConnectionStore } from '../stores/connections'
 import { useReadOnlyStore } from '../stores/readOnly'
@@ -32,9 +33,17 @@ import { useSettingsStore } from '../stores/settings'
 import { useTabStore, type QueryTab, type RevealLine } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
 import { useUiStateStore } from '../stores/uiState'
+import { useLibraryStore } from '../stores/library'
 import { onMenuAction } from '../lib/menuBus'
 import { exportConnections, importConnections } from '../lib/connectionTransfer'
 import { detachedTabFrom, openTabFrom } from '../lib/detach'
+import {
+  objectKey,
+  queryKey,
+  routineKey,
+  touchRecent,
+  type QuickOpenItem
+} from '../lib/quickOpen'
 import { api } from '../lib/api'
 
 type PaneView = InstanceType<typeof TabPaneView>
@@ -54,6 +63,7 @@ const settings = useSettingsStore()
 const tabs = useTabStore()
 const toasts = useToastStore()
 const uiState = useUiStateStore()
+const library = useLibraryStore()
 
 const sidebar = ref<InstanceType<typeof AppSidebar> | null>(null)
 
@@ -119,6 +129,43 @@ watch(sidebarCollapsed, (collapsed) => {
 
 const showSettings = ref(false)
 const showShortcuts = ref(false)
+const showQuickOpen = ref(false)
+
+/**
+ * What was on screen lately, most recent first, as quick open's keys — so
+ * the table you were just in is the first thing it offers. Kept for this
+ * window while it stays on this connection; it is not worth a file.
+ */
+const recent = ref<string[]>([])
+watch(
+  () => {
+    const tab = tabs.active
+    if (!tab || tab.kind === 'activity') return null
+    if (tab.kind === 'table') return objectKey(tab.schema, tab.table)
+    if (tab.routine) return routineKey(tab.routine.schema, tab.routine.name)
+    return tab.savedQueryId ? queryKey(tab.savedQueryId) : null
+  },
+  (key) => {
+    if (key) recent.value = touchRecent(recent.value, key)
+  }
+)
+
+/** Opens what quick open picked: a table's rows or structure, a routine, a saved query. */
+function openPicked(item: QuickOpenItem, structure: boolean): void {
+  showQuickOpen.value = false
+  if (!item.schema) {
+    const saved = library.savedQueries.find((query) => query.id === item.savedQueryId)
+    if (saved && connectionId.value) {
+      void tabs.openQuery(connectionId.value, saved.sql, saved.name, { savedQueryId: saved.id })
+    }
+    return
+  }
+  if (item.kind === 'procedure' || item.kind === 'function') {
+    void openRoutine(item.schema, item.name)
+    return
+  }
+  openTable(item.schema, item.name, item.objectType ?? 'table', structure ? 'structure' : 'data')
+}
 const exportPayload = ref<{ columns: ColumnMeta[]; rows: CellValue[][]; name?: string } | null>(
   null
 )
@@ -199,6 +246,16 @@ async function openRoutine(schemaName: string, name: string, reveal?: RevealLine
   } catch (error) {
     toasts.fromError(`Could not read the definition of ${schemaName}.${name}`, error)
   }
+}
+
+/** The tree's Import CSV…: the table's rows, and the file picker over them. */
+async function importInto(schemaName: string, table: string): Promise<void> {
+  if (!connectionId.value) return
+  await tabs.openTable(connectionId.value, schemaName, table, 'table', 'data')
+  const tab = tabs.activeTableTab
+  if (tab?.schema !== schemaName || tab.table !== table || tab.view !== 'data') return
+  await nextTick()
+  focusedView.value?.importFile()
 }
 
 /** Sidebar "generate statement" actions. */
@@ -345,6 +402,12 @@ function handleAction(action: string): void {
     case 'query:cancel':
       focusedView.value?.cancel()
       break
+    case 'query:estimated-plan':
+      focusedView.value?.plan('estimated')
+      break
+    case 'query:actual-plan':
+      focusedView.value?.plan('actual')
+      break
     case 'query:format':
       focusedView.value?.format()
       break
@@ -386,8 +449,9 @@ function handleAction(action: string): void {
       else sidebar.value?.focusFilter()
       break
     case 'schema:refresh':
-      if (tabs.active?.kind === 'table') focusedView.value?.refresh()
-      else void sidebar.value?.refresh()
+      if (tabs.active?.kind === 'table' || tabs.active?.kind === 'activity') {
+        focusedView.value?.refresh()
+      } else void sidebar.value?.refresh()
       break
     case 'connection:disconnect':
       void disconnect()
@@ -406,6 +470,12 @@ function handleAction(action: string): void {
       break
     case 'help:shortcuts':
       showShortcuts.value = true
+      break
+    case 'view:quick-open':
+      showQuickOpen.value = true
+      break
+    case 'view:activity':
+      if (connectionId.value) void tabs.openActivity(connectionId.value)
       break
   }
 }
@@ -432,6 +502,11 @@ function onKeydown(event: KeyboardEvent): void {
   if (event.key === '/') {
     event.preventDefault()
     showShortcuts.value = true
+    return
+  }
+  if (event.key.toLowerCase() === 'p' && !event.shiftKey && !event.altKey) {
+    event.preventDefault()
+    showQuickOpen.value = true
   }
 }
 
@@ -471,6 +546,7 @@ watch(
   connectionId,
   (id, previous) => {
     if (previous) schema.reset()
+    if (previous) recent.value = []
     if (id) void schema.loadAll(id)
   },
   { immediate: true }
@@ -543,6 +619,7 @@ onBeforeUnmount(() => {
           @open-sql="openSql"
           @open-routine="openRoutine"
           @generate="generate"
+          @import="importInto"
         />
       </template>
 
@@ -611,6 +688,12 @@ onBeforeUnmount(() => {
     />
     <SettingsDialog v-if="showSettings" @close="showSettings = false" />
     <ShortcutsDialog v-if="showShortcuts" @close="showShortcuts = false" />
+    <QuickOpen
+      v-if="showQuickOpen"
+      :recent="recent"
+      @open="openPicked"
+      @close="showQuickOpen = false"
+    />
     <!-- Raised by the tab store from wherever a routine's tab is closed. -->
     <UnsavedRoutineDialog v-if="tabs.closePrompt" />
     <!-- …and from wherever a query tab's session would end with a transaction open. -->

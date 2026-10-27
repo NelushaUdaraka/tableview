@@ -191,6 +191,15 @@ describe('saved tabs', () => {
     expect(normalizeSavedTabs('x')).toBeNull()
   })
 
+  it('reads back an activity monitor tab', () => {
+    expect(
+      normalizeSavedTabs({ panes: [{ tabs: [{ kind: 'activity', showRowPanel: false }], active: 0 }] })
+    ).toEqual({
+      panes: [{ tabs: [{ kind: 'activity', title: 'Activity', showRowPanel: false }], active: 0 }],
+      focused: 0
+    })
+  })
+
   it('forgets a deleted connection’s tabs and table intervals, and no one else’s', () => {
     const state = forgetConnection(
       {

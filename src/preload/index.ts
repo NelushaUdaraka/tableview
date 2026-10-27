@@ -67,6 +67,7 @@ const api: RendererApi = {
   answerCloseRequest: (proceed) => invoke(CHANNELS.windowCloseAnswer, proceed),
   runMenuRole: (role) => invoke(CHANNELS.windowMenuRole, role),
   openExternal: (url) => invoke(CHANNELS.shellOpenExternal, url),
+  notifyQueryFinished: (notice) => invoke(CHANNELS.notifyQueryFinished, notice),
 
   connect: (connectionId, password) => invoke(CHANNELS.dbConnect, connectionId, password),
   disconnect: (connectionId) => invoke(CHANNELS.dbDisconnect, connectionId),
@@ -88,6 +89,9 @@ const api: RendererApi = {
   searchDefinitions: (request) => invoke(CHANNELS.dbSearchDefinitions, request),
   findReferences: (id, schema, name) => invoke(CHANNELS.dbFindReferences, id, schema, name),
 
+  readActivity: (id) => invoke(CHANNELS.dbActivity, id),
+  killSession: (id, sessionId, confirmed) =>
+    invoke(CHANNELS.dbKillSession, id, sessionId, confirmed),
   fetchTableData: (request: TableDataRequest) => invoke(CHANNELS.dbTableData, request),
   applyChanges: (changeSet: TableChangeSet) => invoke(CHANNELS.dbApplyChanges, changeSet),
   truncateTable: (id, schema, table, confirmed) =>
@@ -123,10 +127,12 @@ const api: RendererApi = {
   copyToClipboard: (text) => invoke(CHANNELS.exportToClipboard, text),
   readAwsCredentialsFromClipboard: () => invoke(CHANNELS.clipboardAwsCredentials),
   readTablePlusUrlFromClipboard: () => invoke(CHANNELS.clipboardTablePlusUrl),
+  readClipboardText: () => invoke(CHANNELS.clipboardReadText),
 
   openFile: (filters) => invoke(CHANNELS.dialogOpenFile, filters),
   readTextFile: (filePath) => invoke('file:readText', filePath),
-  saveTextFile: (text, defaultPath) => invoke(CHANNELS.dialogSaveFile, text, defaultPath),
+  saveTextFile: (text, defaultPath, kind) =>
+    invoke(CHANNELS.dialogSaveFile, text, defaultPath, kind),
 
   onStatusChanged: (handler: (status: ConnectionStatus) => void) =>
     subscribe(CHANNELS.eventStatusChanged, handler as (payload: never) => void),
@@ -141,7 +147,9 @@ const api: RendererApi = {
   onUpdateState: (handler: (state: UpdateState) => void) =>
     subscribe(CHANNELS.eventUpdateState, handler as (payload: never) => void),
   onSessionChanged: (handler: (event: SessionEvent) => void) =>
-    subscribe(CHANNELS.eventSessionChanged, handler as (payload: never) => void)
+    subscribe(CHANNELS.eventSessionChanged, handler as (payload: never) => void),
+  onNotificationClicked: (handler: (tabId: string) => void) =>
+    subscribe(CHANNELS.eventNotificationClicked, handler as (payload: never) => void)
 }
 
 contextBridge.exposeInMainWorld('api', api)

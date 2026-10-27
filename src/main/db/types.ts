@@ -13,7 +13,9 @@ import type {
   DatabaseSummary,
   DefinitionSearchRequest,
   DefinitionSearchResult,
+  PlanKind,
   RoutineObject,
+  ServerActivity,
   SchemaObject,
   SchemaObjectType,
   ServerMessage,
@@ -93,6 +95,8 @@ export type SessionChangeListener = (change: SessionChange) => void
 export interface SessionRunOptions extends ExecuteOptions {
   /** A routine's tab: the database its session opens in, and stays in. */
   pinnedDatabase?: string
+  /** Compile without running (`estimated`), or run and return each plan (`actual`). */
+  plan?: PlanKind
 }
 
 /** A definition search, once it has reached the connection it runs on. */
@@ -155,6 +159,11 @@ export interface DbClient {
   searchDefinitions(search: DefinitionSearch): Promise<DefinitionSearchResult>
   /** The procedures, functions, views and triggers that use an object. */
   findReferences(schema: string, name: string): Promise<DefinitionSearchResult>
+
+  /** Every user session on the server and what it is running, for the activity monitor. */
+  readActivity(): Promise<ServerActivity>
+  /** Ends a session; refused on a read-only connection, and unconfirmed on a confirm-writes one. */
+  killSession(sessionId: number, confirmed?: boolean): Promise<void>
 
   fetchTableData(request: TableDataRequest): Promise<TableDataResponse>
   applyChanges(changeSet: TableChangeSet): Promise<AppliedChanges>

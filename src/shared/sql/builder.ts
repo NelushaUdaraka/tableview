@@ -301,6 +301,74 @@ export function buildDeleteStatement(
 }
 
 /**
+ * SQL Server takes at most 1000 rows in one `VALUES` list and 2100 parameters
+ * in one request; this keeps a little under the second.
+ */
+const MAX_ROWS_PER_INSERT = 1000
+const MAX_PARAMS_PER_STATEMENT = 2000
+
+/**
+ * Several rows into the same columns as one `INSERT … VALUES (…), (…)`: an
+ * imported file of thousands of rows goes up in a few dozen round trips
+ * rather than one per row, its values still bound as parameters.
+ */
+export function buildMultiRowInsert(
+  schema: string,
+  table: string,
+  rows: Record<string, CellValue>[]
+): BuiltQuery {
+  if (rows.length === 1) return buildInsertStatement(schema, table, rows[0])
+  const params = new ParamBag()
+  const names = Object.keys(rows[0])
+  const columns = names.map(quoteIdent).join(', ')
+  const tuples = rows.map(
+    (row) => `(${names.map((name) => params.add(row[name] ?? null)).join(', ')})`
+  )
+  return {
+    sql: `INSERT INTO ${qualify(schema, table)} (${columns}) VALUES\n  ${tuples.join(',\n  ')}`,
+    params: params.all()
+  }
+}
+
+/**
+ * Inserts in the order given, rows running into the same columns gathered
+ * into multi-row statements, as many to a statement as the server takes.
+ */
+export function buildInsertStatements(
+  schema: string,
+  table: string,
+  inserts: Record<string, CellValue>[]
+): BuiltQuery[] {
+  const out: BuiltQuery[] = []
+  let run: Record<string, CellValue>[] = []
+  let shape = ''
+  const flush = (): void => {
+    if (run.length > 0) out.push(buildMultiRowInsert(schema, table, run))
+    run = []
+  }
+  for (const values of inserts) {
+    const names = Object.keys(values)
+    // A row with nothing in it takes every default, which has no VALUES form.
+    if (names.length === 0) {
+      flush()
+      out.push(buildInsertStatement(schema, table, values))
+      shape = ''
+      continue
+    }
+    const key = JSON.stringify(names)
+    const perStatement = Math.max(
+      1,
+      Math.min(MAX_ROWS_PER_INSERT, Math.floor(MAX_PARAMS_PER_STATEMENT / names.length))
+    )
+    if (key !== shape || run.length >= perStatement) flush()
+    shape = key
+    run.push(values)
+  }
+  flush()
+  return out
+}
+
+/**
  * Staged grid edits as the statements Apply sends, in the order it sends them:
  * deletes, then updates, then inserts. The main process runs these; the review
  * before Apply shows the same ones (`changeScript.ts`).
@@ -310,7 +378,11 @@ export function buildChangeSetStatements(changeSet: TableChangeSet): BuiltQuery[
   return [
     ...changeSet.deletes.map((item) => buildDeleteStatement(schema, table, item.key)),
     ...changeSet.updates.map((item) => buildUpdateStatement(schema, table, item.key, item.changes)),
-    ...changeSet.inserts.map((item) => buildInsertStatement(schema, table, item.values))
+    ...buildInsertStatements(
+      schema,
+      table,
+      changeSet.inserts.map((item) => item.values)
+    )
   ]
 }
 

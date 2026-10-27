@@ -11,6 +11,8 @@ const GROUPS = [
       ['Ctrl+Shift+Enter', 'Run the selection'],
       ['Ctrl+Alt+Enter', 'Run the statement under the cursor'],
       ['Escape', 'Cancel the running query'],
+      ['Ctrl+L', 'Show the estimated plan, without running'],
+      ['Ctrl+M', 'Run, and show the actual plan'],
       ['Ctrl+Shift+F', 'Format SQL'],
       ['Ctrl+S', 'Save query'],
       ['Ctrl+O', 'Open a .sql file']
@@ -50,6 +52,7 @@ const GROUPS = [
       ['Delete', 'Set the cell to NULL'],
       ['Ctrl+C', 'Copy the cell'],
       ['Ctrl+Shift+C', 'Copy the row'],
+      ['Ctrl+V', 'Paste a range from a spreadsheet: changes rows, adds them past the end'],
       ['Click the › arrow', 'Open the row a foreign key points at'],
       ['Double-click a divider', 'Fit the column to its contents'],
       ['Shift+click a header', 'Add a secondary sort'],
@@ -59,6 +62,7 @@ const GROUPS = [
   {
     title: 'App',
     items: [
+      ['Ctrl+P', 'Open a table, view, routine or saved query by name'],
       ['Ctrl+B', 'Toggle the sidebar'],
       ['Ctrl+I', 'Toggle the row panel'],
       ['Ctrl+F', 'Focus the filter box'],

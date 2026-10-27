@@ -17,6 +17,7 @@ import {
   SavedQuery,
   SchemaObject,
   SerializedError,
+  ServerActivity,
   SessionEvent,
   TableChangeSet,
   TableDataRequest,
@@ -39,7 +40,7 @@ import type { UiState, UiStatePatch } from './uiState'
  * old window — staged edits, a result set, a scroll position — travels with it.
  */
 export interface DetachedTab {
-  kind: 'query' | 'table'
+  kind: 'query' | 'table' | 'activity'
   connectionId: string
   title: string
   /** Query tabs only. */
@@ -56,10 +57,13 @@ export interface DetachedTab {
   objectType?: SchemaObjectType
   view?: 'data' | 'structure'
   /**
-   * How often the table re-reads itself, when it does: a table being watched
-   * is the one most likely to be dragged out onto a screen of its own.
+   * How often the table — or the activity monitor — re-reads itself, when it
+   * does: one being watched is the one most likely to be dragged out onto a
+   * screen of its own.
    */
   autoRefresh?: number
+  /** The activity monitor: whether it lists idle sessions too. */
+  showIdle?: boolean
   /**
    * Columns taken out of its grid, by name. A table narrowed to the few
    * columns worth watching is the same table on another screen.
@@ -172,6 +176,7 @@ export const CHANNELS = {
   windowCloseAnswer: 'window:closeAnswer',
 
   shellOpenExternal: 'shell:openExternal',
+  notifyQueryFinished: 'notify:queryFinished',
 
   dbConnect: 'db:connect',
   dbDisconnect: 'db:disconnect',
@@ -191,6 +196,8 @@ export const CHANNELS = {
   dbAutocomplete: 'db:autocomplete',
   dbSearchDefinitions: 'db:searchDefinitions',
   dbFindReferences: 'db:findReferences',
+  dbActivity: 'db:activity',
+  dbKillSession: 'db:killSession',
 
   queryRun: 'query:run',
   queryCancel: 'query:cancel',
@@ -218,6 +225,7 @@ export const CHANNELS = {
   exportToClipboard: 'export:toClipboard',
   clipboardAwsCredentials: 'clipboard:awsCredentials',
   clipboardTablePlusUrl: 'clipboard:tablePlusUrl',
+  clipboardReadText: 'clipboard:readText',
 
   dialogOpenFile: 'dialog:openFile',
   dialogSaveFile: 'dialog:saveFile',
@@ -230,7 +238,8 @@ export const CHANNELS = {
   eventAttachTab: 'event:attachTab',
   eventCloseRequested: 'event:closeRequested',
   eventUpdateState: 'event:updateState',
-  eventSessionChanged: 'event:sessionChanged'
+  eventSessionChanged: 'event:sessionChanged',
+  eventNotificationClicked: 'event:notificationClicked'
 } as const
 
 /**
@@ -251,6 +260,17 @@ export interface AppInfo {
   platform: string
   secretsAreOsBacked: boolean
   userDataPath: string
+}
+
+/** What a text file is saved as: a script, or an execution plan SSMS can open. */
+export type SaveKind = 'sql' | 'sqlplan'
+
+/** A desktop notification that a query tab's long run has ended. */
+export interface QueryNotice {
+  title: string
+  body: string
+  /** The tab that ran, brought forward when the notification is clicked. */
+  tabId: string
 }
 
 /** What an export wrote, and where. */
@@ -312,6 +332,11 @@ export interface RendererApi {
   /** Runs a menu item the renderer cannot: clipboard, zoom, dev tools, quit. */
   runMenuRole(role: MenuRole): Promise<void>
   openExternal(url: string): Promise<void>
+  /**
+   * Shows a desktop notification for a query that finished in the
+   * background. Where the desktop has no way to show one, nothing happens.
+   */
+  notifyQueryFinished(notice: QueryNotice): Promise<void>
 
   connect(connectionId: string, password?: string): Promise<ConnectionStatus>
   disconnect(connectionId: string): Promise<void>
@@ -334,6 +359,11 @@ export interface RendererApi {
   searchDefinitions(request: DefinitionSearchRequest): Promise<DefinitionSearchResult>
   /** The procedures, functions, views and triggers that use a table, view or routine. */
   findReferences(connectionId: string, schema: string, name: string): Promise<DefinitionSearchResult>
+
+  /** Every user session on the server and what it is running. */
+  readActivity(connectionId: string): Promise<ServerActivity>
+  /** Ends a session on the server. `confirmed`: the user was asked first. */
+  killSession(connectionId: string, sessionId: number, confirmed?: boolean): Promise<void>
 
   fetchTableData(request: TableDataRequest): Promise<TableDataResponse>
   applyChanges(changeSet: TableChangeSet): Promise<AppliedChanges>
@@ -403,10 +433,13 @@ export interface RendererApi {
    * database's URL and its password included, reaches the window.
    */
   readTablePlusUrlFromClipboard(): Promise<string>
+  /** The text on the clipboard, for a paste into a table's grid the user asked for. */
+  readClipboardText(): Promise<string>
 
   openFile(filters?: { name: string; extensions: string[] }[]): Promise<string | null>
   readTextFile(filePath: string): Promise<string>
-  saveTextFile(text: string, defaultPath?: string): Promise<string | null>
+  /** `kind` names the dialog and its filter: SQL unless said otherwise. */
+  saveTextFile(text: string, defaultPath?: string, kind?: SaveKind): Promise<string | null>
 
   onStatusChanged(handler: (status: ConnectionStatus) => void): () => void
   onMenuAction(handler: (action: string) => void): () => void
@@ -419,6 +452,8 @@ export interface RendererApi {
   onUpdateState(handler: (state: UpdateState) => void): () => void
   /** A query tab's session moved with the sidebar's database, or was lost. */
   onSessionChanged(handler: (event: SessionEvent) => void): () => void
+  /** A query notification was clicked: its window is in front, and this is its tab. */
+  onNotificationClicked(handler: (tabId: string) => void): () => void
 }
 
 declare global {

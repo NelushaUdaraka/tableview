@@ -35,8 +35,10 @@ import ChoiceMenu from '../components/ChoiceMenu.vue'
 import ColumnPicker from '../components/ColumnPicker.vue'
 import DataGrid, { type RowState } from '../components/DataGrid.vue'
 import FilterBuilder from '../components/FilterBuilder.vue'
+import ImportDialog from '../components/ImportDialog.vue'
 import ContextMenu, { type MenuEntry } from '../components/ContextMenu.vue'
 import RowDetailPanel, { type RowField } from '../components/RowDetailPanel.vue'
+import SelectionFigures from '../components/SelectionFigures.vue'
 import SplitPane from '../components/SplitPane.vue'
 import TableViewSwitch from '../components/TableViewSwitch.vue'
 import { exportRows } from '@shared/export'
@@ -57,6 +59,10 @@ import {
 import { sameColumns, sameRows } from '../lib/tableCache'
 import { readsFiltered } from '../lib/tableFilters'
 import { reindexStagedEdits } from '../lib/stagedRows'
+import { selectionFigures } from '../lib/selectionFigures'
+import { decodeText, parseDelimited } from '@shared/csv'
+import { normalizeName, type ImportRow } from '@shared/import'
+import { parseCellInput } from '@shared/serialize'
 import { useRowPanel } from '../lib/rowPanel'
 import { foreignKeyFilterValue, foreignKeyFilters, foreignKeyTargets } from '@shared/foreignKeys'
 import { changeSetScript, changeSetStatements } from '@shared/sql/changeScript'
@@ -192,6 +198,24 @@ const rowStates = computed<RowState[]>(() => {
     deletedRows.value.has(index) ? 'deleted' : 'normal'
   )
   return [...states, ...newRows.value.map(() => 'inserted' as RowState)]
+})
+
+/**
+ * Count, sum and the rest for the focused column over the selected rows, as
+ * the grid shows them — staged edits included. Only for two rows or more:
+ * the figures of one value are the value. They are over the page that is
+ * loaded, never the whole table, and the footer says so.
+ */
+const figures = computed(() => {
+  const focused = selection.value
+  if (!focused || selectedRows.value.length < 2) return null
+  const column = columns.value[focused.columnIndex]
+  if (!column) return null
+  const values = selectedRows.value.map((row) => {
+    const key = `${row}:${focused.columnIndex}`
+    return key in edits ? edits[key] : (allRows.value[row]?.[focused.columnIndex] ?? null)
+  })
+  return { column: column.name, figures: selectionFigures(values, column.jsKind, column.dataType) }
 })
 
 const pendingCount = computed(() => {
@@ -874,6 +898,182 @@ function addRow(): void {
   newRows.value = [...newRows.value, columns.value.map(() => null)]
 }
 
+// --- importing and pasting ----------------------------------------------------
+
+/**
+ * Stages rows as inserts, as Add row and typing into it would: each value an
+ * edit on a new row, so the change set builds the insert from them. A column
+ * a row leaves out is not edited, and takes its default.
+ */
+function stageInserts(rows: Record<string, CellValue>[]): void {
+  const indexOf = new Map(columns.value.map((column, index) => [column.name, index]))
+  const start = loadedRows.value.length + newRows.value.length
+  newRows.value = [
+    ...newRows.value,
+    ...rows.map((values) => columns.value.map((column) => values[column.name] ?? null))
+  ]
+  rows.forEach((values, offset) => {
+    for (const [name, value] of Object.entries(values)) {
+      const index = indexOf.get(name)
+      if (index !== undefined) edits[`${start + offset}:${index}`] = value
+    }
+  })
+}
+
+/** The file being imported, while its dialog is open. */
+const importing = ref<{ fileName: string; text: string } | null>(null)
+
+/** Asks for a CSV file and opens it in the import dialog. */
+async function importFile(): Promise<void> {
+  if (!editable.value) {
+    toasts.info(isView.value ? 'Views cannot be imported into' : 'This connection is read-only')
+    return
+  }
+  try {
+    const path = await api.openFile([
+      { name: 'Delimited text', extensions: ['csv', 'tsv', 'txt'] },
+      { name: 'All files', extensions: ['*'] }
+    ])
+    if (!path) return
+    const text = await api.readTextFile(path)
+    if (!structure.value) {
+      structure.value = await schemaStore.getStructure(
+        props.tab.connectionId,
+        props.tab.schema,
+        props.tab.table
+      )
+    }
+    importing.value = { fileName: path.split(/[\\/]/).pop() ?? path, text }
+  } catch (error) {
+    toasts.fromError('Could not read that file', error)
+  }
+}
+
+/** Whether a drag carries files, which a table takes as something to import. */
+function carriesFiles(event: DragEvent): boolean {
+  return Boolean(event.dataTransfer?.types.includes('Files'))
+}
+
+function onFileDragOver(event: DragEvent): void {
+  if (!carriesFiles(event) || !editable.value) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+
+/** A CSV file dropped on the rows opens in the import dialog, as Import would. */
+async function onFileDrop(event: DragEvent): Promise<void> {
+  if (!carriesFiles(event)) return
+  // Taken here either way: a file let go over a window would otherwise be
+  // opened in it, in place of the app.
+  event.preventDefault()
+  if (!editable.value) {
+    toasts.info(isView.value ? 'Views cannot be imported into' : 'This connection is read-only')
+    return
+  }
+  const file = event.dataTransfer?.files[0]
+  if (!file) return
+  try {
+    const text = decodeText(new Uint8Array(await file.arrayBuffer()))
+    if (!structure.value) {
+      structure.value = await schemaStore.getStructure(
+        props.tab.connectionId,
+        props.tab.schema,
+        props.tab.table
+      )
+    }
+    importing.value = { fileName: file.name, text }
+  } catch (error) {
+    toasts.fromError('Could not read that file', error)
+  }
+}
+
+function stageImported(rows: ImportRow[]): void {
+  importing.value = null
+  stageInserts(rows.map((row) => row.values))
+  toasts.success(
+    `Staged ${rows.length.toLocaleString()} ${rows.length === 1 ? 'row' : 'rows'} from the file`,
+    'Look them over in the grid, then Apply — or Discard'
+  )
+  // The browser clamps it: this is the last row, where the staged ones are.
+  void nextTick(() => grid.value?.scrollTo(Number.MAX_SAFE_INTEGER))
+}
+
+/**
+ * A block pasted onto the grid — a range copied from Excel or Google Sheets
+ * arrives tab-separated — laid out from the focused cell across the drawn
+ * columns and down the rows. Over rows that are there it stages updates; past
+ * the last row it stages new ones. With nothing focused, every line is a new
+ * row from the first column on. One value pasted over several selected rows
+ * goes into each of them.
+ */
+function onPaste(payload: {
+  rowIndex: number | null
+  columnIndex: number | null
+  columns: number[]
+  text: string
+}): void {
+  if (!editable.value) return
+  let block = parseDelimited(payload.text, '\t').rows
+  if (block.length === 0) return
+
+  const startCol = payload.columnIndex ?? payload.columns[0]
+  const targets = payload.columns.slice(Math.max(0, payload.columns.indexOf(startCol)))
+  // A range copied with its header row names the columns it lands in.
+  const isHeader = (row: string[]): boolean =>
+    row.every((cell, at) => {
+      const column = columns.value[targets[at]]
+      return column !== undefined && normalizeName(cell) === normalizeName(column.name)
+    })
+  if (block.length > 1 && isHeader(block[0])) block = block.slice(1)
+
+  const single = block.length === 1 && block[0].length === 1
+  const startRow = payload.rowIndex ?? allRows.value.length
+  const rowsFor: number[] =
+    single && selectedRows.value.length > 1 && payload.rowIndex !== null
+      ? [...selectedRows.value]
+      : block.map((_, offset) => startRow + offset)
+
+  const adding = rowsFor.filter((row) => row >= allRows.value.length).length
+  if (adding > 0) {
+    newRows.value = [...newRows.value, ...Array.from({ length: adding }, () => columns.value.map(() => null))]
+  }
+
+  let changed = 0
+  let skippedColumns = 0
+  rowsFor.forEach((rowIndex, offset) => {
+    if (deletedRows.value.has(rowIndex)) return
+    const cells = single ? block[0] : block[offset]
+    cells.forEach((text, at) => {
+      const columnIndex = targets[at]
+      const column = columns.value[columnIndex]
+      if (!column) return
+      if (column.isReadOnly || isServerGenerated(column.name)) {
+        if (offset === 0) skippedColumns += 1
+        return
+      }
+      const value = parseCellInput(text, column.jsKind)
+      const original = rowIndex < loadedRows.value.length ? (loadedRows.value[rowIndex]?.[columnIndex] ?? null) : null
+      const key = `${rowIndex}:${columnIndex}`
+      if (rowIndex < loadedRows.value.length && JSON.stringify(value) === JSON.stringify(original)) {
+        delete edits[key]
+        return
+      }
+      edits[key] = value
+      changed += 1
+    })
+  })
+
+  const updated = rowsFor.length - adding
+  const parts = [
+    updated > 0 && changed > 0 ? `${updated} ${updated === 1 ? 'row' : 'rows'} changed` : '',
+    adding > 0 ? `${adding} ${adding === 1 ? 'row' : 'rows'} added` : ''
+  ].filter(Boolean)
+  toasts.info(
+    parts.length ? `Pasted: ${parts.join(', ')}` : 'Nothing to paste — the values are already there',
+    skippedColumns > 0 ? 'Identity, computed and read-only columns were left as they are' : undefined
+  )
+}
+
 /** Whether the server fills this column in, so a copy must leave it alone. */
 function isServerGenerated(columnName: string): boolean {
   const column = structure.value?.columns.find((entry) => entry.name === columnName)
@@ -1449,6 +1649,7 @@ async function copyAs(format: ExportFormat, rowIndexes: number[] | null): Promis
 }
 
 defineExpose({
+  importFile,
   refresh: () => withPendingEdits(() => load()),
   toggleRowPanel,
   focusFilter: () => {
@@ -1581,6 +1782,15 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
           <AppIcon name="plus" :size="14" />
           <span class="data__label">Add row</span>
         </button>
+        <button
+          class="btn data__tool data__import"
+          title="Import rows from a CSV file — they are staged, not sent"
+          aria-label="Import"
+          @click="importFile"
+        >
+          <AppIcon name="upload" :size="14" />
+          <span class="data__label">Import</span>
+        </button>
         <button v-if="pendingCount > 0" class="btn btn--muted" :disabled="applying" @click="discard">
           Discard
         </button>
@@ -1640,7 +1850,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       changed more than once.
     </div>
 
-    <div class="data__grid">
+    <div class="data__grid" @dragover="onFileDragOver" @drop="onFileDrop">
       <SplitPane
         v-model="rowPanelWidth"
         direction="horizontal"
@@ -1670,6 +1880,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
             @selection="selection = $event"
             @rows-selected="selectedRows = $event"
             @delete-rows="deleteRows"
+            @paste="onPaste"
             @follow-key="followKey($event.rowIndex, $event.columnIndex)"
             @row-context="
               menu = {
@@ -1751,12 +1962,32 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
       </select>
 
       <div class="data__spacer"></div>
-      <span class="data__ms">{{ durationMs }} ms</span>
-      <div class="divider-v data__foot-rule"></div>
-      <span class="mono truncate data__sql" :title="lastSql">
-        {{ lastSql.replace(/\s+/g, ' ') }}
-      </span>
+      <!-- A selection of rows says what is in them, in the statement's
+           place; the statement comes back once one row is selected again. -->
+      <SelectionFigures
+        v-if="figures"
+        class="data__figures"
+        :figures="figures.figures"
+        :column="figures.column"
+        scope="this page"
+      />
+      <template v-else>
+        <span class="data__ms">{{ durationMs }} ms</span>
+        <div class="divider-v data__foot-rule"></div>
+        <span class="mono truncate data__sql" :title="lastSql">
+          {{ lastSql.replace(/\s+/g, ' ') }}
+        </span>
+      </template>
     </div>
+
+    <ImportDialog
+      v-if="importing && structure"
+      :structure="structure"
+      :file-name="importing.fileName"
+      :text="importing.text"
+      @stage="stageImported"
+      @close="importing = null"
+    />
 
     <ContextMenu
       v-if="menu"
@@ -1867,7 +2098,7 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
 /* A narrow pane — a split, a small window — keeps every control on the bar by
    taking the words off the secondary buttons; their icons, tooltips and names
    stay. */
-@container data (max-width: 960px) {
+@container data (max-width: 1050px) {
   .data__label {
     display: none;
   }
@@ -1882,12 +2113,28 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
     display: none;
   }
 }
+/* Import is the newest of them, and the first to give its word up. */
+@container data (max-width: 1260px) {
+  .data--staged .data__import .data__label {
+    display: none;
+  }
+  .data--staged .data__import {
+    padding: 0 7px;
+  }
+}
 @container data (max-width: 1110px) {
   .data--staged .data__label {
     display: none;
   }
   .data--staged .data__tool {
     padding: 0 7px;
+  }
+}
+/* Narrower still, with Discard and Apply on the bar, Import gives way
+   altogether: the tree's menu and a file dropped on the rows still import. */
+@container data (max-width: 740px) {
+  .data--staged .data__import {
+    display: none;
   }
 }
 .data__auto {
@@ -2005,6 +2252,9 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
 }
 .data__foot-rule {
   height: 14px;
+}
+.data__figures {
+  flex: 0 1 auto;
 }
 .data__sql {
   max-width: 44%;

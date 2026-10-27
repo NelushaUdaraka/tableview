@@ -6,6 +6,37 @@ not there yet is the next release, still being prepared.
 
 ## 0.4.0
 
+- Execution plans: *Plan* in the query toolbar (or `Ctrl+L` / `Ctrl+M`) shows how SQL Server runs a
+  query — the estimated plan without running it, or the actual plan after running it — as a tree of
+  operators with each one's share of the cost, estimated against actual rows (big gaps marked),
+  warnings such as implicit conversions and spills, and missing-index hints as a `CREATE INDEX`
+  statement to copy. Save a plan as `.sqlplan` to open it in SSMS too. An estimated plan runs
+  nothing, so it works on read-only connections as well.
+- Import a CSV file into a table — *Import* in the table's toolbar, *Import CSV…* on its menu in
+  the tree, or drop the file on the rows. A preview matches the file's columns to the table's by
+  name, lets you choose whether empty cells are NULL or empty text, and lists every row with a
+  problem before anything is sent. The rows arrive staged, to look over and Apply in one
+  transaction; thousands of them go up in a few statements.
+- Paste a range copied from Excel or Google Sheets into a table's grid with `Ctrl+V`: over existing
+  rows it stages changes, and past the last row it adds new ones.
+- An activity monitor (View → Activity Monitor): every session on the server, what it is running,
+  what it is waiting on and for how long, and who is blocking whom — shown as chains with the head
+  blocker first. Kill ends a session once you say so, and is refused on a read-only connection.
+  TableView's own sessions are marked, so you don't kill the one you are using. It refreshes on the
+  same intervals as a table, and says which permission is missing when the login cannot see the
+  other sessions.
+- Quick open: press `Ctrl+P` from anywhere, type part of a name, and press Enter to open that
+  table, view, procedure, function or saved query. Pinned tables and what you had open lately come
+  first; `Shift+Enter` opens a table's structure instead. It works in a window holding a single
+  dragged-out tab too, which has no schema tree.
+- A query that runs longer than ten seconds and finishes while TableView is in the background now
+  says so with a desktop notification: which tab, how long it took, and how many rows came back or
+  what the error was. Clicking it brings that window and tab forward. Turn it off, or change the ten
+  seconds, in Settings.
+- Select two rows or more in a table or in query results and the footer adds up the focused
+  column for you, as a spreadsheet does: count, sum, average, minimum and maximum for a number
+  column, the count and how many distinct values for anything else, with NULLs counted apart. It
+  covers the rows that are loaded — a table's current page — and says so.
 - Search inside stored procedures: the sidebar's new *Search* panel finds text across every
   procedure, function, view and trigger in the database and shows the lines it is on, with options
   to match case, match whole words and pick which kinds of object to search. Clicking a line opens
@@ -13,7 +44,7 @@ not there yet is the next release, still being prepared.
 - *Find references* on a table, view or routine in the schema tree lists the procedures,
   functions, views and triggers that use it, in the same list.
 - *Apply* in a table now shows the statements it is about to run, in the order it runs them,
-  values written in, instead of only counting them. *Copy as script* puts the same statements on
+  values written in and highlighted as in the editor, instead of only counting them. *Copy as script* puts the same statements on
   the clipboard wrapped in one transaction, to keep for a change ticket or to run on another
   server. Turn the review off with *Confirm before applying a change set* in Settings.
 - Truncate, Drop and deleting a connection now ask in the app's own dialog rather than the

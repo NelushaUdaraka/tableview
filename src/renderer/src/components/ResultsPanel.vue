@@ -19,10 +19,13 @@ import DataGrid from './DataGrid.vue'
 import AppIcon from './AppIcon.vue'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
 import RowDetailPanel, { type RowField } from './RowDetailPanel.vue'
+import SelectionFigures from './SelectionFigures.vue'
+import PlanView from './PlanView.vue'
 import SplitPane from './SplitPane.vue'
 import { exportRows } from '@shared/export'
 import { columnMenuItems } from '../lib/columnMenu'
 import { sortRows, type SortDirection } from '../lib/sortRows'
+import { selectionFigures } from '../lib/selectionFigures'
 import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toasts'
 import { api } from '../lib/api'
@@ -43,11 +46,16 @@ const settings = useSettingsStore()
 const toasts = useToastStore()
 const activeIndex = ref(0)
 const showMessages = ref(false)
+/** The Plan tab is showing, rather than a result set or the messages. */
+const showPlan = ref(false)
+const plans = computed(() => props.result?.plans ?? [])
 const menu = ref<{ kind: 'row' | 'header'; x: number; y: number; row: number; col: number } | null>(
   null
 )
 const grid = ref<InstanceType<typeof DataGrid> | null>(null)
 const selection = ref<{ rowIndex: number; columnIndex: number } | null>(null)
+/** Rows the grid has picked out, as indexes into the rows in the order shown. */
+const selectedRows = ref<number[]>([])
 
 /** Flattens every batch's result sets into one tab strip. */
 interface Panel {
@@ -112,6 +120,20 @@ const rows = computed<CellValue[][]>(() => {
   return index < 0 ? panel.rows : sortRows(panel.rows, index, current.direction)
 })
 
+/**
+ * Count, sum and the rest for the focused column over the selected rows —
+ * the rows that came back, which a capped result says is not all of them.
+ */
+const figures = computed(() => {
+  const focused = selection.value
+  const panel = active.value
+  if (!focused || !panel || selectedRows.value.length < 2) return null
+  const column = panel.columns[focused.columnIndex]
+  if (!column) return null
+  const values = selectedRows.value.map((row) => rows.value[row]?.[focused.columnIndex] ?? null)
+  return { column: column.name, figures: selectionFigures(values, column.jsKind, column.dataType) }
+})
+
 /** What the grid's header draws its arrow from. */
 const gridSorts = computed(() => (sort.value ? [sort.value] : []))
 
@@ -135,6 +157,15 @@ watch(panels, () => {
   // Surface messages automatically when there is nothing else to show.
   showMessages.value = panels.value.length === 0 && (messages.value.length > 0 || errors.value.length > 0)
 })
+
+// A run that asked for a plan opens on it, unless it failed before there was one.
+watch(
+  () => props.result,
+  (result) => {
+    showPlan.value = Boolean(result?.plan && result.plans?.length)
+    if (showPlan.value) showMessages.value = false
+  }
+)
 
 // A different result set has different columns, so an order named on the last
 // one means nothing here.
@@ -293,8 +324,8 @@ function durationLabel(ms: number): string {
           v-for="(panel, index) in panels"
           :key="panel.key"
           class="results__tab"
-          :class="{ 'results__tab--active': !showMessages && activeIndex === index }"
-          @click="((activeIndex = index), (showMessages = false))"
+          :class="{ 'results__tab--active': !showMessages && !showPlan && activeIndex === index }"
+          @click="((activeIndex = index), (showMessages = false), (showPlan = false))"
         >
           {{ panel.label }}
           <span class="results__tab-count">{{ panel.rowCount }}</span>
@@ -303,13 +334,22 @@ function durationLabel(ms: number): string {
           v-if="messages.length || errors.length"
           class="results__tab"
           :class="{
-            'results__tab--active': showMessages,
+            'results__tab--active': showMessages && !showPlan,
             'results__tab--error': errors.length > 0
           }"
-          @click="showMessages = true"
+          @click="((showMessages = true), (showPlan = false))"
         >
           Messages
           <span class="results__tab-count">{{ messages.length }}</span>
+        </button>
+        <button
+          v-if="plans.length"
+          class="results__tab"
+          :class="{ 'results__tab--active': showPlan }"
+          @click="showPlan = true"
+        >
+          <AppIcon name="plan" :size="13" />
+          Plan
         </button>
       </div>
 
@@ -318,6 +358,13 @@ function durationLabel(ms: number): string {
           <span class="spinner"></span> Running…
         </span>
         <template v-else-if="result">
+          <SelectionFigures
+            v-if="figures && !showMessages && !showPlan"
+            class="results__cell results__figures"
+            :figures="figures.figures"
+            :column="figures.column"
+            :scope="active?.truncated ? 'the rows kept' : undefined"
+          />
           <span
             v-if="active?.truncated"
             class="results__cell results__warn"
@@ -344,7 +391,8 @@ function durationLabel(ms: number): string {
     </div>
 
     <div class="results__body">
-      <div v-if="showMessages" class="messages">
+      <PlanView v-if="showPlan && plans.length" :plans="plans" />
+      <div v-else-if="showMessages" class="messages">
         <div v-for="(error, index) in errors" :key="`e-${index}`" class="message message--error">
           <!-- A script a read-only connection turned down has no server
                message number: nothing of it reached the server. -->
@@ -393,6 +441,7 @@ function durationLabel(ms: number): string {
             empty-message="The statement returned no rows"
             @sort="toggleSort"
             @selection="selection = $event"
+            @rows-selected="selectedRows = $event"
             @row-context="
               menu = {
                 kind: 'row',
@@ -541,7 +590,12 @@ function durationLabel(ms: number): string {
   display: flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
   white-space: nowrap;
+}
+.results__figures {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .results__cell {
   display: flex;

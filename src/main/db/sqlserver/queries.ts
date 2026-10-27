@@ -372,3 +372,73 @@ export function isSystemDatabase(name: string, databaseId?: number): boolean {
   if (typeof databaseId === 'number' && databaseId <= 4) return true
   return ['master', 'tempdb', 'model', 'msdb'].includes(name.toLowerCase())
 }
+
+/**
+ * What the activity monitor shows: every user session, the request it is
+ * running and the statement in it — or, for an idle session, the last thing
+ * it sent, which is what a sleeping head blocker holding a transaction open
+ * is known by. A session with several requests (MARS) shows its first.
+ *
+ * Preceded by what the login may see: without VIEW SERVER STATE (VIEW
+ * DATABASE STATE on Azure SQL Database) the DMVs answer with its own session
+ * alone, and an empty-looking list would say nothing about why.
+ */
+export const SERVER_ACTIVITY = `
+SELECT
+  @@SPID                                                       AS [monitorSessionId],
+  CAST(SERVERPROPERTY('EngineEdition') AS int)                 AS [engineEdition],
+  HAS_PERMS_BY_NAME(NULL, NULL, 'VIEW SERVER STATE')           AS [serverState],
+  HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'VIEW DATABASE STATE') AS [databaseState];
+
+SELECT
+  s.session_id                                   AS [sessionId],
+  s.login_name                                   AS [login],
+  s.host_name                                    AS [host],
+  s.program_name                                 AS [program],
+  s.host_process_id                              AS [hostProcessId],
+  DB_NAME(COALESCE(r.database_id, s.database_id)) AS [database],
+  COALESCE(r.status, s.status)                   AS [status],
+  r.command                                      AS [command],
+  NULLIF(r.blocking_session_id, 0)               AS [blockedBy],
+  r.wait_type                                    AS [waitType],
+  COALESCE(r.wait_time, 0)                       AS [waitTimeMs],
+  r.wait_resource                                AS [waitResource],
+  COALESCE(r.cpu_time, s.cpu_time)               AS [cpuMs],
+  COALESCE(r.logical_reads, s.logical_reads)     AS [logicalReads],
+  r.total_elapsed_time                           AS [elapsedMs],
+  s.open_transaction_count                       AS [openTransactions],
+  CASE
+    WHEN r.sql_handle IS NOT NULL AND r.statement_start_offset IS NOT NULL THEN
+      SUBSTRING(t.text, r.statement_start_offset / 2 + 1,
+        (CASE r.statement_end_offset WHEN -1 THEN DATALENGTH(t.text) ELSE r.statement_end_offset END
+          - r.statement_start_offset) / 2 + 1)
+    ELSE t.text
+  END                                            AS [sql],
+  CAST(CASE WHEN r.session_id IS NULL THEN 0 ELSE 1 END AS bit) AS [sqlIsCurrent],
+  s.login_time                                   AS [loginTime],
+  s.last_request_end_time                        AS [lastRequestEnd]
+FROM sys.dm_exec_sessions s
+OUTER APPLY (
+  SELECT TOP (1) *
+  FROM sys.dm_exec_requests er
+  WHERE er.session_id = s.session_id
+  ORDER BY er.request_id
+) r
+OUTER APPLY (
+  SELECT TOP (1) conn.most_recent_sql_handle
+  FROM sys.dm_exec_connections conn
+  WHERE conn.session_id = s.session_id
+) c
+OUTER APPLY sys.dm_exec_sql_text(COALESCE(r.sql_handle, c.most_recent_sql_handle)) t
+WHERE s.is_user_process = 1
+ORDER BY s.session_id;
+`
+
+/**
+ * Ends a session. `KILL` takes no variable, so the number — bound like any
+ * value — is put into the statement on the server, as an int, and nowhere else.
+ */
+export const KILL_SESSION = `
+DECLARE @statement nvarchar(32) = N'KILL ' + CAST(CAST(@sessionId AS int) AS nvarchar(11));
+EXEC (@statement);
+`

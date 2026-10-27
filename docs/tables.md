@@ -115,6 +115,24 @@ rather than folding it away.
   nothing the field did not
 - **Follow a foreign key**: a `›` at the end of a referencing cell opens the referenced table in its
   own tab, filtered to the row it points at — composite keys included
+- **Figures for the selected rows** — select two rows or more (Shift, Ctrl, or a drag) and the
+  footer says what the focused column holds over them, the way a spreadsheet's status bar does:
+  `amount · 12 rows on this page · Count 12 · Sum 4,310.50 · Avg 359.21 · Min 9.99 · Max 1,200.00`.
+  A column that is not numeric gets its count and how many distinct values it has. NULLs are left
+  out of the figures and counted on their own. They are over the rows that are loaded — a table's
+  current page, staged edits included — and say so; query results show the same figures in their
+  bar, over the rows that came back. See below
+
+### Figures for the selected rows
+
+They are worked out in the window from the rows it already has (`lib/selectionFigures.ts`), so
+selecting costs nothing and the figures are only ever as wide as the page. The sums are done on
+decimal digits, not floats: a `bigint` crosses from the main process as text so it keeps every digit,
+and a `decimal` or `money` arrives as a number whose shortest text is the value the server holds, so
+adding those as floats would turn `0.1 + 0.2` into `0.30000000000000004`. The sum, minimum and
+maximum keep the column's places; the average has two at least. A `float` too fine to spell out
+in digits is added as a float. A cell typed into but not applied is counted as what it now says,
+and a numeric column with text typed into it is counted as text rather than added up wrongly.
 
 ### Following a foreign key
 
@@ -148,7 +166,9 @@ rather than opening a query that would match nothing.
 - **Apply shows the statements first** — every one it will send, in the order it sends them:
   deletes, then updates, then inserts. They are built from the same change set by the same builders
   the main process uses, so what is shown is what is sent; values are written in as literals to be
-  read, while Apply still binds them as parameters. *Copy as script* puts the same statements on the
+  read, while Apply still binds them as parameters. They are highlighted as the editor would
+  highlight them — the same T-SQL grammar and the same colours (`lib/sqlHighlight.ts`), which the
+  confirm-writes question uses for its statements too. *Copy as script* puts the same statements on the
   clipboard as a script that runs on its own — `SET XACT_ABORT ON`, `BEGIN TRANSACTION` …
   `COMMIT TRANSACTION`, all or nothing like Apply — for a change ticket, or to repeat on another
   server. The focus starts on *Apply*, so Enter goes ahead and Escape doesn't. *Confirm before
@@ -157,6 +177,53 @@ rather than opening a query that would match nothing.
 - Rows are addressed by primary key; a keyless table falls back to matching every column and the UI
   says so — the review before Apply warns that such a statement may touch more than one row
 - Identity and computed columns are excluded from inserts; `rowversion` is read-only
+- **Import a CSV file, or paste a range from a spreadsheet** — rows arrive staged, like rows added
+  by hand, and go up with Apply; see below
+
+### Importing a CSV file
+
+*Import* in the table's toolbar, *Import CSV…* on a table's menu in the tree, or a file dropped on
+the rows opens the file in a dialog before anything happens to it:
+
+- **Separated by** comma, semicolon, tab or pipe — worked out from the first lines, and changeable.
+  Quoted fields may hold the separator, line breaks and doubled quotes. The file may be UTF-8 (with
+  or without a byte-order mark), UTF-16 with one — Excel's *Unicode text* — or, failing UTF-8,
+  Windows-1252, which is what Excel's plain CSV is on most Western machines.
+- **The first row names the columns** — ticked when it names any of the table's, and then file
+  columns are matched to table columns by name, ignoring case, spaces and underscores; without a
+  header they are taken in order. Each table column picks its file column, or is left out and takes
+  its default. Identity, computed and `rowversion` columns are not offered: the server fills them.
+- **An empty cell is** NULL, or an empty string in a text column. An empty cell in a `NOT NULL`
+  column with a default leaves the column out of that row, so it takes the default — an explicit
+  NULL would not.
+- **Every problem before anything is sent**, by line and column: a number that is not one, an
+  integer out of its type's range, a decimal too large for its precision, a date that is not one,
+  text longer than its column, a `NOT NULL` column left empty — and, once for the whole file, a
+  required column nothing fills. The preview marks the cells.
+
+*Stage* puts the rows that passed into the grid as staged inserts — the dialog says how many it
+leaves out — to be looked over, edited and applied in one transaction like any other edit, or
+discarded. Values are converted in the window (`shared/import.ts`) the way the server would
+read them, and the ones that would lose digits as JS numbers — decimals, money, integers past
+2^53 — and dates, which a time zone could move, go up as their text for SQL Server to convert.
+
+**Thousands of rows** go up as multi-row `INSERT … VALUES (…), (…)` statements: consecutive inserts
+into the same columns are gathered, as many to a statement as SQL Server takes (1000 rows, and
+under its 2100 parameters), with every value still bound. A file of a few thousand rows is a few
+statements, not one round trip a row, inside the same transaction — one bad row and none of them
+land. The review before Apply shows the same statements, and *Copy as script* writes them out.
+
+### Pasting from a spreadsheet
+
+`Ctrl+V` with the grid focused pastes what is on the clipboard — a range copied from Excel or
+Google Sheets arrives tab-separated, and a single value is a range of one — from the focused cell
+across the columns on show and down the rows. Over rows that are there it stages updates; past the
+last row it stages new rows; with nothing focused every line is a new row. A header row copied
+with the range is recognised by its names and skipped, one value pasted over several selected rows
+goes into each of them, and identity, computed and read-only columns are left as they are. Each
+value is read as if it had been typed into its cell. A toast says how many rows changed and how
+many were added; all of it is staged, so *Discard* takes it back. Neither works on a read-only
+connection, any more than any other edit does.
 
 ## Structure and export
 

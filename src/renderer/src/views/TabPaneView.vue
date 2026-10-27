@@ -13,8 +13,9 @@ import AppIcon from '../components/AppIcon.vue'
 import TabBar from '../components/TabBar.vue'
 import QueryView from './QueryView.vue'
 import TableView from './TableView.vue'
+import ActivityView from './ActivityView.vue'
 import { useTabStore } from '../stores/tabs'
-import type { QueryTab, TableTab, TabPane } from '../stores/tabs'
+import type { ActivityTab, QueryTab, TableTab, TabPane } from '../stores/tabs'
 
 const props = withDefaults(
   defineProps<{
@@ -36,6 +37,7 @@ const emit = defineEmits<{
 const tabs = useTabStore()
 const queryView = ref<InstanceType<typeof QueryView> | null>(null)
 const tableView = ref<InstanceType<typeof TableView> | null>(null)
+const activityView = ref<InstanceType<typeof ActivityView> | null>(null)
 
 const tab = computed(
   () => tabs.tabs.find((entry) => entry.id === props.pane.activeTabId) ?? null
@@ -46,14 +48,19 @@ defineExpose({
   run: () => queryView.value?.run(),
   runSelection: () => queryView.value?.runSelection(),
   runCurrent: () => queryView.value?.runCurrent(),
+  plan: (kind: 'estimated' | 'actual') => queryView.value?.plan(kind),
   cancel: () => void queryView.value?.cancel(),
   format: () => queryView.value?.format(),
   save: () => void queryView.value?.save(),
   saveAs: () => void queryView.value?.saveAs(),
   openFile: () => void queryView.value?.openFile(),
-  refresh: () => tableView.value?.refresh(),
+  refresh: () => {
+    tableView.value?.refresh()
+    activityView.value?.refresh()
+  },
   focusFilter: () => tableView.value?.focusFilter(),
   exportRows: () => tableView.value?.exportRows(),
+  importFile: () => tableView.value?.importFile(),
   // Both kinds of tab have one, so whichever is mounted takes it.
   toggleRowPanel: () => {
     queryView.value?.toggleRowPanel()
@@ -88,6 +95,13 @@ defineExpose({
         @export="(columns, rows, name) => emit('export', columns, rows, name)"
         @open-sql="(sql, title) => emit('open-sql', sql, title)"
         @open-related="(schema, table, filters) => emit('open-related', schema, table, filters)"
+      />
+      <ActivityView
+        v-else-if="tab?.kind === 'activity'"
+        ref="activityView"
+        :key="tab.id"
+        :tab="tab as ActivityTab"
+        @open-sql="(sql, title) => emit('open-sql', sql, title)"
       />
       <div v-else class="empty-state">
         <div class="empty-state__icon"><AppIcon name="terminal" :size="20" /></div>

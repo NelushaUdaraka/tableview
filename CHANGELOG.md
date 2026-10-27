@@ -6,6 +6,10 @@ not there yet is the next release, still being prepared.
 
 ## 0.4.0
 
+- The query editor completes column names, not just keywords and tables: a bare word in the
+  `SELECT` list, `WHERE`, `ON` or `ORDER BY` is offered the columns of the tables the statement
+  reads (ranked first, with the table beside each), and `c.`, `Customers.` or `dbo.Customers.`
+  offer that table's columns — aliases, any case and `[bracketed names]` included.
 - Execution plans: *Plan* in the query toolbar (or `Ctrl+L` / `Ctrl+M`) shows how SQL Server runs a
   query — the estimated plan without running it, or the actual plan after running it — as a tree of
   operators with each one's share of the cost, estimated against actual rows (big gaps marked),

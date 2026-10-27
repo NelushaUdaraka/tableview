@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   asCreateOrAlter,
+  isCodeAt,
   maskNonCode,
   returnsRows,
   splitBatches,
@@ -272,5 +273,28 @@ describe('asCreateOrAlter', () => {
     expect(asCreateOrAlter('CREATE \r\n  PROCEDURE p AS SELECT 1')).toBe(
       'CREATE OR ALTER \r\n  PROCEDURE p AS SELECT 1'
     )
+  })
+})
+
+describe('isCodeAt', () => {
+  it('is true in code and after a closed literal or comment', () => {
+    expect(isCodeAt('SELECT a', 8)).toBe(true)
+    expect(isCodeAt("SELECT 'x'", 10)).toBe(true)
+    expect(isCodeAt("SELECT 'it''s'", 14)).toBe(true)
+    expect(isCodeAt('SELECT [a]]b]', 13)).toBe(true)
+    expect(isCodeAt('SELECT /* x */', 14)).toBe(true)
+    expect(isCodeAt('-- x\nSELECT', 5)).toBe(true)
+  })
+
+  it('is false inside a comment, a literal or a quoted name, closed or not', () => {
+    expect(isCodeAt("SELECT 'x", 9)).toBe(false)
+    expect(isCodeAt("SELECT 'it''", 12)).toBe(false)
+    expect(isCodeAt("SELECT 'x' + 'y'", 14)).toBe(false)
+    expect(isCodeAt('SELECT [a', 9)).toBe(false)
+    expect(isCodeAt('SELECT [a]]', 11)).toBe(false)
+    expect(isCodeAt('SELECT "a', 9)).toBe(false)
+    expect(isCodeAt('SELECT 1 -- x', 13)).toBe(false)
+    expect(isCodeAt('SELECT 1 -- x\nFROM', 13)).toBe(false)
+    expect(isCodeAt('SELECT /* x', 11)).toBe(false)
   })
 })

@@ -2,7 +2,9 @@
 /**
  * CodeMirror 6 SQL editor.
  *
- * Schema-aware completion is fed from the connected database, and the theme
+ * Schema-aware completion is fed from the connected database — table names
+ * through lang-sql, columns through a source of our own that knows which
+ * tables the statement reads (lib/columnCompletion.ts) — and the theme
  * lives in a compartment so switching light/dark does not rebuild the state
  * (which would lose undo history and the cursor).
  */
@@ -11,7 +13,13 @@ import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap, placeholder as placeholderExt } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { MSSQL, sql } from '@codemirror/lang-sql'
-import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete'
+import {
+  autocompletion,
+  closeBrackets,
+  closeBracketsKeymap,
+  completionKeymap,
+  type CompletionSource
+} from '@codemirror/autocomplete'
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search'
 import {
   HighlightStyle,
@@ -32,10 +40,12 @@ import {
   trackedChanges
 } from '../lib/changeTracking'
 import { matcherFor, type LineMatchOptions } from '@shared/sql/definitionSearch'
+import { columnIndex, completeColumns } from '../lib/columnCompletion'
 
 const props = withDefaults(
   defineProps<{
     modelValue: string
+    /** `schema.table` → its columns, from the connected database. */
     schema?: Record<string, string[]>
     theme?: 'dark' | 'light'
     fontFamily?: string
@@ -263,12 +273,39 @@ function baseTheme(): ReturnType<typeof EditorView.theme> {
   )
 }
 
-function sqlExtension(): ReturnType<typeof sql> {
-  return sql({
-    dialect: MSSQL,
-    schema: props.schema,
-    upperCaseKeywords: true
-  })
+/**
+ * lang-sql completes keywords and table names — bare and schema-qualified —
+ * but is given no columns: it would offer them only after an exact-case
+ * `table.`, and twice over beside ours.
+ */
+function sqlExtension(): Extension {
+  const tables: Record<string, string[]> = {}
+  for (const qualified of Object.keys(props.schema)) {
+    tables[qualified] = []
+    const bare = qualified.split('.').slice(-1)[0]
+    if (bare && !(bare in tables)) tables[bare] = []
+  }
+  return [
+    sql({ dialect: MSSQL, schema: tables, upperCaseKeywords: true }),
+    MSSQL.language.data.of({ autocomplete: columnSource(columnIndex(props.schema)) })
+  ]
+}
+
+/** Columns rank above keywords and tables in a bare position (lang-sql's keywords are -1). */
+function columnSource(index: ReturnType<typeof columnIndex>): CompletionSource {
+  return (context) => {
+    const found = completeColumns(context.state.doc.toString(), context.pos, index, context.explicit)
+    if (!found) return null
+    return {
+      from: found.from,
+      options: found.options.map((option) => ({
+        ...option,
+        type: 'property',
+        boost: found.qualified ? 0 : 1
+      })),
+      validFor: /^[\p{L}\p{N}_@#$]*$/u
+    }
+  }
 }
 
 /**

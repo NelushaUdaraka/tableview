@@ -1,6 +1,7 @@
 # Query editor
 
-- CodeMirror 6 with T-SQL highlighting and schema-aware completion pulled from the live database
+- CodeMirror 6 with T-SQL highlighting and **completion of keywords, tables and the columns of
+  the tables the statement reads**, pulled from the live database — see below
 - Run all / run selection / run the statement under the cursor; cancel a running query
 - Scripts split on `GO` (like SSMS), so `BEGIN … END` bodies and `CREATE PROCEDURE` work; `GO 5` repeats
 - Multiple result sets per batch, rows-affected, `PRINT` output, and errors with their
@@ -16,6 +17,30 @@
 - **A long query says when it is done** — see below
 - **Execution plans**, estimated (`Ctrl+L`) or actual (`Ctrl+M`), drawn as a tree of operators with
   their costs, row counts, warnings and missing-index hints — see below
+
+## Completion
+
+Completion pops up as you type (`Ctrl+Space` asks for it anywhere). Keywords and table names come
+from lang-sql, bare (`Customers`) or schema-qualified (`dbo.` lists the schema's tables). Columns
+come from a source of the app's own (`lib/columnCompletion.ts`), because lang-sql offers them only
+after an exact-case `table.` and cannot see which tables a statement reads:
+
+- **A bare word** — in the `SELECT` list, `WHERE`, `ON`, `GROUP BY`, `ORDER BY`, `SET` — is offered
+  the columns of every table the statement under the cursor names after `FROM`, `JOIN`, `UPDATE`,
+  `INTO`, `DELETE`, `INSERT`, `MERGE` or `USING`, each with its table beside it and ranked above
+  the keywords. The `FROM` can come after the cursor: `SELECT Na| FROM Customers` works.
+- **After `name.`**, only that table's columns: `c.` resolves the alias in `FROM Customers c` or
+  `FROM Customers AS c`, `Customers.` and `dbo.Customers.` name the table outright (in the
+  statement or not), and bracketed names (`[Order Details].`) work the same. Names are matched
+  without regard to case, as SQL Server matches them.
+- **Nothing** where a column cannot go: right after `FROM` and the other table keywords, after
+  `AS`, in comments and strings, and for `@variables` and `#temp` tables.
+
+A column whose name needs brackets (`Unit Price`, `Key`) is inserted with them. The statement is
+the one under the cursor as run-statement finds it (`;` and `GO` end it), read by a lexer rather
+than a parser, so a half-typed query works as well as a finished one. Columns come from the same
+list the schema store loads for the connection, tables and views alike; a derived table or a CTE
+offers none of its own.
 
 ## Execution plans
 

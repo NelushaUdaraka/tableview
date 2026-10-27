@@ -44,7 +44,7 @@ not there yet is the next release, still being prepared.
 - *Find references* on a table, view or routine in the schema tree lists the procedures,
   functions, views and triggers that use it, in the same list.
 - *Apply* in a table now shows the statements it is about to run, in the order it runs them,
-  values written in, instead of only counting them. *Copy as script* puts the same statements on
+  values written in and highlighted as in the editor, instead of only counting them. *Copy as script* puts the same statements on
   the clipboard wrapped in one transaction, to keep for a change ticket or to run on another
   server. Turn the review off with *Confirm before applying a change set* in Settings.
 - Truncate, Drop and deleting a connection now ask in the app's own dialog rather than the

@@ -166,7 +166,9 @@ rather than opening a query that would match nothing.
 - **Apply shows the statements first** — every one it will send, in the order it sends them:
   deletes, then updates, then inserts. They are built from the same change set by the same builders
   the main process uses, so what is shown is what is sent; values are written in as literals to be
-  read, while Apply still binds them as parameters. *Copy as script* puts the same statements on the
+  read, while Apply still binds them as parameters. They are highlighted as the editor would
+  highlight them — the same T-SQL grammar and the same colours (`lib/sqlHighlight.ts`), which the
+  confirm-writes question uses for its statements too. *Copy as script* puts the same statements on the
   clipboard as a script that runs on its own — `SET XACT_ABORT ON`, `BEGIN TRANSACTION` …
   `COMMIT TRANSACTION`, all or nothing like Apply — for a change ticket, or to repeat on another
   server. The focus starts on *Apply*, so Enter goes ahead and Escape doesn't. *Confirm before

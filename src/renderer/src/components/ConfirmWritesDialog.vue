@@ -16,6 +16,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import BaseModal from './BaseModal.vue'
+import SqlCode from './SqlCode.vue'
 import { api } from '../lib/api'
 import { namesIt } from '../lib/confirmWrites'
 import { useConfirmWritesStore } from '../stores/confirmWrites'
@@ -84,7 +85,7 @@ function go(): void {
       <ol class="statements" aria-label="The statements, in the order they run">
         <li v-for="(statement, index) in question.statements" :key="index" class="statement">
           <span class="statement__number mono">{{ index + 1 }}</span>
-          <pre class="statement__sql mono selectable">{{ statement }}</pre>
+          <pre class="statement__sql mono selectable"><SqlCode :sql="statement" /></pre>
         </li>
       </ol>
       <p class="statements__aside">

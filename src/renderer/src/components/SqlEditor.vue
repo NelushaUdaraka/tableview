@@ -21,7 +21,7 @@ import {
   indentOnInput,
   syntaxHighlighting
 } from '@codemirror/language'
-import { tags } from '@lezer/highlight'
+import { SQL_TOKEN_COLORS, SQL_TOKENS } from '../lib/sqlHighlight'
 import { lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection } from '@codemirror/view'
 import {
   changeTracking,
@@ -278,19 +278,15 @@ function sqlExtension(): ReturnType<typeof sql> {
  * tuned per theme in the stylesheet, so this table never has to know which
  * one is showing.
  */
-const sqlHighlight = HighlightStyle.define([
-  { tag: [tags.keyword, tags.operatorKeyword, tags.modifier], color: 'var(--syntax-keyword)' },
-  { tag: [tags.controlKeyword, tags.definitionKeyword], color: 'var(--syntax-keyword)' },
-  { tag: [tags.function(tags.variableName), tags.standard(tags.name)], color: 'var(--syntax-function)' },
-  { tag: [tags.string, tags.special(tags.string)], color: 'var(--syntax-string)' },
-  { tag: [tags.number, tags.bool, tags.null], color: 'var(--syntax-number)' },
-  { tag: [tags.comment, tags.lineComment, tags.blockComment], color: 'var(--syntax-comment)', fontStyle: 'italic' },
-  { tag: [tags.variableName, tags.propertyName, tags.name], color: 'var(--text-primary)' },
-  { tag: [tags.typeName, tags.className], color: 'var(--syntax-type)' },
-  { tag: tags.operator, color: 'var(--text-secondary)' },
-  { tag: [tags.punctuation, tags.separator, tags.bracket], color: 'var(--text-muted)' },
-  { tag: tags.invalid, color: 'var(--danger)' }
-])
+const sqlHighlight = HighlightStyle.define(
+  // The same table the SQL shown in dialogs is highlighted from, so the two
+  // never disagree about what colour anything is.
+  SQL_TOKENS.map(({ tag, token }) => ({
+    tag,
+    color: SQL_TOKEN_COLORS[token],
+    ...(token === 'comment' ? { fontStyle: 'italic' } : {})
+  }))
+)
 
 function themeExtension(): unknown[] {
   return [syntaxHighlighting(sqlHighlight, { fallback: true })]

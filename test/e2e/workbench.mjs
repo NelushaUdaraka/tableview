@@ -334,6 +334,19 @@ await ev(`[...document.querySelectorAll('.data__toolbar .btn')].find(b => b.text
 await waitFor(`!!document.querySelector('.statement__sql')`, 'the review before Apply')
 steps.push({ step: 'review', statements: await ev(`[...document.querySelectorAll('.statement__sql')].map(e => e.textContent.trim())`) })
 check(steps.at(-1).statements.length === 1 && steps.at(-1).statements[0].includes('(12, NULL, NULL)'), 'the three rows are not one multi-row insert')
+// Highlighted as the editor would: keywords and strings in their own colours.
+const colours = await ev(`(() => {
+  const sql = document.querySelector('.statement__sql')
+  const colourOf = (text) => {
+    const span = [...sql.querySelectorAll('span')].find(s => s.textContent.trim() === text)
+    return span ? getComputedStyle(span).color : null
+  }
+  return { keyword: colourOf('INSERT'), string: colourOf("'ten'"), number: colourOf('12'), plain: getComputedStyle(sql).color }
+})()`)
+steps.push({ step: 'review highlighting', colours })
+check(colours.keyword && colours.string && colours.keyword !== colours.string && colours.keyword !== colours.plain, 'the statement is not highlighted')
+await delay(500)
+await shot('06b-review-highlighted')
 await ev(`[...document.querySelectorAll('.modal__foot .btn')].find(b => b.textContent.trim() === 'Apply').click()`)
 await waitFor(`[...document.querySelectorAll('.toast')].some(t => t.textContent.includes('3 inserted'))`, 'the apply toast')
 await waitFor(`document.querySelectorAll('.grid__row').length === 7 && !document.querySelector('.grid__row--inserted')`, 'the applied rows read back')

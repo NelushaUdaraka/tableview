@@ -18,7 +18,8 @@ export interface CheckResult {
 export interface SsmPreflight {
   awsCli: CheckResult
   plugin: CheckResult
-  credentials: CheckResult
+  /** `ssoExpired` when signing in to AWS SSO again would fix it. */
+  credentials: CheckResult & { ssoExpired?: boolean }
 }
 
 function run(
@@ -111,8 +112,12 @@ export async function checkSsmPrerequisites(
     }
   } else {
     const text = `${identity.stderr} ${identity.stdout}`.toLowerCase()
+    // An SSO session the CLI could not refresh is fixed by signing in again,
+    // which the form offers to do; pasted credentials have no session to renew.
+    const ssoExpired = !usingPasted && /\bsso\b|token has expired/.test(text)
     result.credentials = {
       ok: false,
+      ...(ssoExpired ? { ssoExpired: true } : {}),
       error: /expired|sso/.test(text)
         ? 'Credentials have expired. For SSO run: aws sso login --profile <name>'
         : /profile/.test(text)

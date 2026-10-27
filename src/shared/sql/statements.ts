@@ -354,6 +354,45 @@ export function maskNonCode(sql: string): string {
   return out
 }
 
+/**
+ * Whether `offset` sits in code rather than inside a comment, a string literal
+ * or a quoted name. The end of a line comment, and of anything left unclosed,
+ * still counts as inside it: that is where the next keystroke would land.
+ */
+export function isCodeAt(sql: string, offset: number): boolean {
+  for (const token of tokenize(sql)) {
+    if (token.kind === 'code') continue
+    if (offset <= token.start) return true
+    if (offset < token.end) return false
+    if (offset === token.end && !isClosed(sql.slice(token.start, token.end), token.kind)) {
+      return false
+    }
+  }
+  return true
+}
+
+/** Whether a non-code token's text has its closing delimiter. */
+function isClosed(text: string, kind: Token['kind']): boolean {
+  const count = (ch: string): number => text.split(ch).length - 1
+  switch (kind) {
+    case 'line-comment':
+      return false
+    case 'block-comment':
+      return text.length >= 4 && text.endsWith('*/')
+    // An escaped delimiter is doubled, so a closed literal holds an even
+    // number of quotes (opening and closing ones included) and a closed
+    // bracketed name an odd number of `]`.
+    case 'string':
+      return count("'") % 2 === 0
+    case 'quoted':
+      return count('"') % 2 === 0
+    case 'bracket':
+      return count(']') % 2 === 1
+    default:
+      return true
+  }
+}
+
 /** The leading keyword of a statement, e.g. `SELECT`, uppercased. */
 export function statementKind(sql: string): string {
   const cleaned = stripComments(sql).trim()

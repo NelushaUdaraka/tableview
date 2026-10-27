@@ -51,6 +51,8 @@ const api: RendererApi = {
   exportConnections: () => invoke(CHANNELS.connectionsExport),
   importConnections: () => invoke(CHANNELS.connectionsImport),
   testConnection: (input) => invoke(CHANNELS.connectionsTest, input),
+  ssoLogin: (config, loginId, deviceCode) => invoke(CHANNELS.ssoLogin, config, loginId, deviceCode),
+  cancelSsoLogin: (loginId) => invoke(CHANNELS.ssoLoginCancel, loginId),
   checkSsmPrerequisites: (config, connectionId) =>
     invoke(CHANNELS.ssmCheck, config, connectionId),
   listSsmInstances: (config, connectionId) =>
@@ -111,6 +113,10 @@ const api: RendererApi = {
   listSavedQueries: () => invoke(CHANNELS.savedQueriesList),
   saveQuery: (input) => invoke(CHANNELS.savedQueriesSave, input),
   deleteSavedQuery: (id) => invoke(CHANNELS.savedQueriesDelete, id),
+  listSnippets: () => invoke(CHANNELS.snippetsList),
+  saveSnippets: (snippets) => invoke(CHANNELS.snippetsSave, snippets),
+  exportSnippets: () => invoke(CHANNELS.snippetsExport),
+  importSnippets: () => invoke(CHANNELS.snippetsImport),
 
   getSettings: () => invoke(CHANNELS.settingsGet),
   updateSettings: (patch) => invoke(CHANNELS.settingsUpdate, patch),
@@ -149,7 +155,9 @@ const api: RendererApi = {
   onSessionChanged: (handler: (event: SessionEvent) => void) =>
     subscribe(CHANNELS.eventSessionChanged, handler as (payload: never) => void),
   onNotificationClicked: (handler: (tabId: string) => void) =>
-    subscribe(CHANNELS.eventNotificationClicked, handler as (payload: never) => void)
+    subscribe(CHANNELS.eventNotificationClicked, handler as (payload: never) => void),
+  onSsoLoginPrompt: (handler) =>
+    subscribe(CHANNELS.eventSsoLoginPrompt, handler as (payload: never) => void)
 }
 
 contextBridge.exposeInMainWorld('api', api)

@@ -25,6 +25,7 @@ import { useSchemaStore } from '../stores/schema'
 import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toasts'
 import { useLibraryStore } from '../stores/library'
+import { useSnippetStore } from '../stores/snippets'
 import { useUiStateStore } from '../stores/uiState'
 import { useRowPanel } from '../lib/rowPanel'
 import { runQueryTab } from '../lib/runQueryTab'
@@ -41,6 +42,7 @@ const schema = useSchemaStore()
 const settings = useSettingsStore()
 const toasts = useToastStore()
 const library = useLibraryStore()
+const snippets = useSnippetStore()
 const uiState = useUiStateStore()
 
 const editor = ref<InstanceType<typeof SqlEditor> | null>(null)
@@ -85,17 +87,6 @@ function onChanges(count: number): void {
   if ((props.tab.changeCount ?? 0) === count) return
   tabs.update<QueryTab>(props.tab.id, { changeCount: count })
 }
-
-/** lang-sql wants bare table names as well as schema-qualified ones. */
-const completionSchema = computed(() => {
-  const out: Record<string, string[]> = {}
-  for (const [qualified, columns] of Object.entries(schema.autocomplete)) {
-    out[qualified] = columns
-    const bare = qualified.split('.').slice(-1)[0]
-    if (bare && !(bare in out)) out[bare] = columns
-  }
-  return out
-})
 
 const currentStatement = computed(() => statementAt(props.tab.sql, cursor.value))
 
@@ -477,7 +468,8 @@ defineExpose({
           <SqlEditor
             ref="editor"
             v-model="sql"
-            :schema="completionSchema"
+            :schema="schema.autocomplete"
+            :snippets="snippets.snippets"
             :theme="settings.resolvedTheme"
             :font-family="settings.settings.editorFontFamily"
             :font-size="settings.settings.fontSize"

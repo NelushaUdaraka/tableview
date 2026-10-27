@@ -16,6 +16,7 @@ import {
   SavedConnection,
   SavedQuery,
   SchemaObject,
+  Snippet,
   SerializedError,
   ServerActivity,
   SessionEvent,
@@ -28,6 +29,7 @@ import {
   SchemaObjectType
 } from './types'
 import type { ImportSummary } from './connectionTransfer'
+import type { SnippetImportSummary } from './snippets'
 import type { MenuRole } from './menu'
 import type { UpdateState } from './updates'
 import type { UiState, UiStatePatch } from './uiState'
@@ -111,7 +113,18 @@ export interface SsmCheckResult {
 export interface SsmPreflight {
   awsCli: SsmCheckResult
   plugin: SsmCheckResult
-  credentials: SsmCheckResult
+  /** `ssoExpired` when signing in to AWS SSO again would fix it. */
+  credentials: SsmCheckResult & { ssoExpired?: boolean }
+}
+
+/** What `aws sso login` asks the user to do, as `main/tunnel/ssoLogin` reads it. */
+export interface SsoLoginPrompt {
+  /** The page to sign in on. */
+  url: string
+  /** The device flow's code to enter there; null for the browser flow. */
+  code: string | null
+  /** The page as opened: with the code already filled in, where there is one. */
+  openUrl: string
 }
 
 /**
@@ -161,6 +174,8 @@ export const CHANNELS = {
   connectionsImport: 'connections:import',
   connectionsTest: 'connections:test',
   ssmCheck: 'ssm:check',
+  ssoLogin: 'ssm:ssoLogin',
+  ssoLoginCancel: 'ssm:ssoLoginCancel',
   ssmInstances: 'ssm:instances',
 
   windowNew: 'window:new',
@@ -209,6 +224,10 @@ export const CHANNELS = {
   savedQueriesList: 'savedQueries:list',
   savedQueriesSave: 'savedQueries:save',
   savedQueriesDelete: 'savedQueries:delete',
+  snippetsList: 'snippets:list',
+  snippetsSave: 'snippets:save',
+  snippetsExport: 'snippets:export',
+  snippetsImport: 'snippets:import',
 
   settingsGet: 'settings:get',
   settingsUpdate: 'settings:update',
@@ -239,7 +258,8 @@ export const CHANNELS = {
   eventCloseRequested: 'event:closeRequested',
   eventUpdateState: 'event:updateState',
   eventSessionChanged: 'event:sessionChanged',
-  eventNotificationClicked: 'event:notificationClicked'
+  eventNotificationClicked: 'event:notificationClicked',
+  eventSsoLoginPrompt: 'event:ssoLoginPrompt'
 } as const
 
 /**
@@ -297,6 +317,16 @@ export interface RendererApi {
   testConnection(input: Partial<ConnectionConfig>): Promise<ConnectionStatus>
   /** `connectionId` lets the check fall back to credentials already saved. */
   checkSsmPrerequisites(config: SsmConfig, connectionId?: string): Promise<SsmPreflight>
+  /**
+   * Runs `aws sso login` for the config's profile: true once the user has
+   * finished signing in, false when it was cancelled. `loginId` names it for
+   * `cancelSsoLogin` and for the `onSsoLoginPrompt` events it sends meanwhile.
+   * `deviceCode` asks for a code to enter on any device rather than a page to
+   * open on this one.
+   */
+  ssoLogin(config: SsmConfig, loginId: string, deviceCode?: boolean): Promise<boolean>
+  /** Stops a sign-in, whose `ssoLogin` call then answers false. Nothing happens for one already over. */
+  cancelSsoLogin(loginId: string): Promise<void>
   /** Instances in the configured region, so the bastion can be picked rather than typed. */
   listSsmInstances(config: SsmConfig, connectionId?: string): Promise<SsmInstanceList>
 
@@ -397,6 +427,14 @@ export interface RendererApi {
   saveQuery(input: Partial<SavedQuery> & { name: string; sql: string }): Promise<SavedQuery>
   deleteSavedQuery(id: string): Promise<boolean>
 
+  listSnippets(): Promise<Snippet[]>
+  /** Replaces the whole list; refused, saving nothing, when one of them is not valid. */
+  saveSnippets(snippets: Snippet[]): Promise<Snippet[]>
+  /** Writes the list to a file the user picks; null when they cancel. */
+  exportSnippets(): Promise<{ filePath: string; count: number } | null>
+  /** Merges a file the user picks into the list; null when they cancel. */
+  importSnippets(): Promise<{ summary: SnippetImportSummary; snippets: Snippet[] } | null>
+
   getSettings(): Promise<AppSettings>
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>
 
@@ -454,6 +492,7 @@ export interface RendererApi {
   onSessionChanged(handler: (event: SessionEvent) => void): () => void
   /** A query notification was clicked: its window is in front, and this is its tab. */
   onNotificationClicked(handler: (tabId: string) => void): () => void
+  onSsoLoginPrompt(handler: (event: SsoLoginPrompt & { loginId: string }) => void): () => void
 }
 
 declare global {

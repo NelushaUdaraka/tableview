@@ -11,6 +11,11 @@
  *                                          banner, opens the requested local
  *                                          port and proxies it to an upstream
  *                                          the test controls
+ *   aws sso login                          signing in again — prints what the
+ *                                          real one does with --no-browser, then
+ *                                          stands in for the user finishing in
+ *                                          the browser after FAKE_AWS_SSO_DELAY
+ *                                          ms by writing FAKE_AWS_SSO_TOKEN_FILE
  *
  * Behaviour is chosen with FAKE_AWS_SCENARIO; the invocation is recorded to
  * FAKE_AWS_ARGS_FILE so tests can assert on the exact command line. The fleet
@@ -18,7 +23,7 @@
  * wrong region produces the empty list a real account would.
  */
 import net from 'node:net'
-import { writeFileSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 
 const args = process.argv.slice(2)
 const scenario = process.env.FAKE_AWS_SCENARIO ?? 'ok'
@@ -75,6 +80,46 @@ switch (scenario) {
 if (args[0] === '--version' || args[0] === 'version') {
   process.stdout.write('aws-cli/2.31.0 Python/3.13.7 Linux/6.8.0 exe/x86_64 (fake)\n')
   process.exit(0)
+}
+
+const ssoToken = process.env.FAKE_AWS_SSO_TOKEN_FILE
+
+if (subcommand === 'sso login') {
+  if (scenario === 'sso-not-configured') {
+    fail(
+      'Missing the following required SSO configuration values: sso_start_url, sso_region. To make sure this profile is properly configured to use SSO, please run:\n\naws configure sso',
+      253
+    )
+  }
+  if (args.includes('--use-device-code')) {
+    process.stderr.write(
+      'Browser will not be automatically opened.\nPlease visit the following URL:\n\n' +
+        'https://device.sso.eu-west-2.amazonaws.com/\n\nThen enter the code:\n\nWDDD-HRQV\n\n' +
+        'Alternatively, you may visit the following URL which will autofill the code upon loading:\n' +
+        'https://device.sso.eu-west-2.amazonaws.com/?user_code=WDDD-HRQV\n'
+    )
+  } else {
+    process.stderr.write(
+      'Browser will not be automatically opened.\nPlease visit the following URL:\n\n' +
+        'https://oidc.eu-west-2.amazonaws.com/authorize?response_type=code&client_id=fake' +
+        '&redirect_uri=http%3A%2F%2F127.0.0.1%3A50123%2Foauth%2Fcallback\n'
+    )
+  }
+  setTimeout(() => {
+    if (ssoToken) writeFileSync(ssoToken, 'signed in')
+    process.stdout.write('Successfully logged into Start URL: https://example.awsapps.com/start\n')
+    process.exit(0)
+  }, Number(process.env.FAKE_AWS_SSO_DELAY ?? 1500))
+  // Nothing else here applies; the timer ends the process.
+  await new Promise(() => {})
+}
+
+// An SSO session that has run out, until `sso login` above renews it.
+if (scenario === 'sso-expired' && !(ssoToken && existsSync(ssoToken))) {
+  fail(
+    'Error when retrieving token from sso: Token has expired and refresh failed',
+    255
+  )
 }
 
 if (subcommand === 'sts get-caller-identity') {

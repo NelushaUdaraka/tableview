@@ -1,6 +1,6 @@
 /**
- * Persistence for saved connections, query history, saved queries, settings
- * and the remembered layout of the workspace.
+ * Persistence for saved connections, query history, saved queries, snippets,
+ * settings and the remembered layout of the workspace.
  *
  * Secrets never reach the renderer: `listConnections` strips them and reports
  * only whether one is stored, and the connect path re-reads the plaintext here
@@ -18,8 +18,19 @@ import {
   QueryHistoryEntry,
   SavedConnection,
   SavedQuery,
+  Snippet,
   SqlServerOptions
 } from '../../shared/types'
+import {
+  STARTER_SNIPPETS,
+  mergeSnippets,
+  normalizeSnippet,
+  parseSnippetFile,
+  snippetExportFile,
+  snippetProblem,
+  type SnippetExportFile,
+  type SnippetImportSummary
+} from '../../shared/snippets'
 import { normalizeHex } from '../../shared/accent'
 import { copyNameFor } from '../../shared/copyName'
 import {
@@ -82,6 +93,11 @@ interface QueriesFile {
   queries: SavedQuery[]
 }
 
+interface SnippetsFile {
+  version: number
+  snippets: Snippet[]
+}
+
 interface LastRunFile {
   /** The app version that last ran with this data, or null before any has. */
   appVersion: string | null
@@ -91,6 +107,7 @@ export class AppData {
   private readonly connections: JsonStore<ConnectionsFile>
   private readonly history: JsonStore<HistoryFile>
   private readonly queries: JsonStore<QueriesFile>
+  private readonly snippets: JsonStore<SnippetsFile>
   private readonly settings: JsonStore<AppSettings>
   private readonly lastRun: JsonStore<LastRunFile>
   private readonly uiState: JsonStore<UiState>
@@ -110,6 +127,11 @@ export class AppData {
     this.queries = new JsonStore(path.join(userDataDir, 'saved-queries.json'), () => ({
       version: 1,
       queries: []
+    }))
+    // No file yet is a new install, which starts with the starter set.
+    this.snippets = new JsonStore(path.join(userDataDir, 'snippets.json'), () => ({
+      version: 1,
+      snippets: STARTER_SNIPPETS.map((snippet) => ({ ...snippet }))
     }))
     this.settings = new JsonStore(path.join(userDataDir, 'settings.json'), () => ({
       ...DEFAULT_SETTINGS
@@ -434,6 +456,35 @@ export class AppData {
     if (next.length === file.queries.length) return false
     this.queries.write({ ...file, queries: next })
     return true
+  }
+
+  // -- snippets ---------------------------------------------------------------
+
+  listSnippets(): Snippet[] {
+    return [...this.snippets.read().snippets]
+  }
+
+  /** Replaces the list, checking each one against the rest first. */
+  saveSnippets(input: Snippet[]): Snippet[] {
+    const snippets = input.map((snippet) =>
+      normalizeSnippet({ ...snippet, id: snippet.id || randomUUID() })
+    )
+    for (const snippet of snippets) {
+      const problem = snippetProblem(snippet, snippets)
+      if (problem) throw new Error(problem)
+    }
+    this.snippets.write({ version: 1, snippets })
+    return snippets
+  }
+
+  exportSnippets(): SnippetExportFile {
+    return snippetExportFile(this.listSnippets())
+  }
+
+  importSnippets(contents: string): { summary: SnippetImportSummary; snippets: Snippet[] } {
+    const merged = mergeSnippets(this.listSnippets(), parseSnippetFile(contents), randomUUID)
+    this.snippets.write({ version: 1, snippets: merged.snippets })
+    return merged
   }
 
   // -- moving connections between machines ----------------------------------

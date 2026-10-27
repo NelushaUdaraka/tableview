@@ -737,6 +737,17 @@ export interface QueryHistoryEntry {
   errorMessage?: string
 }
 
+/** A reusable piece of T-SQL the editor's completion offers (`shared/snippets.ts`). */
+export interface Snippet {
+  id: string
+  name: string
+  /** The word that brings it up in completion. */
+  prefix: string
+  /** The text, with `${1:name}` placeholders that Tab moves between. */
+  body: string
+  description?: string
+}
+
 export interface SavedQuery {
   id: string
   name: string

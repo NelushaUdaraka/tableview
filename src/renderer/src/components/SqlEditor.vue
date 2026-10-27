@@ -2,7 +2,10 @@
 /**
  * CodeMirror 6 SQL editor.
  *
- * Schema-aware completion is fed from the connected database, and the theme
+ * Schema-aware completion is fed from the connected database — table names
+ * through lang-sql, columns through a source of our own that knows which
+ * tables the statement reads (lib/columnCompletion.ts) — snippets come from
+ * the user's own list, and the theme
  * lives in a compartment so switching light/dark does not rebuild the state
  * (which would lose undo history and the cursor).
  */
@@ -10,11 +13,19 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap, placeholder as placeholderExt } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
-import { MSSQL, sql } from '@codemirror/lang-sql'
-import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete'
+import { MSSQL, keywordCompletionSource, schemaCompletionSource } from '@codemirror/lang-sql'
+import {
+  autocompletion,
+  closeBrackets,
+  closeBracketsKeymap,
+  completionKeymap,
+  snippetCompletion,
+  type CompletionSource
+} from '@codemirror/autocomplete'
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search'
 import {
   HighlightStyle,
+  LanguageSupport,
   bracketMatching,
   foldGutter,
   foldKeymap,
@@ -32,11 +43,18 @@ import {
   trackedChanges
 } from '../lib/changeTracking'
 import { matcherFor, type LineMatchOptions } from '@shared/sql/definitionSearch'
+import { columnIndex, completeColumns } from '../lib/columnCompletion'
+import { snippetFrom } from '../lib/snippetCompletion'
+import { snippetPreview } from '@shared/snippets'
+import type { Snippet } from '@shared/types'
 
 const props = withDefaults(
   defineProps<{
     modelValue: string
+    /** `schema.table` → its columns, from the connected database. */
     schema?: Record<string, string[]>
+    /** Offered in completion by their prefix. */
+    snippets?: Snippet[]
     theme?: 'dark' | 'light'
     fontFamily?: string
     fontSize?: number
@@ -51,6 +69,7 @@ const props = withDefaults(
   }>(),
   {
     schema: () => ({}),
+    snippets: () => [],
     theme: 'dark',
     fontFamily: 'monospace',
     fontSize: 13,
@@ -78,6 +97,7 @@ let view: EditorView | null = null
 
 const themeCompartment = new Compartment()
 const schemaCompartment = new Compartment()
+const snippetCompartment = new Compartment()
 const styleCompartment = new Compartment()
 /** Empty unless there is a baseline, so a plain query tab has no change gutter at all. */
 const changesCompartment = new Compartment()
@@ -185,6 +205,10 @@ function baseTheme(): ReturnType<typeof EditorView.theme> {
         color: 'var(--text-primary)',
         overflow: 'hidden'
       },
+      // The preview beside the list (a snippet's text) hangs outside it, so
+      // the list's tooltip must not clip what overflows.
+      '.cm-tooltip.cm-tooltip-autocomplete': { overflow: 'visible' },
+      '.cm-tooltip.cm-completionInfo': { padding: '8px 10px' },
       '.cm-tooltip.cm-tooltip-autocomplete > ul': {
         padding: '4px',
         fontFamily: props.fontFamily,
@@ -201,6 +225,24 @@ function baseTheme(): ReturnType<typeof EditorView.theme> {
       },
       '.cm-completionIcon': { opacity: '0.7', paddingRight: '6px' },
       '.cm-completionDetail': { color: 'var(--text-muted)', fontStyle: 'normal', marginLeft: '8px' },
+      '.cm-snippetInfo': { maxWidth: '420px' },
+      '.cm-snippetInfo p': {
+        margin: '0 0 6px',
+        fontFamily: 'var(--font-ui)',
+        fontSize: '12px',
+        lineHeight: '1.5',
+        color: 'var(--text-secondary)'
+      },
+      '.cm-snippetInfo pre': {
+        margin: '0',
+        fontFamily: props.fontFamily,
+        fontSize: '12px',
+        lineHeight: '1.5',
+        whiteSpace: 'pre-wrap',
+        color: 'var(--text-primary)'
+      },
+      // A placeholder still to be filled in, and the one Tab has reached.
+      '.cm-snippetField': { backgroundColor: 'var(--accent-soft)', borderRadius: '2px' },
       '.cm-completionMatchedText': { textDecoration: 'none', color: 'var(--accent-fg)', fontWeight: '600' },
       // The find bar, in the window's own controls rather than the browser's.
       '.cm-panels': {
@@ -263,12 +305,80 @@ function baseTheme(): ReturnType<typeof EditorView.theme> {
   )
 }
 
-function sqlExtension(): ReturnType<typeof sql> {
-  return sql({
-    dialect: MSSQL,
-    schema: props.schema,
-    upperCaseKeywords: true
-  })
+/**
+ * lang-sql completes keywords and table names — bare and schema-qualified —
+ * but is given no columns: it would offer them only after an exact-case
+ * `table.`, and twice over beside ours. Its keywords are kept away from a
+ * name after a dot (`c.Na`), where only a column or a table can go.
+ */
+function sqlExtension(): Extension {
+  const tables: Record<string, string[]> = {}
+  for (const qualified of Object.keys(props.schema)) {
+    tables[qualified] = []
+    const bare = qualified.split('.').slice(-1)[0]
+    if (bare && !(bare in tables)) tables[bare] = []
+  }
+  const keywords = keywordCompletionSource(MSSQL, true)
+  const data = (autocomplete: CompletionSource): Extension => MSSQL.language.data.of({ autocomplete })
+  return new LanguageSupport(MSSQL.language, [
+    data(schemaCompletionSource({ dialect: MSSQL, schema: tables })),
+    data((context) => (context.matchBefore(/\.[\p{L}\p{N}_@#$]*$/u) ? null : keywords(context))),
+    data(columnSource(columnIndex(props.schema)))
+  ])
+}
+
+/** Columns rank above keywords and tables in a bare position (lang-sql's keywords are -1). */
+function columnSource(index: ReturnType<typeof columnIndex>): CompletionSource {
+  return (context) => {
+    const found = completeColumns(context.state.doc.toString(), context.pos, index, context.explicit)
+    if (!found) return null
+    return {
+      from: found.from,
+      options: found.options.map((option) => ({
+        ...option,
+        type: 'property',
+        boost: found.qualified ? 0 : 1
+      })),
+      validFor: /^[\p{L}\p{N}_@#$]*$/u
+    }
+  }
+}
+
+/**
+ * The user's snippets, by prefix. A prefix is something they chose to type,
+ * so it ranks above the keyword it may share letters with (`tran`, TRAN).
+ */
+function snippetExtension(): Extension {
+  const options = props.snippets.map((snippet) =>
+    snippetCompletion(snippet.body, {
+      label: snippet.prefix,
+      detail: snippet.name,
+      type: 'text',
+      boost: 2,
+      info: () => snippetInfo(snippet)
+    })
+  )
+  if (options.length === 0) return []
+  const source: CompletionSource = (context) => {
+    const from = snippetFrom(context.state.doc.toString(), context.pos, context.explicit)
+    return from === null ? null : { from, options, validFor: /^[\p{L}\p{N}_]*$/u }
+  }
+  return MSSQL.language.data.of({ autocomplete: source })
+}
+
+/** The completion's preview: what the snippet is for, and the text it puts in. */
+function snippetInfo(snippet: Snippet): HTMLElement {
+  const box = document.createElement('div')
+  box.className = 'cm-snippetInfo'
+  if (snippet.description) {
+    const about = document.createElement('p')
+    about.textContent = snippet.description
+    box.append(about)
+  }
+  const code = document.createElement('pre')
+  code.textContent = snippetPreview(snippet.body)
+  box.append(code)
+  return box
 }
 
 /**
@@ -335,6 +445,7 @@ onMounted(() => {
         indentWithTab
       ]),
       schemaCompartment.of(sqlExtension()),
+      snippetCompartment.of(snippetExtension()),
       themeCompartment.of(themeExtension() as never),
       styleCompartment.of(baseTheme()),
       EditorState.readOnly.of(props.readonly),
@@ -378,6 +489,14 @@ watch(
   () => props.schema,
   () => {
     view?.dispatch({ effects: schemaCompartment.reconfigure(sqlExtension()) })
+  },
+  { deep: true }
+)
+
+watch(
+  () => props.snippets,
+  () => {
+    view?.dispatch({ effects: snippetCompartment.reconfigure(snippetExtension()) })
   },
   { deep: true }
 )

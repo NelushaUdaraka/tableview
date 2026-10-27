@@ -57,7 +57,8 @@ and the picker only fills it in.
 Set a fixed local port (blank picks a free one) and an explicit CLI path if you need them.
 **Check prerequisites** verifies the three things that actually go wrong — the AWS CLI, the Session
 Manager plugin, and whether your credentials are still valid — and `aws sts get-caller-identity`
-confirms which identity you are about to connect as.
+confirms which identity you are about to connect as. When the credentials fail because an AWS SSO session has
+run out, the check offers **Sign in with AWS SSO** (below) and runs again once you are signed in.
 
 ## Credentials
 
@@ -77,6 +78,38 @@ Two sources, chosen per connection:
 - **Let the AWS CLI resolve them** — the normal chain: `--profile`, environment variables, SSO
   cache, `credential_process`, assume-role, instance profile. Use this if you keep profiles in
   `~/.aws/`.
+
+## Signing in to AWS SSO again
+
+An SSO (IAM Identity Center) session lasts hours, not days, so a connection whose credentials the
+CLI resolves from an SSO profile often fails first thing in the morning. When it does, the dialog
+that says the credentials have expired offers **Sign in with AWS SSO** instead of a command to run
+in a terminal:
+
+```
+These credentials have expired                                  SSO bastion
+ ◌ Waiting for you to finish signing in in your browser…        Cancel
+   No browser came up? Open the page again or sign in with a code instead.
+```
+
+- **What runs:** `aws sso login --profile <profile> --no-browser`, with the connection's CLI path
+  and profile, in the main process like the SSM session itself. The CLI needs no stdin for this; it
+  prints the sign-in page and waits for you to finish there. The app opens that page in your
+  browser itself, which is how it knows whether a browser could be opened at all.
+- **No browser:** when the page cannot be opened, the sign-in starts again with
+  `--use-device-code`, and the app shows the page and the code to enter on it — from this machine
+  or any other. *sign in with a code* does the same when a browser opened somewhere unhelpful.
+- **Afterwards:** once the CLI says you are signed in, the dialog closes and whatever failed — the
+  connection, a reconnect — is tried again. **Cancel** stops the CLI (on Windows as a process
+  tree, like the session's plugin), and so does closing the window.
+- **When it fails**, the dialog says why in the terms of what to do: a profile that does not
+  exist, one with no `sso_session` or `sso_start_url` (run `aws configure sso` for it), a CLI too old
+  to know `--no-browser`, or a sign-in left unfinished until it timed out. *Retry* is still there
+  for credentials refreshed some other way.
+
+The same button appears under **Check prerequisites** when that is where the expiry shows up. It is
+offered only for credentials the CLI resolves; pasted credentials have no session to renew — paste
+a fresh block instead. `main/tunnel/ssoLogin.ts` runs the CLI and reads its prompt.
 
 Only a masked summary (`ASIA****…MPLE · eu-west-2 · temporary`) ever reaches the renderer; the
 secret and session token stay in the main process. The app never *derives* credentials: it either

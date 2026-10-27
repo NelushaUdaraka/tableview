@@ -22,8 +22,10 @@ Deliberately out of scope for phase 1, in rough priority order for phase 2:
   Credentials that ran out are not something reopening can fix; the status bar says so and offers
   the paste box.
 - **No interactive AWS prompts.** The CLI child is spawned without stdin, so a profile configured
-  with `mfa_serial` cannot be answered, and `aws sso login` (a browser flow) has to be run yourself —
-  the app detects the expiry and says so. Pasting portal credentials sidesteps both.
+  with `mfa_serial` cannot be answered; pasting portal credentials sidesteps it. AWS SSO is the
+  exception, because `aws sso login` needs no stdin: an expired SSO session offers *Sign in with
+  AWS SSO*, which runs it and retries ([AWS SSM](aws-ssm.md#signing-in-to-aws-sso-again)). It needs
+  AWS CLI v2 recent enough to know `--no-browser` (and `--use-device-code` to sign in with a code).
 - **Expiry is only known when the block says so.** The portal's environment-variable format carries
   no expiry, so the app can tell you the credentials *are* temporary but not when they lapse; it
   reports the failure when they do.

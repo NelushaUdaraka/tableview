@@ -32,6 +32,7 @@ export type MenuAction =
   | 'query:estimated-plan'
   | 'query:actual-plan'
   | 'query:format'
+  | 'query:snippets'
   | 'results:export'
   | 'results:copy'
   | 'view:quick-open'
@@ -198,6 +199,8 @@ export function buildMenuModel(platform: string): MenuModel[] {
           accelerator: 'CmdOrCtrl+M',
           action: 'query:actual-plan'
         },
+        SEPARATOR,
+        { label: 'Snippets…', action: 'query:snippets' },
         SEPARATOR,
         { label: 'Copy Results', accelerator: 'CmdOrCtrl+Shift+C', action: 'results:copy' }
       ]

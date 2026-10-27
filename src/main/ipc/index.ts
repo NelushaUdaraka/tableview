@@ -36,6 +36,7 @@ import {
   RunQueryRequest,
   ServerMessage,
   SessionEvent,
+  Snippet,
   SsmConfig,
   TableChangeSet,
   TableDataRequest
@@ -54,6 +55,7 @@ import {
   WindowChromeState
 } from '../../shared/ipc'
 import { exportFileName, type ImportSummary } from '../../shared/connectionTransfer'
+import { snippetExportFileName } from '../../shared/snippets'
 import { MenuRole } from '../../shared/menu'
 import { EXPORT_EXTENSIONS, exportRows } from '../../shared/export'
 import { tablePlusUrlFromClipboard } from '../../shared/tableplus'
@@ -519,6 +521,40 @@ export function registerIpcHandlers(context: IpcContext): void {
     appData.saveQuery(input)
   )
   handle(CHANNELS.savedQueriesDelete, (_call, id: string) => appData.deleteSavedQuery(id))
+
+  // -- snippets ---------------------------------------------------------------
+
+  handle(CHANNELS.snippetsList, () => appData.listSnippets())
+  handle(CHANNELS.snippetsSave, (_call, snippets: Snippet[]) => appData.saveSnippets(snippets))
+  handle(CHANNELS.snippetsExport, async (call) => {
+    const payload = appData.exportSnippets()
+    const result = await showSaveDialog(call, {
+      title: 'Export snippets',
+      defaultPath: snippetExportFileName(),
+      filters: [
+        { name: 'JSON', extensions: ['json'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    })
+    if (result.canceled || !result.filePath) return null
+    await fs.writeFile(result.filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
+    return { filePath: result.filePath, count: payload.snippets.length }
+  })
+  handle(CHANNELS.snippetsImport, async (call) => {
+    const options = {
+      title: 'Import snippets',
+      properties: ['openFile'] as ['openFile'],
+      filters: [
+        { name: 'JSON', extensions: ['json'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    }
+    const picked = call.window
+      ? await dialog.showOpenDialog(call.window, options)
+      : await dialog.showOpenDialog(options)
+    if (picked.canceled || !picked.filePaths[0]) return null
+    return appData.importSnippets(await fs.readFile(picked.filePaths[0], 'utf8'))
+  })
 
   // -- settings -------------------------------------------------------------
 

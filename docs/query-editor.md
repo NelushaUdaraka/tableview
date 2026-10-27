@@ -2,6 +2,8 @@
 
 - CodeMirror 6 with T-SQL highlighting and **completion of keywords, tables and the columns of
   the tables the statement reads**, pulled from the live database — see below
+- **Snippets**: your own reusable pieces of T-SQL, inserted from completion by a short prefix, with
+  placeholders Tab moves between — see below
 - Run all / run selection / run the statement under the cursor; cancel a running query
 - Scripts split on `GO` (like SSMS), so `BEGIN … END` bodies and `CREATE PROCEDURE` work; `GO 5` repeats
 - Multiple result sets per batch, rows-affected, `PRINT` output, and errors with their
@@ -32,7 +34,7 @@ after an exact-case `table.` and cannot see which tables a statement reads:
 - **After `name.`**, only that table's columns: `c.` resolves the alias in `FROM Customers c` or
   `FROM Customers AS c`, `Customers.` and `dbo.Customers.` name the table outright (in the
   statement or not), and bracketed names (`[Order Details].`) work the same. Names are matched
-  without regard to case, as SQL Server matches them.
+  without regard to case, as SQL Server matches them, and keywords are left out of the list there.
 - **Nothing** where a column cannot go: right after `FROM` and the other table keywords, after
   `AS`, in comments and strings, and for `@variables` and `#temp` tables.
 
@@ -41,6 +43,50 @@ the one under the cursor as run-statement finds it (`;` and `GO` end it), read b
 than a parser, so a half-typed query works as well as a finished one. Columns come from the same
 list the schema store loads for the connection, tables and views alike; a derived table or a CTE
 offers none of its own.
+
+## Snippets
+
+A snippet is a piece of T-SQL typed often enough to be worth a name: a guarded transaction, a
+`TRY…CATCH`, a team's audit columns. Type its prefix in a query tab — `tran` — and it is in the
+completion list beside the keywords, ranked above them, with its name and a preview of what it
+inserts; pick it and the text goes in with its first placeholder selected. Type over it, press Tab
+for the next, Shift+Tab to go back, Escape to stop.
+
+```
+tran ▸ Guarded transaction           BEGIN TRAN;
+
+                                     -- statements
+
+                                     -- Look at the results, then swap these two lines to keep them.
+                                     ROLLBACK;
+                                     -- COMMIT;
+```
+
+**Placeholders** are written `${1:name}`, `${2:value}`, … and visited in that order. The same
+number twice is one placeholder in two places, edited in both at once (`${1:dbo.table}` in the
+`OBJECT_ID` check and in the `DROP`), and `${0}` is where the cursor ends up. A literal `{` or `}`
+right after a `$` or a `#` is written `\{`, `\}`. Snippets are offered where a word of code is being
+typed — not after a `.`, on an `@variable` or a `#temp` table, or in a comment or a string.
+
+**The starter set** a new install begins with: `tran` (guarded transaction), `trycatch` (`TRY…CATCH`
+that commits or rolls back and rethrows), `droptable` (`IF OBJECT_ID(…) IS NOT NULL DROP TABLE …`,
+which works on every version), `temptable`, `page` (`OFFSET … FETCH`) and `cte`. They are ordinary
+snippets: edit them, delete them, and *Restore starters* puts back any that are gone.
+
+**Managing them**: *Query → Snippets…*, or *Manage snippets…* in Settings, lists them with an editor
+beside the list — name, prefix, an optional description shown in completion, the text, and what it
+inserts. Edits are made to a copy and saved together with **Save**, so a half-finished snippet never
+reaches completion; a snippet with no name, a prefix of more than one word (letters, digits and
+`_`), no text, or a prefix another one already uses is pointed out instead. Cancel (or Escape) asks
+before dropping unsaved edits.
+
+**Where they live**: `snippets.json` in the app data folder, next to the saved queries, written by
+the main process the same new-file-then-rename way. A window reads the list when it opens and
+whenever it gets the focus, so an edit made in one window reaches the others. **Export…** writes the
+list to a JSON file (`tableview/snippets`, without the machine's ids) for a team to share;
+**Import…** merges one in — a snippet whose prefix is already in the list replaces it, the rest are
+added — and says which were which. `shared/snippets.ts` holds the starter set, the checks and the
+file format.
 
 ## Execution plans
 

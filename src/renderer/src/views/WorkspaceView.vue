@@ -21,6 +21,7 @@ import SplitPane from '../components/SplitPane.vue'
 import StatusBar from '../components/StatusBar.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import SettingsDialog from '../components/SettingsDialog.vue'
+import SnippetsDialog from '../components/SnippetsDialog.vue'
 import ShortcutsDialog from '../components/ShortcutsDialog.vue'
 import UnsavedRoutineDialog from '../components/UnsavedRoutineDialog.vue'
 import OpenTransactionDialog from '../components/OpenTransactionDialog.vue'
@@ -34,6 +35,7 @@ import { useTabStore, type QueryTab, type RevealLine } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
 import { useUiStateStore } from '../stores/uiState'
 import { useLibraryStore } from '../stores/library'
+import { useSnippetStore } from '../stores/snippets'
 import { onMenuAction } from '../lib/menuBus'
 import { exportConnections, importConnections } from '../lib/connectionTransfer'
 import { detachedTabFrom, openTabFrom } from '../lib/detach'
@@ -64,6 +66,7 @@ const tabs = useTabStore()
 const toasts = useToastStore()
 const uiState = useUiStateStore()
 const library = useLibraryStore()
+const snippets = useSnippetStore()
 
 const sidebar = ref<InstanceType<typeof AppSidebar> | null>(null)
 
@@ -128,6 +131,7 @@ watch(sidebarCollapsed, (collapsed) => {
 })
 
 const showSettings = ref(false)
+const showSnippets = ref(false)
 const showShortcuts = ref(false)
 const showQuickOpen = ref(false)
 
@@ -474,6 +478,9 @@ function handleAction(action: string): void {
     case 'view:quick-open':
       showQuickOpen.value = true
       break
+    case 'query:snippets':
+      showSnippets.value = true
+      break
     case 'view:activity':
       if (connectionId.value) void tabs.openActivity(connectionId.value)
       break
@@ -583,8 +590,15 @@ async function openStartingTabs(): Promise<void> {
   if (tabs.tabs.length === 0) newQueryTab()
 }
 
+/** Another window may have edited the snippets while this one was behind it. */
+function loadSnippets(): void {
+  void snippets.load().catch(() => undefined)
+}
+
 onMounted(async () => {
   document.addEventListener('keydown', onKeydown)
+  loadSnippets()
+  window.addEventListener('focus', loadSnippets)
   unsubscribeMenu = onMenuAction(handleAction)
   unsubscribeStatus = api.onStatusChanged(onStatusChanged)
   try {
@@ -596,6 +610,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('focus', loadSnippets)
   unsubscribeMenu?.()
   unsubscribeStatus?.()
 })
@@ -686,7 +701,12 @@ onBeforeUnmount(() => {
       :table-name="exportPayload.name"
       @close="exportPayload = null"
     />
-    <SettingsDialog v-if="showSettings" @close="showSettings = false" />
+    <SettingsDialog
+      v-if="showSettings"
+      @close="showSettings = false"
+      @snippets="(showSettings = false), (showSnippets = true)"
+    />
+    <SnippetsDialog v-if="showSnippets" @close="showSnippets = false" />
     <ShortcutsDialog v-if="showShortcuts" @close="showShortcuts = false" />
     <QuickOpen
       v-if="showQuickOpen"

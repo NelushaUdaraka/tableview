@@ -16,6 +16,7 @@ import {
   SavedConnection,
   SavedQuery,
   SchemaObject,
+  Snippet,
   SerializedError,
   ServerActivity,
   SessionEvent,
@@ -28,6 +29,7 @@ import {
   SchemaObjectType
 } from './types'
 import type { ImportSummary } from './connectionTransfer'
+import type { SnippetImportSummary } from './snippets'
 import type { MenuRole } from './menu'
 import type { UpdateState } from './updates'
 import type { UiState, UiStatePatch } from './uiState'
@@ -209,6 +211,10 @@ export const CHANNELS = {
   savedQueriesList: 'savedQueries:list',
   savedQueriesSave: 'savedQueries:save',
   savedQueriesDelete: 'savedQueries:delete',
+  snippetsList: 'snippets:list',
+  snippetsSave: 'snippets:save',
+  snippetsExport: 'snippets:export',
+  snippetsImport: 'snippets:import',
 
   settingsGet: 'settings:get',
   settingsUpdate: 'settings:update',
@@ -396,6 +402,14 @@ export interface RendererApi {
   listSavedQueries(): Promise<SavedQuery[]>
   saveQuery(input: Partial<SavedQuery> & { name: string; sql: string }): Promise<SavedQuery>
   deleteSavedQuery(id: string): Promise<boolean>
+
+  listSnippets(): Promise<Snippet[]>
+  /** Replaces the whole list; refused, saving nothing, when one of them is not valid. */
+  saveSnippets(snippets: Snippet[]): Promise<Snippet[]>
+  /** Writes the list to a file the user picks; null when they cancel. */
+  exportSnippets(): Promise<{ filePath: string; count: number } | null>
+  /** Merges a file the user picks into the list; null when they cancel. */
+  importSnippets(): Promise<{ summary: SnippetImportSummary; snippets: Snippet[] } | null>
 
   getSettings(): Promise<AppSettings>
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>

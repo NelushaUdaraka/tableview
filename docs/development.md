@@ -119,7 +119,7 @@ and flips `AllowTcpForwarding` on, which the `linuxserver/openssh-server` image 
 ### End-to-end
 
 ```bash
-scripts/e2e.sh all          # or: smoke | connections | workspace | editing | table-ui | table-tools | routines | auto-refresh | unsaved | read-only | confirm-writes | workbench | ssm-form
+scripts/e2e.sh all          # or: smoke | connections | workspace | editing | editor | table-ui | table-tools | routines | auto-refresh | unsaved | read-only | confirm-writes | workbench | ssm-form
 ```
 
 On a headless box it starts Xvfb itself. It needs Electron's usual Linux libraries:
@@ -150,6 +150,13 @@ The suites:
   and the `INSERT` with their values, in that order, with the focus on *Apply* and *Copy as script*
   beside it; applies the change set, verifies the rows in the database, deletes through the context
   menu (the review shows the `DELETE`), and drives the filter builder
+- **editor** — completion in a query tab: a bare word offers the columns of the table the `FROM`
+  after it names, first and with the table beside them; `c.` offers only the alias's table's
+  columns, keywords left out; a bracketed table's column is inserted in brackets; and after `FROM`
+  tables come without columns. The starter `tran` snippet is first for `tran`, shows its preview,
+  and goes in with its placeholder selected. The Snippets dialog (Query menu) lists the starters,
+  turns down a snippet with no prefix, and saves one; typing its prefix inserts it, and Tab moves
+  from its first placeholder to its second
 - **table-ui** — opens the title bar's View menu, reads the selected row out of the row panel, edits
   a field there and applies it to the database, follows a foreign key into the referenced table and
   checks the filter and the row it lands on, opens the expanding cell editor, and hides the panel

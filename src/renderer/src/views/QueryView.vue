@@ -25,6 +25,7 @@ import { useSchemaStore } from '../stores/schema'
 import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toasts'
 import { useLibraryStore } from '../stores/library'
+import { useSnippetStore } from '../stores/snippets'
 import { useUiStateStore } from '../stores/uiState'
 import { useRowPanel } from '../lib/rowPanel'
 import { runQueryTab } from '../lib/runQueryTab'
@@ -41,6 +42,7 @@ const schema = useSchemaStore()
 const settings = useSettingsStore()
 const toasts = useToastStore()
 const library = useLibraryStore()
+const snippets = useSnippetStore()
 const uiState = useUiStateStore()
 
 const editor = ref<InstanceType<typeof SqlEditor> | null>(null)
@@ -467,6 +469,7 @@ defineExpose({
             ref="editor"
             v-model="sql"
             :schema="schema.autocomplete"
+            :snippets="snippets.snippets"
             :theme="settings.resolvedTheme"
             :font-family="settings.settings.editorFontFamily"
             :font-size="settings.settings.fontSize"

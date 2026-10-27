@@ -3,7 +3,7 @@
 # Runs the end-to-end suites against a built app. On a headless machine it
 # starts an Xvfb display first.
 #
-# Usage: scripts/e2e.sh [smoke|connections|workspace|editing|table-ui|table-tools|routines|auto-refresh|unsaved|read-only|confirm-writes|workbench|ssm-form|all]
+# Usage: scripts/e2e.sh [smoke|connections|workspace|editing|editor|table-ui|table-tools|routines|auto-refresh|unsaved|read-only|confirm-writes|workbench|ssm-form|all]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -62,6 +62,7 @@ case "$SUITE" in
   smoke)       run smoke ;;
   workspace)   run workspace ;;
   editing)     run editing ;;
+  editor)      run editor ;;
   table-ui)    run table-ui ;;
   table-tools) run table-tools ;;
   ssm-form)    run ssm-form ;;
@@ -72,6 +73,6 @@ case "$SUITE" in
   read-only)   run read-only ;;
   confirm-writes) run confirm-writes ;;
   workbench)   run workbench ;;
-  all)         run smoke; run connections; run workspace; run editing; run table-ui; run table-tools; run routines; run auto-refresh; run unsaved; run read-only; run confirm-writes; run workbench; run ssm-form ;;
-  *) echo "usage: $0 {smoke|connections|workspace|editing|table-ui|table-tools|routines|auto-refresh|unsaved|read-only|confirm-writes|workbench|ssm-form|all}" >&2; exit 1 ;;
+  all)         run smoke; run connections; run workspace; run editing; run editor; run table-ui; run table-tools; run routines; run auto-refresh; run unsaved; run read-only; run confirm-writes; run workbench; run ssm-form ;;
+  *) echo "usage: $0 {smoke|connections|workspace|editing|editor|table-ui|table-tools|routines|auto-refresh|unsaved|read-only|confirm-writes|workbench|ssm-form|all}" >&2; exit 1 ;;
 esac

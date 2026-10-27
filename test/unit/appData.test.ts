@@ -10,6 +10,7 @@ import {
 } from '../../src/shared/types'
 import { LocalKeyVault } from '../../src/main/storage/crypto'
 import { JsonStore } from '../../src/main/storage/store'
+import { STARTER_SNIPPETS } from '../../src/shared/snippets'
 
 let dir: string
 let appData: AppData
@@ -655,6 +656,57 @@ describe('saved queries', () => {
     const saved = appData.saveQuery({ name: 'Q', sql: 'SELECT 1' })
     expect(appData.deleteSavedQuery(saved.id)).toBe(true)
     expect(appData.deleteSavedQuery(saved.id)).toBe(false)
+  })
+})
+
+describe('snippets', () => {
+  it('starts a new install with the starter set', () => {
+    expect(appData.listSnippets().map((s) => s.prefix)).toEqual(STARTER_SNIPPETS.map((s) => s.prefix))
+  })
+
+  it('saves the list whole, tidied, and reads it back after a restart', () => {
+    appData.saveSnippets([{ id: '', name: ' Audit ', prefix: ' audit ', body: 'a\r\nb', description: ' ' }])
+    const reopened = new AppData(dir, new LocalKeyVault(path.join(dir, 'secret.key')))
+    const [saved] = reopened.listSnippets()
+    expect(saved).toMatchObject({ name: 'Audit', prefix: 'audit', body: 'a\nb' })
+    expect(saved.id).not.toBe('')
+    expect(saved).not.toHaveProperty('description')
+  })
+
+  it('keeps an empty list empty rather than bringing the starters back', () => {
+    appData.saveSnippets([])
+    expect(new AppData(dir, new LocalKeyVault(path.join(dir, 'secret.key'))).listSnippets()).toEqual([])
+  })
+
+  it('refuses a list with a bad snippet, saving none of it', () => {
+    expect(() =>
+      appData.saveSnippets([
+        { id: 'a', name: 'One', prefix: 'x', body: '1' },
+        { id: 'b', name: 'Two', prefix: 'X', body: '2' }
+      ])
+    ).toThrow(/already uses the prefix/)
+    expect(appData.listSnippets()).toHaveLength(STARTER_SNIPPETS.length)
+  })
+
+  it('exports without ids and imports by prefix', () => {
+    const file = appData.exportSnippets()
+    expect(file.kind).toBe('tableview/snippets')
+    expect(file.snippets[0]).not.toHaveProperty('id')
+
+    const incoming = {
+      ...file,
+      snippets: [
+        { name: 'Our transaction', prefix: 'tran', body: 'BEGIN TRAN;' },
+        { name: 'Audit columns', prefix: 'audit', body: 'created_at, created_by' }
+      ]
+    }
+    const { summary, snippets } = appData.importSnippets(JSON.stringify(incoming))
+    expect(summary).toEqual({ added: ['audit'], replaced: ['tran'] })
+    expect(snippets.find((s) => s.prefix === 'tran')).toMatchObject({
+      id: 'starter-tran',
+      name: 'Our transaction'
+    })
+    expect(appData.listSnippets()).toHaveLength(STARTER_SNIPPETS.length + 1)
   })
 })
 

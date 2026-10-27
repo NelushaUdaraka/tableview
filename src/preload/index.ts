@@ -111,6 +111,10 @@ const api: RendererApi = {
   listSavedQueries: () => invoke(CHANNELS.savedQueriesList),
   saveQuery: (input) => invoke(CHANNELS.savedQueriesSave, input),
   deleteSavedQuery: (id) => invoke(CHANNELS.savedQueriesDelete, id),
+  listSnippets: () => invoke(CHANNELS.snippetsList),
+  saveSnippets: (snippets) => invoke(CHANNELS.snippetsSave, snippets),
+  exportSnippets: () => invoke(CHANNELS.snippetsExport),
+  importSnippets: () => invoke(CHANNELS.snippetsImport),
 
   getSettings: () => invoke(CHANNELS.settingsGet),
   updateSettings: (patch) => invoke(CHANNELS.settingsUpdate, patch),

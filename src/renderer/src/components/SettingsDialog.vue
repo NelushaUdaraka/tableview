@@ -14,7 +14,7 @@ import { DEFAULT_SETTINGS } from '@shared/types'
 import { useSettingsStore } from '../stores/settings'
 import { useUpdateStore } from '../stores/updates'
 
-defineEmits<{ (event: 'close'): void }>()
+defineEmits<{ (event: 'close'): void; (event: 'snippets'): void }>()
 const settings = useSettingsStore()
 const updates = useUpdateStore()
 
@@ -155,6 +155,17 @@ const THEMES: { value: 'dark' | 'light' | 'system'; label: string; icon: IconNam
         </label>
       </div>
 
+      <div class="settings__snippets">
+        <div class="field">
+          <span class="field__label">Snippets</span>
+          <span class="field__hint">
+            Reusable pieces of T-SQL the editor completes by their prefix, such as
+            <code class="mono">tran</code> for a guarded transaction.
+          </span>
+        </div>
+        <button class="btn btn--sm" @click="$emit('snippets')">Manage snippets…</button>
+      </div>
+
       <hr class="rule" />
 
       <label class="checkbox">
@@ -257,6 +268,14 @@ const THEMES: { value: 'dark' | 'light' | 'system'; label: string; icon: IconNam
 .settings__row {
   display: flex;
   gap: 16px;
+}
+.settings__snippets {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.settings__snippets .field {
+  flex: 1;
 }
 .settings__notify {
   display: flex;

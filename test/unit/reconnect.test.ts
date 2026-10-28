@@ -13,7 +13,7 @@ import {
   isHopeless,
   planReconnect
 } from '../../src/main/db/reconnect'
-import { SSM_CREDENTIALS_EXPIRED } from '../../src/shared/types'
+import { CERTIFICATE_NOT_TRUSTED, SSM_CREDENTIALS_EXPIRED } from '../../src/shared/types'
 
 const dropped = new Error('socket hang up')
 
@@ -55,6 +55,14 @@ describe('planReconnect', () => {
 
     expect(planReconnect(1, expired)).toEqual({ retry: false, delayMs: 0 })
     expect(planReconnect(1, refused)).toEqual({ retry: false, delayMs: 0 })
+  })
+
+  // The certificate will be the same one next time; only the user can decide to trust it.
+  it('does not retry a certificate this computer does not trust', () => {
+    const untrusted = Object.assign(new Error('self-signed certificate'), {
+      code: CERTIFICATE_NOT_TRUSTED
+    })
+    expect(planReconnect(1, untrusted)).toEqual({ retry: false, delayMs: 0 })
   })
 })
 

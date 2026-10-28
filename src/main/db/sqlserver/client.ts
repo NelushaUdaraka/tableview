@@ -41,6 +41,7 @@ import {
   READ_ONLY_CONNECTION,
   SESSION_LOST,
   SSM_CREDENTIALS_EXPIRED,
+  CERTIFICATE_NOT_TRUSTED,
   WRITE_NOT_CONFIRMED
 } from '../../../shared/types'
 import type { WriteGuard } from '../../../shared/writeMode'
@@ -442,9 +443,7 @@ export class SqlServerClient implements DbClient {
       await this.teardownTunnel()
 
       const certificate = untrustedCertificate(error)
-      if (certificate) {
-        throw codedError(certificate, (error as { code?: string }).code ?? 'ESOCKET')
-      }
+      if (certificate) throw codedError(certificate, CERTIFICATE_NOT_TRUSTED)
       if (forwardError) {
         const message = `Could not reach ${this.config.host}:${this.config.port} through the ${via} — ${forwardError.message}`
         const code = (forwardError as Error & { code?: string }).code

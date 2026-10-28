@@ -10,9 +10,9 @@ not there yet is the next release, still being prepared.
   server shows its key's fingerprint and asks whether to trust it; after that, a server answering
   with a different key is stopped with a warning before anything is sent to sign in.
 - New connections check the SQL Server's certificate instead of trusting any certificate. A server
-  with a certificate of its own making — most on a private network — now says so when you connect;
-  tick *Trust server certificate* under *Advanced* for it. Connections you already have keep the
-  setting they had.
+  with a certificate of its own making — most on a private network — now asks when you connect or
+  test whether to trust its certificate; *Trust and retry* turns *Trust server certificate* on and
+  connects. Connections you already have keep the setting they had.
 - Importing a connections file no longer takes an AWS CLI path from it, and exporting no longer
   writes one: a file someone sent you could otherwise choose which program runs when you connect.
 - Read-only connections now also refuse Service Broker statements that change a queue —

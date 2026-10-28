@@ -65,8 +65,11 @@ they do once open. Connecting through an AWS bastion has [a page of its own](aws
 - **The server's certificate is checked.** A new connection encrypts and does not take the
   server's certificate on trust, since an encrypted connection to whoever answered keeps out only
   those who are not trying. Most servers on a private network have a certificate of their own
-  making, which this computer has no way to check; connecting to one says so, and *Trust server
-  certificate* under *Advanced* lets it through. Through a tunnel the certificate is checked
+  making, which this computer has no way to check. Connecting to one, or testing it, asks whether
+  to trust its certificate, saying what that gives up, with *Cancel* focused: *Trust and retry*
+  turns on *Trust server certificate* (under *Advanced*) and tries again. From the list it is saved
+  with the connection; from the form it ticks the box, kept when the form is saved. The certificate
+  is the same next time, so a dropped connection is not retried over it. Through a tunnel the certificate is checked
   against the server's real name, not the `127.0.0.1` the driver dials. Connections saved before
   this keep the setting they had.
 - **SSH tunnelling** with password, private key (with passphrase) or agent auth, `~` expansion,

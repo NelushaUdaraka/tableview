@@ -28,6 +28,19 @@ function cellToText(value: CellValue, nullString: string): string {
   return formatCellFull(value)
 }
 
+/** What a spreadsheet takes for the start of a formula. */
+const FORMULA_START = /^[=+\-@\t\r]/
+
+/**
+ * Text a spreadsheet would run, made inert. Only text: a number or a date
+ * cannot hold a formula, and a string that is just a number — `-5` — is shown
+ * as one either way.
+ */
+function defuseFormula(value: CellValue, text: string): string {
+  if (typeof value !== 'string' || !FORMULA_START.test(text) || NUMERIC_TEXT.test(text)) return text
+  return `'${text}`
+}
+
 export function toDelimited(
   columns: ColumnMeta[],
   rows: CellValue[][],
@@ -42,10 +55,12 @@ export function toDelimited(
   if (includeHeader) {
     lines.push(columns.map((column) => escapeDelimited(column.name, delimiter)).join(delimiter))
   }
+  const text = (cell: CellValue): string => {
+    const plain = cellToText(cell, nullString)
+    return options.escapeFormulas ? defuseFormula(cell, plain) : plain
+  }
   for (const row of rows) {
-    lines.push(
-      row.map((cell) => escapeDelimited(cellToText(cell, nullString), delimiter)).join(delimiter)
-    )
+    lines.push(row.map((cell) => escapeDelimited(text(cell), delimiter)).join(delimiter))
   }
   return lines.join(eol) + (lines.length > 0 ? eol : '')
 }

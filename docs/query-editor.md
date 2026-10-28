@@ -5,7 +5,8 @@
 - **Snippets**: your own reusable pieces of T-SQL, inserted from completion by a short prefix, with
   placeholders Tab moves between — see below
 - Run all / run selection / run the statement under the cursor; cancel a running query
-- Scripts split on `GO` (like SSMS), so `BEGIN … END` bodies and `CREATE PROCEDURE` work; `GO 5` repeats
+- Scripts split on `GO` (like SSMS), so `BEGIN … END` bodies and `CREATE PROCEDURE` work; `GO 5` repeats,
+  and a `-- comment` after the `GO` is allowed, as SSMS and sqlcmd allow it
 - Multiple result sets per batch, rows-affected, `PRINT` output, and errors with their
   message number, state and line
 - Results sort by clicking a header — a local reorder, since the statement is yours to re-issue, not

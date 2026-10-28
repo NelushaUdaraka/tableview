@@ -120,6 +120,12 @@ describe('splitBatches', () => {
   it('handles a trailing GO with nothing after it', () => {
     expect(splitBatches('SELECT 1\nGO\n')).toHaveLength(1)
   })
+
+  it('splits on a GO followed by a line comment, as sqlcmd and SSMS do', () => {
+    const parts = splitBatches('CREATE PROCEDURE p AS SELECT 1\nGO -- end of p\nSELECT 2')
+    expect(parts.map((p) => p.text)).toEqual(['CREATE PROCEDURE p AS SELECT 1', 'SELECT 2'])
+    expect(splitBatches('SELECT 1\nGO 2 --twice\nSELECT 2')).toHaveLength(3)
+  })
 })
 
 describe('statementAt', () => {

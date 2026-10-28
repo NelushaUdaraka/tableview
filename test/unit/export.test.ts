@@ -78,6 +78,36 @@ describe('toDelimited', () => {
   it('produces an empty string for no rows and no header', () => {
     expect(toDelimited(columns, [], { format: 'csv', includeHeader: false })).toBe('')
   })
+
+  // Text from the database opened in a spreadsheet runs as a formula when it
+  // starts with one of these, and a formula can reach outside the sheet.
+  it('keeps text from running as a spreadsheet formula when asked', () => {
+    const text = ['=HYPERLINK("http://x","y")', '+1+1', '-2+3', '@SUM(A1)', '\tTAB', '\rCR', 'plain', '-5', '-1.5e3']
+    const csv = toDelimited(
+      [meta('v', 'string', 0)],
+      text.map((value) => [value]),
+      { format: 'csv', includeHeader: false, escapeFormulas: true }
+    )
+    expect(csv.split('\n').slice(0, -1)).toEqual([
+      `"'=HYPERLINK(""http://x"",""y"")"`,
+      "'+1+1",
+      "'-2+3",
+      "'@SUM(A1)",
+      "'\tTAB",
+      `"'\rCR"`,
+      'plain',
+      // A number is not a formula, and stays as it is.
+      '-5',
+      '-1.5e3'
+    ])
+  })
+
+  it('leaves numbers, and text it was not asked about, as they are', () => {
+    expect(toDelimited(columns, [[-1, '=1+1']], { format: 'csv', includeHeader: false })).toBe('-1,=1+1\n')
+    expect(
+      toDelimited(columns, [[-1, 'x']], { format: 'csv', includeHeader: false, escapeFormulas: true })
+    ).toBe('-1,x\n')
+  })
 })
 
 describe('rowToObject', () => {

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { SqlServerClient } from '../../src/main/db/sqlserver/client'
 import { buildCreateTableDdl } from '../../src/shared/sql/builder'
-import { isTagged } from '../../src/shared/types'
+import { CERTIFICATE_NOT_TRUSTED, isTagged } from '../../src/shared/types'
 import { connectedClient, createTestDatabase, seedTestDatabase } from './helpers'
 
 let client: SqlServerClient
@@ -33,6 +33,18 @@ describe('connection', () => {
     })
     await expect(bad.connect()).rejects.toThrow(/login failed/i)
     await bad.disconnect()
+  })
+
+  // The test server's certificate is self-signed, as most private ones are.
+  it('turns down a certificate it cannot check, and says how to trust it', async () => {
+    const strict = new SqlServerClient({
+      ...client.currentConfig,
+      options: { ...client.currentConfig.options, trustServerCertificate: false }
+    })
+    await expect(strict.connect()).rejects.toThrow(/self-signed certificate.*Trust server certificate/s)
+    // Coded, so the window can offer to trust it rather than match on the words.
+    await expect(strict.connect()).rejects.toMatchObject({ code: CERTIFICATE_NOT_TRUSTED })
+    await strict.disconnect()
   })
 
   it('fails fast on an unreachable host', async () => {

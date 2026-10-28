@@ -13,6 +13,7 @@ import {
   renderDriverType
 } from '../../src/main/db/sqlserver/types'
 import { mapDriverColumns, serializeError } from '../../src/main/db/sqlserver/client'
+import { untrustedCertificate } from '../../src/main/db/sqlserver/errors'
 import {
   DEFAULT_SQLSERVER_OPTIONS,
   DEFAULT_SSH_CONFIG,
@@ -119,6 +120,15 @@ describe('buildMssqlConfig', () => {
     expect(cfg.port).toBe(54321)
   })
 
+  // Through a tunnel the driver dials 127.0.0.1, which no certificate names.
+  it('checks the certificate against the real host when tunnelling', () => {
+    const tunnel = { localHost: '127.0.0.1', localPort: 54321 }
+    expect(built(config(), tunnel).options.serverName).toBe('db.example.com')
+    expect(built(config()).options.serverName).toBeUndefined()
+    // TLS takes no IP address as a server name.
+    expect(built(config({ host: '10.0.0.5' }), tunnel).options.serverName).toBeUndefined()
+  })
+
   it('ignores the named instance when tunnelling, since SQL Browser is UDP', () => {
     const cfg = built(
       config({ options: { ...DEFAULT_SQLSERVER_OPTIONS, instanceName: 'SQLEXPRESS' } }),
@@ -170,6 +180,44 @@ describe('buildSessionConfig', () => {
     expect(built.server).toBe('127.0.0.1')
     expect(built.port).toBe(54321)
     expect(built.options.encrypt).toBe(true)
+  })
+})
+
+describe('certificates', () => {
+  it('checks the server certificate unless a connection says otherwise', () => {
+    expect(DEFAULT_SQLSERVER_OPTIONS.encrypt).toBe(true)
+    expect(DEFAULT_SQLSERVER_OPTIONS.trustServerCertificate).toBe(false)
+  })
+
+  /** The shape mssql hands back for a certificate Node turned down. */
+  const refused = (code: string, reason: string): Error =>
+    Object.assign(new Error(`Failed to connect to db.example.com:1433 - ${reason}`), {
+      code: 'ESOCKET',
+      originalError: Object.assign(new Error(`Failed to connect - ${reason}`), {
+        cause: Object.assign(new Error(reason), { code })
+      })
+    })
+
+  it('says what to do about a certificate this computer does not trust', () => {
+    const message = untrustedCertificate(refused('DEPTH_ZERO_SELF_SIGNED_CERT', 'self-signed certificate'))
+    expect(message).toMatch(/db\.example\.com:1433/)
+    expect(message).toMatch(/self-signed certificate/)
+    expect(message).toMatch(/Trust server certificate/)
+  })
+
+  it('knows a name the certificate does not cover, and one that has expired', () => {
+    expect(
+      untrustedCertificate(refused('ERR_TLS_CERT_ALTNAME_INVALID', "Hostname/IP does not match certificate's altnames"))
+    ).toMatch(/Trust server certificate/)
+    expect(untrustedCertificate(refused('CERT_HAS_EXPIRED', 'certificate has expired'))).toMatch(
+      /certificate has expired/
+    )
+  })
+
+  it('leaves every other failure alone', () => {
+    expect(untrustedCertificate(new Error("Login failed for user 'sa'."))).toBeNull()
+    expect(untrustedCertificate(refused('ECONNREFUSED', 'connect ECONNREFUSED'))).toBeNull()
+    expect(untrustedCertificate('nothing like an error')).toBeNull()
   })
 })
 

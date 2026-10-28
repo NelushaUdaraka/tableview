@@ -4,7 +4,7 @@
  * Kept apart from the client so the policy can be read — and tested — without
  * a server to drop a connection from.
  */
-import { SSM_CREDENTIALS_EXPIRED } from '../../shared/types'
+import { CERTIFICATE_NOT_TRUSTED, SSM_CREDENTIALS_EXPIRED } from '../../shared/types'
 
 /**
  * Waits between attempts, in order.
@@ -29,13 +29,13 @@ export const MAX_RECONNECT_ATTEMPTS = 20
 /**
  * Whether reopening the connection could possibly work.
  *
- * Credentials that ran out and a login the server refuses are not going to fix
- * themselves, and retrying them for eight minutes only delays telling the user
- * the one thing they need to know.
+ * Credentials that ran out, a login the server refuses and a certificate this
+ * computer does not trust are not going to fix themselves, and retrying them
+ * for eight minutes only delays telling the user the one thing they need to know.
  */
 export function isHopeless(error: unknown): boolean {
   const code = (error as { code?: unknown } | null)?.code
-  return code === SSM_CREDENTIALS_EXPIRED || code === 'ELOGIN'
+  return code === SSM_CREDENTIALS_EXPIRED || code === 'ELOGIN' || code === CERTIFICATE_NOT_TRUSTED
 }
 
 export interface RetryDecision {

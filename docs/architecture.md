@@ -15,8 +15,12 @@ src/
 │   │                         activity.ts, the activity monitor's rows from the DMVs
 │   ├── tunnel/               ssh.ts, ssm.ts (AWS Session Manager), ec2Instances.ts
 │   │                         (the bastion picker's lookup, and the name a
-│   │                         connection resolves on connect), shared contract
-│   ├── storage/              JSON stores + credential vault
+│   │                         connection resolves on connect), hostKeys.ts (which
+│   │                         SSH servers to trust), shared contract
+│   ├── storage/              JSON stores + credential vault, knownHosts.ts
+│   ├── guards.ts             where a window may go, which links leave the app,
+│   │                         which files a window may read
+│   ├── hostKeyPrompt.ts      the dialog that asks about an SSH server's key
 │   ├── ipc/                  handlers, each wrapped in a result envelope
 │   ├── menu.ts, window.ts    native menu + roles, frameless windows and their state
 │   ├── closeGuard.ts         holds a window's close, and the quit, while it has unsaved work
@@ -148,7 +152,27 @@ to go through first time — a virus scanner or the search indexer holding eithe
 takes the same route but is also *coalesced*: dragging a window's edge raises `resize` dozens of
 times a second, and one write per event is both wasted work and the surest way to meet that lock.
 One write per burst, one more when the window closes, and a geometry write that cannot be made is
-logged rather than thrown — it is not worth failing the app over.
+logged rather than thrown — it is not worth failing the app over. The same locks can catch a read,
+which is retried too; one that outlasts the retries is not taken for a corrupt file. The defaults
+stand in until a read gets through, and nothing is written over the file meanwhile — a save made
+then would put the defaults, and whatever was added to them, in place of everything it held.
+
+**A window gets the app's API, so the main process limits what it can do with it.** The preload
+hands the same API to whatever page is in the window, so the window is kept on the app: a
+navigation anywhere else is cancelled (`will-navigate`), and a new window is never opened — an
+https link goes to the browser, and nothing else goes anywhere, since the OS runs a program for a
+`file:` or a registered scheme as readily as it opens a page. A file is read only if the window's
+own open dialog just picked it, and an export is written only where the save dialog says. The
+renderer runs sandboxed; the preload needs nothing from Node beyond Electron's bridge.
+
+**SSH servers are trusted the way `ssh` trusts them.** A tunnel is handed a policy (`tunnel/hostKeys.ts`)
+that knows the keys already trusted and can ask about one that is not; without one it trusts
+nobody. The key is checked in the handshake, before anything is sent to sign in. A key not yet
+trusted holds the handshake open while the user is asked, with its timer stopped — turning it
+down and dialling again would count against this address on a server that penalises connections
+that never log in, as OpenSSH 9.8 and later do. The question is a native dialog
+(`hostKeyPrompt.ts`): it decides whether a server gets a password, and is not the window's to
+answer.
 
 **A tab belongs to a pane, and only a pane's active tab is mounted.** The tab store holds one flat
 list of tabs and one or two panes naming which of them they hold. Because only the mounted tab can be

@@ -39,7 +39,9 @@ they do once open. Connecting through an AWS bastion has [a page of its own](aws
   it had, so the toast can say how many will need a password entering rather than leaving it to be
   discovered at connect time. A name already saved is left alone rather than imported beside
   itself, so re-importing the same file to pick up one new connection does not leave you with two
-  of everything.
+  of everything. Nor does an AWS CLI path travel, in either direction: it names a program this
+  machine runs on *Connect*, and a file someone sent has no business choosing that — one pointing at
+  a share on their server would have this machine run whatever they put there.
 - **…or brought over from TablePlus** — *Import from TablePlus…*, on the list's ⋮ and in the File
   menu, opens a new connection with the three steps for getting one out of TablePlus: right-click
   it in TablePlus's start window, choose *Copy as URL*, and press *Paste URL* here. The form fills
@@ -60,8 +62,25 @@ they do once open. Connecting through an AWS bastion has [a page of its own](aws
 - SQL Server logins, Windows/NTLM (with domain), and Azure AD password auth
 - TLS options: `encrypt`, `trustServerCertificate`, named instances, `ApplicationIntent=ReadOnly`,
   connect/request timeouts, pool sizing, application name
+- **The server's certificate is checked.** A new connection encrypts and does not take the
+  server's certificate on trust, since an encrypted connection to whoever answered keeps out only
+  those who are not trying. Most servers on a private network have a certificate of their own
+  making, which this computer has no way to check. Connecting to one, or testing it, asks whether
+  to trust its certificate, saying what that gives up, with *Cancel* focused: *Trust and retry*
+  turns on *Trust server certificate* (under *Advanced*) and tries again. From the list it is saved
+  with the connection; from the form it ticks the box, kept when the form is saved. The certificate
+  is the same next time, so a dropped connection is not retried over it. Through a tunnel the certificate is checked
+  against the server's real name, not the `127.0.0.1` the driver dials. Connections saved before
+  this keep the setting they had.
 - **SSH tunnelling** with password, private key (with passphrase) or agent auth, `~` expansion,
   keepalives, and an ephemeral loopback-only local port
+- **The SSH server is checked, as `ssh` checks it.** The first connection to a server shows its
+  key's fingerprint (`SHA256:…`, the form `ssh-keygen -l` prints) and asks whether to trust it;
+  *Trust and connect* keeps it, and from then on that address has to present the same key. One
+  that presents another gets a warning naming both, with *Cancel* as the default — a rebuilt server
+  shows a new key, and so does someone standing in for it to read the password. The key is checked
+  before anything is sent to sign in. The list is TableView's own (`known-hosts.json` in its data
+  folder), not `~/.ssh/known_hosts`.
 - **AWS SSM Session Manager** port forwarding — the app runs `aws ssm start-session` for you and
   points the connection at the port it opens, so there is no second terminal to babysit — see
   [Connecting through an AWS bastion](aws-ssm.md)

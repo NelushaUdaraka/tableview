@@ -18,6 +18,11 @@ import { exportConnections, importConnections } from '../lib/connectionTransfer'
 import { CONNECTION_SORT_OPTIONS, describeSort } from '../lib/sortConnections'
 import { groupConnections, hasGroups } from '../lib/connectionGroups'
 import { api } from '../lib/api'
+import {
+  isUntrustedCertificateError,
+  trustCertificateQuestion,
+  withTrustedCertificate
+} from '../lib/certificates'
 
 const connections = useConnectionStore()
 const confirmQuestion = useConfirmStore()
@@ -26,6 +31,7 @@ const readOnly = useReadOnlyStore()
 const settings = useSettingsStore()
 const toasts = useToastStore()
 
+const connectionForm = ref<InstanceType<typeof ConnectionForm> | null>(null)
 const editing = ref<SavedConnection | null>(null)
 /** The connection the open form is a copy of, when it is one. */
 const copiedFrom = ref<string | null>(null)
@@ -169,16 +175,65 @@ async function test(input: Partial<ConnectionConfig>): Promise<void> {
         'Connection succeeded',
         `${status.serverEdition ?? ''} ${status.serverVersion ?? ''}`.trim()
       )
-    } else if (!credentials.offerRefresh(editing.value, status.error, () => test(input))) {
+    } else if (
+      !credentials.offerRefresh(editing.value, status.error, () => test(input)) &&
+      !(await offerTrustOnTest(input, status.error))
+    ) {
       toasts.error('Connection failed', status.error?.message)
     }
   } catch (error) {
-    if (!credentials.offerRefresh(editing.value, error, () => test(input))) {
+    if (
+      !credentials.offerRefresh(editing.value, error, () => test(input)) &&
+      !(await offerTrustOnTest(input, error))
+    ) {
       toasts.fromError('Connection failed', error)
     }
   } finally {
     testing.value = false
   }
+}
+
+/**
+ * After a test turned down over the server's certificate, offers to trust it:
+ * yes ticks the form's box and tests again. Nothing is saved until Save, as
+ * with anything else in the form. True when the failure was that.
+ */
+async function offerTrustOnTest(input: Partial<ConnectionConfig>, error: unknown): Promise<boolean> {
+  if (!isUntrustedCertificateError(error)) return false
+  const target = {
+    name: input.name ?? editing.value?.name ?? 'this connection',
+    host: input.host ?? editing.value?.host ?? '',
+    port: input.port ?? editing.value?.port ?? 1433
+  }
+  if (await confirmQuestion.ask(trustCertificateQuestion(target, 'form'))) {
+    connectionForm.value?.trustServerCertificate()
+    await test(withTrustedCertificate(input))
+  }
+  return true
+}
+
+/**
+ * After a connect turned down over the server's certificate, offers to trust
+ * it: yes saves the setting with the connection and connects again. True when
+ * the failure was that.
+ */
+async function offerTrustOnConnect(
+  connection: SavedConnection,
+  error: unknown,
+  password?: string
+): Promise<boolean> {
+  if (!isUntrustedCertificateError(error)) return false
+  if (!(await confirmQuestion.ask(trustCertificateQuestion(connection, 'saved')))) return true
+  try {
+    // Only the options are sent; everything else saved with it stays as it is.
+    const trusted = await connections.save(
+      withTrustedCertificate({ id: connection.id, name: connection.name, options: connection.options })
+    )
+    await open(trusted, password)
+  } catch (error) {
+    toasts.fromError('Could not save the connection', error)
+  }
+  return true
 }
 
 /** Connects, prompting for a password when none is stored. */
@@ -192,10 +247,11 @@ async function open(connection: SavedConnection, password?: string): Promise<voi
 
   const status = await connections.connect(connection.id, password)
   if (status.state === 'error') {
-    // Expiry is the one connection failure with a fix worth offering in place.
-    const offered = credentials.offerRefresh(connection, status.error, () =>
-      open(connection, password)
-    )
+    // Expired credentials and an untrusted certificate are the failures with
+    // a fix worth offering in place.
+    const offered =
+      credentials.offerRefresh(connection, status.error, () => open(connection, password)) ||
+      (await offerTrustOnConnect(connection, status.error, password))
     if (!offered) toasts.error(`Could not connect to ${connection.name}`, status.error?.message)
   } else {
     passwordPrompt.value = null
@@ -721,6 +777,7 @@ function relativeTime(iso?: string): string {
       @close="showForm = false"
     >
       <ConnectionForm
+        ref="connectionForm"
         :connection="editing"
         :busy="testing"
         :groups="connections.groups"

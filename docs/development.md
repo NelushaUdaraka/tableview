@@ -119,7 +119,7 @@ and flips `AllowTcpForwarding` on, which the `linuxserver/openssh-server` image 
 ### End-to-end
 
 ```bash
-scripts/e2e.sh all          # or: smoke | connections | workspace | editing | editor | table-ui | table-tools | routines | auto-refresh | unsaved | read-only | confirm-writes | workbench | ssm-form | ssm-sso
+scripts/e2e.sh all          # or: smoke | connections | workspace | editing | editor | table-ui | table-tools | routines | auto-refresh | unsaved | read-only | confirm-writes | certificate | workbench | ssm-form | ssm-sso
 ```
 
 On a headless box it starts Xvfb itself. It needs Electron's usual Linux libraries:
@@ -202,6 +202,10 @@ The suites:
   list, and the row's ⋮ menu, turn a connection on and, after the question, off without connecting
   it; and in the form, unticking it asks over the form, Escape answers only the question, and
   *Cancel* leaves the saved setting as it was
+- **certificate** — a connection that checks certificates, against the test server's self-signed
+  one. *Test connection* in the form asks to trust it, with the focus on *Cancel*; *Trust and retry*
+  ticks the form's box and the test succeeds, with nothing saved. *Connect* from the list asks too:
+  *Cancel* leaves it unconnected and untrusted, and *Trust and retry* saves the setting and connects
 - **confirm-writes** — saves a writable connection and one that confirms its writes, and checks the
   list, the status bar and the query and table toolbars mark only that one. A script that reads
   runs without a question; one that writes stops on the question, listing the `DELETE` with its line

@@ -107,6 +107,58 @@ const READ_OPENINGS = new Set([
 const WORD = /[\p{L}_@#][\p{L}\p{N}_@#$]*/gu
 const LEADING_WORD = /^[\p{L}_@#][\p{L}\p{N}_@#$]*/u
 
+/**
+ * Writes spelled with words that are not reserved — Service Broker's, and a
+ * sequence's `NEXT VALUE FOR` — so any of them could also be a name. They are
+ * known by the words that follow instead: a column can be called `send`, but
+ * `SEND ON CONVERSATION` is only ever the statement.
+ */
+interface Phrase {
+  words: string[]
+  description: string
+  /** Part of a statement rather than one of its own, like `INSERT … VALUES (NEXT VALUE FOR s)`. */
+  inStatement?: boolean
+}
+
+const PHRASES: Phrase[] = [
+  // RECEIVE needs nothing after it to be the statement; a name is caught by
+  // what comes before it instead (see `phraseAt`).
+  { words: ['RECEIVE'], description: 'takes messages off a queue' },
+  { words: ['SEND', 'ON', 'CONVERSATION'], description: 'puts a message on a queue' },
+  { words: ['BEGIN', 'DIALOG'], description: 'opens a conversation between services' },
+  { words: ['BEGIN', 'CONVERSATION', 'TIMER'], description: 'sets a timer on a conversation' },
+  { words: ['END', 'CONVERSATION'], description: 'ends a conversation' },
+  { words: ['MOVE', 'CONVERSATION'], description: 'moves a conversation to another group' },
+  {
+    words: ['NEXT', 'VALUE', 'FOR'],
+    description: 'uses up the next number of a sequence',
+    inStatement: true
+  }
+]
+
+/** Up to three words in a row, with nothing but space between them. */
+const WORD_RUN =
+  /([\p{L}_@#][\p{L}\p{N}_@#$]*)(?:\s+([\p{L}_@#][\p{L}\p{N}_@#$]*))?(?:\s+([\p{L}_@#][\p{L}\p{N}_@#$]*))?/uy
+const WORD_BEFORE = /([\p{L}_@#][\p{L}\p{N}_@#$]*)\s*$/u
+
+/** The phrase that starts at `offset` in masked code, if one does. */
+function phraseAt(code: string, offset: number): { keyword: string; phrase: Phrase } | null {
+  WORD_RUN.lastIndex = offset
+  const run = WORD_RUN.exec(code)
+  if (!run) return null
+  const words = run.slice(1).filter(Boolean).map((word) => word.toUpperCase())
+  const phrase = PHRASES.find((candidate) =>
+    candidate.words.every((word, index) => words[index] === word)
+  )
+  if (!phrase) return null
+
+  // `t.receive` and `x AS receive` are names.
+  const before = code.slice(Math.max(0, offset - 64), offset)
+  if (/\.\s*$/.test(before)) return null
+  if (WORD_BEFORE.exec(before)?.[1].toUpperCase() === 'AS') return null
+  return { keyword: phrase.words.join(' '), phrase }
+}
+
 /** The first thing in one batch that is not a read, or null when all of it reads. */
 export function findWrite(batch: string): WriteStatement | null {
   const code = maskNonCode(batch)
@@ -128,6 +180,14 @@ export function findWrite(batch: string): WriteStatement | null {
   for (const match of code.matchAll(WORD)) {
     const word = match[0].toUpperCase()
     const offset = match.index
+    const found = phraseAt(code, offset)
+    if (found) {
+      return {
+        keyword: found.keyword,
+        line: lineAt(offset),
+        description: `${found.keyword} ${found.phrase.description}`
+      }
+    }
     if (word === 'INTO') {
       // FETCH … INTO @a fills variables; INTO anything else makes a table.
       const next = /\s*(\S?)/y
@@ -168,6 +228,8 @@ function unknownOpening(batch: string, code: string): { keyword: string; offset:
   // `;WITH` and `(SELECT …) UNION …` both open with punctuation.
   const start = /[^\s;(]/.exec(code)
   if (!start) return null
+  // Said by the scan that follows, in its own words: `RECEIVE`, `END CONVERSATION`.
+  if (phraseAt(code, start.index)) return null
 
   const word = LEADING_WORD.exec(code.slice(start.index))?.[0]
   if (word) {
@@ -352,6 +414,20 @@ function scanBatch(
     if (upper === 'USE') {
       const name = readName(batch, tokens, i + 1)
       if (name) database = name.last
+      continue
+    }
+
+    const found = phraseAt(code, token.start)
+    if (found) {
+      // A sequence used by an INSERT is part of the write already listed.
+      if (found.phrase.inStatement && statementWrite) continue
+      add(token.start, found.keyword, `${found.keyword} ${found.phrase.description}`)
+      if (!found.phrase.inStatement) {
+        statementWrite = upper
+        sawOutput = false
+      }
+      // Past the rest of the phrase, which says nothing more.
+      i += found.phrase.words.length - 1
       continue
     }
 

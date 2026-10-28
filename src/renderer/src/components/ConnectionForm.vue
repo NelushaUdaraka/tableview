@@ -524,6 +524,16 @@ const canSubmit = computed(
   () => !nameError.value && !hostError.value && !ssmError.value && !props.busy
 )
 
+/**
+ * Ticks *Trust server certificate*: the screen's *Trust and retry*, after a
+ * test the certificate was turned down over, is the user ticking it.
+ */
+function trustServerCertificate(): void {
+  form.options!.trustServerCertificate = true
+}
+
+defineExpose({ trustServerCertificate })
+
 /** Omits untouched secrets so the main process keeps the stored value. */
 function payload(): Partial<ConnectionConfig> & { name: string } {
   const ssh = { ...form.ssh! }

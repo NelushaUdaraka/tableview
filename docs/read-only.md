@@ -59,6 +59,14 @@ procedure called by name at the head of a batch — which SQL Server runs withou
 refused outright, whatever they would have done. A raw `WHERE` in the filter bar is checked the
 same way, since a `;` ends the `SELECT` there as readily as anywhere.
 
+A few writes are spelled with words that are *not* reserved, so a column could have their name.
+Those are known by the words that come with them instead: Service Broker's `RECEIVE` (which takes
+messages off a queue for good, `WAITFOR (RECEIVE …)` included), `SEND ON CONVERSATION`,
+`BEGIN DIALOG`, `BEGIN CONVERSATION TIMER`, `END CONVERSATION` and `MOVE CONVERSATION`, and a
+sequence's `NEXT VALUE FOR`, which uses a number up. `t.receive`, `x AS send` and
+`FETCH NEXT` are names and paging, and go through; a column called `receive` on its own is taken
+for the statement, so write it `[receive]` or with its table.
+
 **An estimated plan is not a run.** *Estimated plan* (`Ctrl+L`) sends the script under
 `SET SHOWPLAN_XML ON`, when SQL Server compiles each statement and runs none of them, so a read-only
 connection gives the plan of a `DELETE` as readily as of a `SELECT`, and a confirm-writes one does

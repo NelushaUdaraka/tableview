@@ -136,7 +136,7 @@ const api: RendererApi = {
   readClipboardText: () => invoke(CHANNELS.clipboardReadText),
 
   openFile: (filters) => invoke(CHANNELS.dialogOpenFile, filters),
-  readTextFile: (filePath) => invoke('file:readText', filePath),
+  readTextFile: (filePath) => invoke(CHANNELS.fileReadText, filePath),
   saveTextFile: (text, defaultPath, kind) =>
     invoke(CHANNELS.dialogSaveFile, text, defaultPath, kind),
 

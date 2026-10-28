@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { CellValue, ColumnMeta, ExportFormat } from '@shared/types'
+import type { CellValue, ColumnMeta, ExportFormat, ExportOptions } from '@shared/types'
 import { exportRows } from '@shared/export'
 import AppIcon from './AppIcon.vue'
 import BaseModal from './BaseModal.vue'
@@ -20,6 +20,7 @@ const format = ref<ExportFormat>('csv')
 const includeHeader = ref(true)
 const delimiter = ref(',')
 const nullString = ref('')
+const escapeFormulas = ref(true)
 const busy = ref(false)
 
 const FORMATS: { value: ExportFormat; label: string; title: string }[] = [
@@ -33,16 +34,20 @@ const FORMATS: { value: ExportFormat; label: string; title: string }[] = [
 
 const isDelimited = computed(() => format.value === 'csv' || format.value === 'tsv')
 
+/** What the preview, the file and the clipboard are all written with. */
+const options = computed<ExportOptions>(() => ({
+  format: format.value,
+  includeHeader: includeHeader.value,
+  delimiter: isDelimited.value ? delimiter.value : undefined,
+  nullString: nullString.value,
+  tableName: props.tableName,
+  escapeFormulas: isDelimited.value && escapeFormulas.value
+}))
+
 const preview = computed(() => {
   const sample = props.rows.slice(0, 12)
   try {
-    return exportRows(props.columns, sample, {
-      format: format.value,
-      includeHeader: includeHeader.value,
-      delimiter: isDelimited.value ? delimiter.value : undefined,
-      nullString: nullString.value,
-      tableName: props.tableName
-    })
+    return exportRows(props.columns, sample, options.value)
   } catch (error) {
     return String(error)
   }
@@ -52,11 +57,7 @@ async function save(): Promise<void> {
   busy.value = true
   try {
     const target = await api.exportToFile({
-      format: format.value,
-      includeHeader: includeHeader.value,
-      delimiter: isDelimited.value ? delimiter.value : undefined,
-      nullString: nullString.value,
-      tableName: props.tableName,
+      ...options.value,
       columns: props.columns,
       rows: props.rows
     })
@@ -72,13 +73,7 @@ async function save(): Promise<void> {
 }
 
 async function copy(): Promise<void> {
-  const text = exportRows(props.columns, props.rows, {
-    format: format.value,
-    includeHeader: includeHeader.value,
-    delimiter: isDelimited.value ? delimiter.value : undefined,
-    nullString: nullString.value,
-    tableName: props.tableName
-  })
+  const text = exportRows(props.columns, props.rows, options.value)
   await api.copyToClipboard(text)
   toasts.info('Copied to clipboard')
   emit('close')
@@ -124,6 +119,15 @@ async function copy(): Promise<void> {
       <label v-if="isDelimited || format === 'markdown'" class="checkbox">
         <input v-model="includeHeader" type="checkbox" />
         <span>Include a header row</span>
+      </label>
+
+      <label
+        v-if="isDelimited"
+        class="checkbox"
+        title="Text that starts with = + - or @ gets a ' in front, so a spreadsheet shows it rather than running it as a formula"
+      >
+        <input v-model="escapeFormulas" type="checkbox" />
+        <span>Keep text from running as a spreadsheet formula</span>
       </label>
 
       <div class="field">

@@ -31,6 +31,12 @@ let writeCounter = 0
 
 export class JsonStore<T> {
   private cache: T | null = null
+  /**
+   * Set while the file is there but held by someone else: what the app is
+   * looking at are the defaults, not what the file holds, so nothing may be
+   * written over it until a read gets through.
+   */
+  private unread = false
 
   constructor(
     private readonly filePath: string,
@@ -40,10 +46,21 @@ export class JsonStore<T> {
   read(): T {
     if (this.cache !== null) return this.cache
     try {
-      const raw = fs.readFileSync(this.filePath, 'utf8')
+      const raw = readWithRetries(this.filePath)
       this.cache = JSON.parse(raw) as T
+      this.unread = false
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code
+      if (code && TRANSIENT_CODES.has(code)) {
+        // A lock that outlasted the retries is still not a corrupt file. The
+        // defaults stand in for now, uncached, so the next read tries again.
+        // eslint-disable-next-line no-console
+        console.error(`[store] could not read ${this.filePath} for now:`, error)
+        this.unread = true
+        return this.defaults()
+      }
+      // Gone, or unreadable for good: either way there is nothing left to keep.
+      this.unread = false
       if (code !== 'ENOENT') {
         // Keep a corrupt file rather than silently discarding the user's data.
         try {
@@ -60,6 +77,13 @@ export class JsonStore<T> {
   }
 
   write(value: T): void {
+    // Writing now would put the defaults, and whatever was added to them, in
+    // place of everything the file holds.
+    if (this.unread) {
+      throw new Error(
+        `${path.basename(this.filePath)} could not be read, so it was not written over. Try again in a moment.`
+      )
+    }
     this.cache = value
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true })
     const json = JSON.stringify(value, null, 2)
@@ -120,6 +144,19 @@ export class JsonStore<T> {
   /** Drops the in-memory copy so the next read hits disk. */
   invalidate(): void {
     this.cache = null
+  }
+}
+
+/** Reads the file, waiting out a lock the way a write's rename does. */
+function readWithRetries(filePath: string): string {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return fs.readFileSync(filePath, 'utf8')
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? ''
+      if (attempt >= COMMIT_ATTEMPTS || !TRANSIENT_CODES.has(code)) throw error
+      sleep(COMMIT_BACKOFF_MS * attempt)
+    }
   }
 }
 

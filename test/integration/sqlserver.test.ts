@@ -35,6 +35,16 @@ describe('connection', () => {
     await bad.disconnect()
   })
 
+  // The test server's certificate is self-signed, as most private ones are.
+  it('turns down a certificate it cannot check, and says how to trust it', async () => {
+    const strict = new SqlServerClient({
+      ...client.currentConfig,
+      options: { ...client.currentConfig.options, trustServerCertificate: false }
+    })
+    await expect(strict.connect()).rejects.toThrow(/self-signed certificate.*Trust server certificate/s)
+    await strict.disconnect()
+  })
+
   it('fails fast on an unreachable host', async () => {
     const bad = new SqlServerClient({
       ...client.currentConfig,

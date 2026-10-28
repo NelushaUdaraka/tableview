@@ -79,6 +79,7 @@ import { checkSsmPrerequisites } from '../tunnel/ssmPreflight'
 import { SsoLogin, SsoLoginCancelled } from '../tunnel/ssoLogin'
 import { listSsmInstances } from '../tunnel/ec2Instances'
 import { UpdateController } from '../updater'
+import { GrantedFiles, isWebPage } from '../guards'
 
 export interface IpcContext {
   registry: ConnectionRegistry
@@ -336,7 +337,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       const login = new SsoLogin(config, {
         // Only a web page goes to the browser, whatever the CLI printed.
         openUrl: (url) =>
-          /^https:\/\//i.test(url) ? shell.openExternal(url) : Promise.reject(new Error('not a web page')),
+          isWebPage(url) ? shell.openExternal(url) : Promise.reject(new Error('not a web page')),
         onPrompt: (prompt) => sendToWindow(call, CHANNELS.eventSsoLoginPrompt, { loginId, ...prompt })
       })
       ssoLogins.get(loginId)?.cancel()
@@ -613,26 +614,23 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   // -- export & files -------------------------------------------------------
 
+  // Always to where the save dialog says: a path from the window could be
+  // any file the user can write.
   handle(CHANNELS.exportToFile, async (call, request: ExportRequest): Promise<string | null> => {
     const text = exportRows(request.columns, request.rows, request)
-    let target = request.filePath
+    const extension = EXPORT_EXTENSIONS[request.format]
+    const result = await showSaveDialog(call, {
+      title: 'Export results',
+      defaultPath: `${request.tableName ?? 'export'}.${extension}`,
+      filters: [
+        { name: request.format.toUpperCase(), extensions: [extension] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    })
+    if (result.canceled || !result.filePath) return null
 
-    if (!target) {
-      const extension = EXPORT_EXTENSIONS[request.format]
-      const result = await showSaveDialog(call, {
-        title: 'Export results',
-        defaultPath: `${request.tableName ?? 'export'}.${extension}`,
-        filters: [
-          { name: request.format.toUpperCase(), extensions: [extension] },
-          { name: 'All files', extensions: ['*'] }
-        ]
-      })
-      if (result.canceled || !result.filePath) return null
-      target = result.filePath
-    }
-
-    await fs.writeFile(target, text, 'utf8')
-    return target
+    await fs.writeFile(result.filePath, text, 'utf8')
+    return result.filePath
   })
 
   handle(CHANNELS.exportToClipboard, (_call, text: string) => {
@@ -668,13 +666,22 @@ export function registerIpcHandlers(context: IpcContext): void {
       const result = call.window
         ? await dialog.showOpenDialog(call.window, options)
         : await dialog.showOpenDialog(options)
-      return result.canceled ? null : (result.filePaths[0] ?? null)
+      const picked = result.canceled ? null : (result.filePaths[0] ?? null)
+      if (picked && call.window) grantedFiles.grant(call.window.webContents.id, picked)
+      return picked
     }
   )
 
   // Whatever the file was saved as — a CSV out of Excel is often UTF-16 or
-  // Windows-1252 rather than UTF-8 — it arrives as text.
-  handle('file:readText', async (_call, filePath: string) => decodeText(await fs.readFile(filePath)))
+  // Windows-1252 rather than UTF-8 — it arrives as text. Only a file the
+  // window's own open dialog just picked: the path is the window's to send,
+  // and the user's keys and the app's own data are files too.
+  handle(CHANNELS.fileReadText, async (call, filePath: string) => {
+    if (!call.window || !grantedFiles.take(call.window.webContents.id, filePath)) {
+      throw new Error('Only a file picked in this window can be opened')
+    }
+    return decodeText(await fs.readFile(filePath))
+  })
 
   handle(CHANNELS.dialogSaveFile, async (call, text: string, defaultPath?: string, kind?: SaveKind) => {
     const what = SAVE_KINDS[kind ?? 'sql'] ?? SAVE_KINDS.sql
@@ -691,7 +698,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     return result.filePath
   })
 
-  handle(CHANNELS.shellOpenExternal, (_call, url: string) => shell.openExternal(url))
+  handle(CHANNELS.shellOpenExternal, (_call, url: string) => {
+    if (!isWebPage(url)) throw new Error('Only a web page can be opened in the browser')
+    return shell.openExternal(url)
+  })
 
   // -- notifications -----------------------------------------------------------
   // A long query that finished while its window was behind another says so on
@@ -756,6 +766,14 @@ const ssoLogins = new Map<string, SsoLogin>()
 
 /** Tabs waiting for the window they were opened for to ask what it is showing. */
 const pendingTabs = new Map<number, DetachedTab>()
+
+/** Files each window has picked to open, by its contents' id. */
+const grantedFiles = new GrantedFiles()
+
+/** Lets go of what a closed window was holding here. */
+export function forgetWindow(contentsId: number): void {
+  grantedFiles.forget(contentsId)
+}
 
 export function setWindowFactory(
   factory: (position?: { x: number; y: number }) => BrowserWindow | null

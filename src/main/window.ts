@@ -137,7 +137,8 @@ export class WindowManager {
       autoHideMenuBar: false,
       webPreferences: {
         preload: preloadPath,
-        sandbox: false,
+        // The preload needs nothing from Node beyond Electron's own bridge.
+        sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
         spellcheck: false

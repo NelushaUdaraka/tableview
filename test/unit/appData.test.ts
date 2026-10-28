@@ -87,6 +87,62 @@ describe('JsonStore', () => {
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ a: 9 })
   })
 
+  // The same locks can catch a read. That is not a corrupt file, and starting
+  // from the defaults would let the next save write over everything in it.
+  const busy = (): never => {
+    throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })
+  }
+
+  it('retries a read the filesystem refuses for a moment', () => {
+    const file = path.join(dir, 'busy.json')
+    fs.writeFileSync(file, JSON.stringify({ a: 5 }))
+    const read = vi.spyOn(fs, 'readFileSync').mockImplementationOnce(busy)
+
+    const value = new JsonStore(file, () => ({ a: 0 })).read()
+    read.mockRestore()
+
+    expect(value).toEqual({ a: 5 })
+  })
+
+  it('never writes over a file it could not read', () => {
+    const file = path.join(dir, 'held.json')
+    fs.writeFileSync(file, JSON.stringify({ items: ['prod', 'staging', 'dev'] }))
+    const read = vi.spyOn(fs, 'readFileSync').mockImplementation(busy)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const store = new JsonStore<{ items: string[] }>(file, () => ({ items: [] }))
+
+    expect(store.read()).toEqual({ items: [] })
+    expect(() => store.update((current) => ({ items: [...current.items, 'new'] }))).toThrow(
+      /could not be read/
+    )
+    read.mockRestore()
+
+    expect(fs.readdirSync(dir).some((name) => name.includes('corrupt'))).toBe(false)
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ items: ['prod', 'staging', 'dev'] })
+    // Once the lock has gone, the file is read rather than the defaults kept.
+    expect(store.update((current) => ({ items: [...current.items, 'new'] })).items).toEqual([
+      'prod',
+      'staging',
+      'dev',
+      'new'
+    ])
+  })
+
+  it('writes again once a file it could not read has gone', () => {
+    const file = path.join(dir, 'gone.json')
+    fs.writeFileSync(file, JSON.stringify({ a: 1 }))
+    const read = vi.spyOn(fs, 'readFileSync').mockImplementation(busy)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const store = new JsonStore(file, () => ({ a: 0 }))
+    store.read()
+    read.mockRestore()
+    fs.rmSync(file)
+
+    expect(store.read()).toEqual({ a: 0 })
+    expect(() => store.write({ a: 2 })).not.toThrow()
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ a: 2 })
+  })
+
   it('leaves no temp file behind when a write cannot be committed', () => {
     // A directory standing where the file should be: nothing can be renamed
     // onto it and nothing can be written over it either.

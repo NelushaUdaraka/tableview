@@ -771,12 +771,17 @@ export interface ExportOptions {
   delimiter?: string
   nullString?: string
   lineEnding?: '\n' | '\r\n'
+  /**
+   * CSV and TSV only: text that a spreadsheet would run as a formula — it
+   * starts with `=`, `+`, `-`, `@`, a tab or a carriage return — goes out with
+   * a `'` in front, which the spreadsheet shows as the text it is.
+   */
+  escapeFormulas?: boolean
 }
 
 export interface ExportRequest extends ExportOptions {
   columns: ColumnMeta[]
   rows: CellValue[][]
-  filePath?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -851,7 +856,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
 export const DEFAULT_SQLSERVER_OPTIONS: SqlServerOptions = {
   encrypt: true,
-  trustServerCertificate: true,
+  // Encryption with a certificate nobody checked keeps out only those who are
+  // not trying: anyone on the path can stand in for the server. A server with
+  // a self-signed certificate is let in by ticking "Trust server certificate".
+  trustServerCertificate: false,
   applicationName: 'TableView',
   connectTimeoutMs: 15000,
   requestTimeoutMs: 60000,

@@ -8,11 +8,21 @@ import { ConnectionRegistry } from './db/registry'
 import { AppData } from './storage/appData'
 import { createVault } from './storage/crypto'
 import { carryOverLegacyProfile } from './storage/legacyProfile'
-import { registerIpcHandlers, scopeForWindow, setWindowFactory, setWindowLocator } from './ipc'
+import {
+  forgetWindow,
+  registerIpcHandlers,
+  scopeForWindow,
+  setWindowFactory,
+  setWindowLocator
+} from './ipc'
+import { isAppUrl, isWebPage } from './guards'
 import { buildMenu } from './menu'
 import { WindowManager } from './window'
 import { closeGuard } from './closeGuard'
 import { UpdateController, runningAppImage, updateMode } from './updater'
+import { KnownHosts } from './storage/knownHosts'
+import { hostKeyPolicy } from './tunnel/hostKeys'
+import { askAboutHostKey } from './hostKeyPrompt'
 
 // One process owns the settings files; a second launch focuses the existing
 // window rather than competing for them. Extra windows come from File → New
@@ -38,8 +48,15 @@ if (!app.requestSingleInstanceLock()) {
 // the one its Start menu shortcut was installed with: the installer's appId.
 if (process.platform === 'win32') app.setAppUserModelId('com.tableview.app')
 
-const registry = new ConnectionRegistry()
 let windows: WindowManager | null = null
+// SSH servers are trusted the way ssh trusts them: asked about once, then
+// held to the same key. The question goes to the window being worked in.
+const registry = new ConnectionRegistry({
+  hostKeys: hostKeyPolicy(
+    new KnownHosts(path.join(app.getPath('userData'), 'known-hosts.json')),
+    (question) => askAboutHostKey(question, windows?.current ?? null)
+  )
+})
 let updates: UpdateController | null = null
 /** Running from an AppImage, which then replaces its own file to update. */
 const appImage = runningAppImage(process.env, process.execPath)
@@ -102,18 +119,29 @@ function createWindow(position?: { x: number; y: number }): BrowserWindow | null
   if (!windows) return null
   const window = windows.create(path.join(__dirname, '../preload/index.js'), position)
 
-  // Keep navigation inside the app; open real links in the user's browser.
+  // No window of the app's opens; a web page asked for goes to the browser,
+  // and nothing else goes anywhere.
   window.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    if (isWebPage(url)) void shell.openExternal(url)
     return { action: 'deny' }
+  })
+
+  // The window stays on the app. Any page it went to would be handed the same
+  // API the app has — and a file dropped where nothing takes it, or a link
+  // with no target, is all it takes to go. The first load raises no event, so
+  // everything after it is measured against the page that load put there.
+  window.webContents.on('will-navigate', (event, url) => {
+    if (!isAppUrl(url, window.webContents.getURL())) event.preventDefault()
   })
 
   // Unsaved work is asked about before the window goes.
   closeGuard.watch(window)
 
   // A window's connections belong to it alone, so close them with it.
+  const contentsId = window.webContents.id
   window.on('closed', () => {
     void registry.closeScope(scopeForWindow(window))
+    forgetWindow(contentsId)
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {

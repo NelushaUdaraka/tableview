@@ -228,6 +228,9 @@ connection, any more than any other edit does.
 ## Structure and export
 
 - Export result sets or whole tables to CSV, TSV, JSON, JSON Lines, SQL `INSERT`s or Markdown —
-  with a live preview — to a file or the clipboard
+  with a live preview — to a file or the clipboard. CSV and TSV keep text from running as a
+  spreadsheet formula, on unless it is unticked: text that starts with `=`, `+`, `-` or `@` gets a
+  `'` in front, which a spreadsheet shows as the text it is. Numbers, `-5` among them, are left
+  alone. A file is always written where the save dialog says.
 - Structure tab: columns, indexes (including filtered and `INCLUDE`d), foreign keys in both
   directions, check/unique/default constraints, triggers, and a regenerated `CREATE TABLE` script

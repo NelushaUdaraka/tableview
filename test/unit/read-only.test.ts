@@ -32,7 +32,11 @@ describe('findWrite: what a read-only connection lets through', () => {
     ],
     ['a name with a letter outside ASCII before the word', 'SELECT ÄDELETE FROM t'],
     ['nothing at all', ''],
-    ['only a comment', '-- nothing to run']
+    ['only a comment', '-- nothing to run'],
+    // The Service Broker words are not reserved, so they can be names.
+    ['columns called receive and send', 'SELECT t.receive, t.send, x AS receive FROM t'],
+    ['paging with FETCH NEXT', 'SELECT * FROM t ORDER BY id OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY'],
+    ['a conversation looked at, not changed', 'SELECT * FROM sys.conversation_endpoints']
   ])('lets through %s', (_label, sql) => {
     expect(findWrite(sql)).toBeNull()
   })
@@ -69,7 +73,41 @@ describe('findWrite: what it refuses', () => {
     ],
     ["DBCC CHECKIDENT ('t', RESEED, 0)", 'DBCC', 'DBCC acts on the server itself'],
     ["BACKUP DATABASE x TO DISK = 'x.bak'", 'BACKUP', 'BACKUP acts on the server itself'],
-    ['KILL 52', 'KILL', 'KILL acts on the server itself']
+    ['KILL 52', 'KILL', 'KILL acts on the server itself'],
+    // Service Broker: a RECEIVE takes the message off the queue for good.
+    [
+      'WAITFOR (RECEIVE TOP (1) * FROM dbo.q), TIMEOUT 1000',
+      'RECEIVE',
+      'RECEIVE takes messages off a queue'
+    ],
+    ['SELECT 1; RECEIVE * FROM dbo.q', 'RECEIVE', 'RECEIVE takes messages off a queue'],
+    ['RECEIVE * FROM dbo.q', 'RECEIVE', 'RECEIVE takes messages off a queue'],
+    [
+      "DECLARE @h uniqueidentifier; SEND ON CONVERSATION @h (N'x')",
+      'SEND ON CONVERSATION',
+      'SEND ON CONVERSATION puts a message on a queue'
+    ],
+    [
+      "DECLARE @h uniqueidentifier; BEGIN DIALOG CONVERSATION @h FROM SERVICE a TO SERVICE 'b'",
+      'BEGIN DIALOG',
+      'BEGIN DIALOG opens a conversation between services'
+    ],
+    [
+      "DECLARE @h uniqueidentifier; BEGIN CONVERSATION TIMER (@h) TIMEOUT = 60",
+      'BEGIN CONVERSATION TIMER',
+      'BEGIN CONVERSATION TIMER sets a timer on a conversation'
+    ],
+    ['END CONVERSATION @h', 'END CONVERSATION', 'END CONVERSATION ends a conversation'],
+    [
+      'SELECT 1; MOVE CONVERSATION @h TO @g',
+      'MOVE CONVERSATION',
+      'MOVE CONVERSATION moves a conversation to another group'
+    ],
+    [
+      'SELECT NEXT VALUE FOR dbo.order_numbers',
+      'NEXT VALUE FOR',
+      'NEXT VALUE FOR uses up the next number of a sequence'
+    ]
   ])('refuses %s', (sql, keyword, description) => {
     expect(findWrite(sql)).toEqual({ keyword, line: 1, description })
   })
@@ -191,6 +229,14 @@ describe('findWritesInScript: what a confirm-writes connection lists', () => {
     expect(keywords('DECLARE @a int; FETCH NEXT FROM c INTO @a')).toEqual([])
     expect(keywords("sp_rename 'a', 'b'")).toEqual(['sp_rename'])
     expect(keywords('INSERT INTO t EXEC dbo.load')).toEqual(['INSERT', 'EXEC'])
+  })
+
+  it('lists Service Broker statements, and a sequence used outside another write', () => {
+    expect(
+      keywords("WAITFOR (RECEIVE TOP (1) * FROM q); SEND ON CONVERSATION @h (N'x')\nEND CONVERSATION @h")
+    ).toEqual(['RECEIVE', 'SEND ON CONVERSATION', 'END CONVERSATION'])
+    expect(keywords('SELECT NEXT VALUE FOR dbo.s')).toEqual(['NEXT VALUE FOR'])
+    expect(keywords('INSERT t (id) VALUES (NEXT VALUE FOR dbo.s)')).toEqual(['INSERT'])
   })
 
   it('says which database a USE moved to', () => {

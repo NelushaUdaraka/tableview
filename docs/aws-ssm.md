@@ -54,7 +54,8 @@ and the picker only fills it in.
 
 ## Local port and prerequisites
 
-Set a fixed local port (blank picks a free one) and an explicit CLI path if you need them.
+Set a fixed local port (blank picks a free one) and an explicit CLI path if you need them. The CLI
+path stays on this machine: it is left out of an export, and an import never takes one from a file.
 **Check prerequisites** verifies the three things that actually go wrong — the AWS CLI, the Session
 Manager plugin, and whether your credentials are still valid — and `aws sts get-caller-identity`
 confirms which identity you are about to connect as. When the credentials fail because an AWS SSO session has

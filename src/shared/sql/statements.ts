@@ -158,11 +158,18 @@ function atLineStart(sql: string, offset: number): boolean {
   return i < 0 || sql[i] === '\n' || sql[i] === '\r'
 }
 
-/** True when only whitespace separates `offset` from the end of its line. */
-function atLineEnd(sql: string, offset: number): boolean {
+/**
+ * Where the line holding `offset` ends, when only whitespace — or whitespace
+ * and a `--` comment, which sqlcmd and SSMS allow after a `GO` — comes before
+ * that; -1 when other text shares the line.
+ */
+function lineEndAfter(sql: string, offset: number): number {
   let i = offset
   while (i < sql.length && (sql[i] === ' ' || sql[i] === '\t')) i += 1
-  return i >= sql.length || sql[i] === '\n' || sql[i] === '\r'
+  if (sql.startsWith('--', i)) {
+    while (i < sql.length && sql[i] !== '\n' && sql[i] !== '\r') i += 1
+  }
+  return i >= sql.length || sql[i] === '\n' || sql[i] === '\r' ? i : -1
 }
 
 /** Offsets of separators that are real code, not text inside a literal. */
@@ -196,8 +203,9 @@ function findSeparators(sql: string, kinds: SeparatorKind[]): Separator[] {
       let match: RegExpExecArray | null
       while ((match = goRe.exec(segment)) !== null) {
         const absStart = token.start + match.index
-        const absEnd = absStart + match[0].length
-        if (!atLineStart(sql, absStart) || !atLineEnd(sql, absEnd)) continue
+        if (!atLineStart(sql, absStart)) continue
+        const absEnd = lineEndAfter(sql, absStart + match[0].length)
+        if (absEnd < 0) continue
         const repeat = match[1] ? Math.max(1, Number.parseInt(match[1], 10)) : 1
         separators.push({ start: absStart, end: absEnd, kind: 'go', repeat })
       }

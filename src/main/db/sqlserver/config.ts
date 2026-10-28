@@ -1,4 +1,5 @@
 /** Translation from the app's connection model into an mssql pool config. */
+import { isIP } from 'node:net'
 import type { config as MssqlConfig } from 'mssql'
 import { DEFAULT_SQLSERVER_OPTIONS, type ConnectionConfig } from '../../../shared/types'
 
@@ -56,6 +57,13 @@ export function buildMssqlConfig(
       rowCollectionOnDone: false,
       rowCollectionOnRequestCompletion: false
     }
+  }
+
+  // Through a tunnel the driver dials 127.0.0.1, which no certificate names;
+  // the certificate is checked against the server it is really for. TLS has
+  // no use for an IP address there, and is not given one.
+  if (useTunnel && connection.host && !isIP(connection.host)) {
+    ;(base.options as Record<string, unknown>).serverName = connection.host
   }
 
   if (options.instanceName && !useTunnel) {

@@ -13,7 +13,7 @@ import {
 } from '../../shared/types'
 import type { WriteGuard } from '../../shared/writeMode'
 import type { ClientStateEvent, DbClient, SessionChange } from './types'
-import { SqlServerClient, serializeError } from './sqlserver/client'
+import { SqlServerClient, serializeError, type ClientDeps } from './sqlserver/client'
 
 /**
  * Told about a connection that changed on its own, and which window's it is.
@@ -46,6 +46,9 @@ function guardOf(client: DbClient): WriteGuard {
 }
 
 export class ConnectionRegistry {
+  /** `deps` go to every client it makes: what decides which SSH servers to trust. */
+  constructor(private readonly deps: ClientDeps = {}) {}
+
   private readonly clients = new Map<string, DbClient>()
   private readonly errors = new Map<string, SerializedError>()
   private readonly connecting = new Set<string>()
@@ -87,7 +90,7 @@ export class ConnectionRegistry {
   private create(config: ConnectionConfig): DbClient {
     switch (config.engine) {
       case 'sqlserver':
-        return new SqlServerClient(config)
+        return new SqlServerClient(config, this.deps)
       default:
         throw new Error(`Unsupported engine: ${String(config.engine)}`)
     }

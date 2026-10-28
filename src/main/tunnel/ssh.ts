@@ -11,6 +11,7 @@ import os from 'node:os'
 import { Client, ConnectConfig } from 'ssh2'
 import type { SshConfig } from '../../shared/types'
 import type { Tunnel, TunnelHandle, TunnelTarget } from './types'
+import { readHostKey, type HostKeyPolicy, type HostKeyQuestion } from './hostKeys'
 
 export type { TunnelHandle, TunnelTarget } from './types'
 
@@ -95,9 +96,14 @@ export class SshTunnel implements Tunnel {
   private closed = false
   private forwardError: Error | null = null
 
+  /**
+   * `hostKeys` decides which servers are trusted. Without one, none is: a
+   * tunnel that cannot ask is not one that may assume.
+   */
   constructor(
     private readonly config: SshConfig,
-    private readonly target: TunnelTarget
+    private readonly target: TunnelTarget,
+    private readonly hostKeys?: HostKeyPolicy
   ) {}
 
   /**
@@ -115,26 +121,7 @@ export class SshTunnel implements Tunnel {
   /** Connects and starts listening. Resolves once the local port is bound. */
   async open(): Promise<TunnelHandle> {
     const connectConfig = buildSshConnectConfig(this.config)
-    const client = new Client()
-    this.client = client
-
-    await new Promise<void>((resolve, reject) => {
-      const onReady = (): void => {
-        client.off('error', onError)
-        resolve()
-      }
-      const onError = (error: Error): void => {
-        client.off('ready', onReady)
-        reject(new SshTunnelError(`SSH connection failed: ${error.message}`, error))
-      }
-      client.once('ready', onReady)
-      client.once('error', onError)
-      try {
-        client.connect(connectConfig)
-      } catch (error) {
-        reject(new SshTunnelError(`SSH connection failed: ${describe(error)}`, error))
-      }
-    })
+    const client = await this.connectTrusted(connectConfig)
 
     // Once connected, surface later drops as tunnel errors rather than crashes.
     client.on('error', (error) => {
@@ -186,6 +173,100 @@ export class SshTunnel implements Tunnel {
     }
   }
 
+  /**
+   * Connects to a server whose key is trusted, asking about it first if not.
+   *
+   * The key is checked before anything is sent to authenticate, so no
+   * password goes to a server nobody vouched for. A key that is not already
+   * trusted holds the handshake open while the user is asked — dropping it
+   * and dialling again instead would count against this address on a server
+   * that penalises connections that never log in, as OpenSSH's does. The
+   * handshake's clock is stopped while the question is open.
+   */
+  private connectTrusted(connectConfig: ConnectConfig): Promise<Client> {
+    const host = this.config.host
+    const port = this.config.port || 22
+    const readyTimeout = connectConfig.readyTimeout ?? 20000
+    const client = new Client()
+    this.client = client
+
+    return new Promise<Client>((resolve, reject) => {
+      let settled = false
+      let refusal: SshTunnelError | null = null
+      let timer: ReturnType<typeof setTimeout> | null = null
+      const disarm = (): void => {
+        if (timer) clearTimeout(timer)
+        timer = null
+      }
+      const fail = (error: Error): void => {
+        if (settled) return
+        settled = true
+        disarm()
+        client.end()
+        reject(error)
+      }
+      const arm = (): void => {
+        disarm()
+        timer = setTimeout(
+          () => fail(new SshTunnelError('SSH connection failed: Timed out while waiting for handshake')),
+          readyTimeout
+        )
+      }
+
+      client.once('ready', () => {
+        if (settled) return
+        settled = true
+        disarm()
+        resolve(client)
+      })
+      client.once('error', (error) => {
+        fail(refusal ?? new SshTunnelError(`SSH connection failed: ${error.message}`, error))
+      })
+      client.once('close', () => {
+        fail(refusal ?? new SshTunnelError('SSH connection failed: the server closed the connection'))
+      })
+
+      const hostVerifier = (blob: Buffer, verify: (trusted: boolean) => void): void => {
+        const key = readHostKey(blob)
+        const verdict = this.hostKeys?.check(host, port, key) ?? { status: 'new' }
+        if (verdict.status === 'known') {
+          verify(true)
+          return
+        }
+        const question: HostKeyQuestion = {
+          host,
+          port,
+          key,
+          previous: verdict.status === 'changed' ? verdict.previous : undefined
+        }
+        if (!this.hostKeys) {
+          refusal = untrustedServer(question)
+          verify(false)
+          return
+        }
+        disarm()
+        void this.hostKeys.ask(question).then((trusted) => {
+          if (settled) return
+          if (!trusted || this.closed) {
+            refusal = untrustedServer(question)
+            verify(false)
+            return
+          }
+          arm()
+          verify(true)
+        })
+      }
+
+      arm()
+      try {
+        // Its own timer is off: it would run on while the user is asked.
+        client.connect({ ...connectConfig, readyTimeout: 0, hostVerifier })
+      } catch (error) {
+        fail(new SshTunnelError(`SSH connection failed: ${describe(error)}`, error))
+      }
+    })
+  }
+
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
@@ -211,4 +292,20 @@ export class SshTunnel implements Tunnel {
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/** Why a server's key stopped the tunnel, in words that say what to look at. */
+function untrustedServer(question: HostKeyQuestion): SshTunnelError {
+  const where = `${question.host}:${question.port}`
+  const key = `${question.key.type} ${question.key.fingerprint}`
+  if (question.previous) {
+    return new SshTunnelError(
+      `The SSH server at ${where} has changed its key: it was ${question.previous.type} ` +
+        `${question.previous.fingerprint}, and is now ${key}. Someone may be standing in for it, ` +
+        'so the tunnel was not opened.'
+    )
+  }
+  return new SshTunnelError(
+    `The SSH server at ${where} was not trusted, so the tunnel was not opened. Its key is ${key}.`
+  )
 }

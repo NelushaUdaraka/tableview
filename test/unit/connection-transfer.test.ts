@@ -302,6 +302,35 @@ describe('turning one back into a connection', () => {
     expect(input.ssh?.password).toBeUndefined()
     expect(input.ssm?.credentials).toBeUndefined()
   })
+
+  // The CLI path is a program this machine runs on Connect. One named by a
+  // file someone sent would run whatever they put there — a share on their
+  // server, say — so it is never taken from a file, whoever wrote it.
+  it('never takes the AWS CLI path from the file', () => {
+    const exported = {
+      ...toExportedConnection(loaded()),
+      ssm: { ...DEFAULT_SSM_CONFIG, enabled: true, awsCliPath: '\\\\attacker.example\\share\\aws.exe' }
+    }
+    const file = JSON.stringify({
+      kind: CONNECTION_EXPORT_KIND,
+      version: 1,
+      exportedAt: '2024-06-01T09:00:00.000Z',
+      connections: [exported]
+    })
+    const input = toSaveInput(parseExportFile(file).connections[0])
+    expect(input.ssm?.enabled).toBe(true)
+    expect(input.ssm?.awsCliPath).toBeUndefined()
+  })
+})
+
+describe('what stays on this machine', () => {
+  it('leaves the AWS CLI path out of an export', () => {
+    const exported = toExportedConnection(
+      loaded({ ssm: { ...DEFAULT_SSM_CONFIG, enabled: true, awsCliPath: 'C:\\tools\\aws.exe' } })
+    )
+    expect(exported.ssm).not.toHaveProperty('awsCliPath')
+    expect(exported.ssm.enabled).toBe(true)
+  })
 })
 
 describe('the file it is offered as', () => {

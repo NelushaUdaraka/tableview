@@ -191,6 +191,7 @@ export const CHANNELS = {
   windowCloseAnswer: 'window:closeAnswer',
 
   shellOpenExternal: 'shell:openExternal',
+  fileReadText: 'file:readText',
   notifyQueryFinished: 'notify:queryFinished',
 
   dbConnect: 'db:connect',

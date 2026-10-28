@@ -63,11 +63,12 @@ import { splitBatches } from '../../../shared/sql/statements'
 import { containsPattern, matchingLines, moduleTypeOf } from '../../../shared/sql/definitionSearch'
 import { findWrite, findWriteInScript, type WriteStatement } from '../../../shared/sql/readOnly'
 import { SshTunnel } from '../../tunnel/ssh'
+import type { HostKeyPolicy } from '../../tunnel/hostKeys'
 import { SsmTunnel } from '../../tunnel/ssm'
 import { credentialsToEnv, expiresAt, isExpired } from '../../../shared/aws/credentials'
 import type { Tunnel, TunnelHandle } from '../../tunnel/types'
 import { buildMssqlConfig } from './config'
-import { isTransportFailure } from './errors'
+import { isTransportFailure, untrustedCertificate } from './errors'
 import { QuerySession } from './session'
 import { serverActivity, validSessionId, type ActivityMeta } from './activity'
 import { compilesOnly } from '../../../shared/showplan'
@@ -292,6 +293,12 @@ export function mapDriverColumns(columns: DriverColumn[]): ColumnMeta[] {
   })
 }
 
+/** What a client is handed rather than reaching for itself. */
+export interface ClientDeps {
+  /** Which SSH servers a tunnel may trust; without it, none. */
+  hostKeys?: HostKeyPolicy
+}
+
 export class SqlServerClient implements DbClient {
   private pool: sql.ConnectionPool | null = null
   private tunnel: Tunnel | null = null
@@ -331,7 +338,10 @@ export class SqlServerClient implements DbClient {
    */
   private sharedRequests = 0
 
-  constructor(private config: ConnectionConfig) {}
+  constructor(
+    private config: ConnectionConfig,
+    private readonly deps: ClientDeps = {}
+  ) {}
 
   onStateChange(listener: ClientStateListener | null): void {
     this.stateListener = listener
@@ -431,6 +441,10 @@ export class SqlServerClient implements DbClient {
       const hint = tunnel?.droppedConnectionHint
       await this.teardownTunnel()
 
+      const certificate = untrustedCertificate(error)
+      if (certificate) {
+        throw codedError(certificate, (error as { code?: string }).code ?? 'ESOCKET')
+      }
       if (forwardError) {
         const message = `Could not reach ${this.config.host}:${this.config.port} through the ${via} — ${forwardError.message}`
         const code = (forwardError as Error & { code?: string }).code
@@ -638,7 +652,7 @@ export class SqlServerClient implements DbClient {
     if (this.config.ssm?.enabled) {
       return new SsmTunnel(this.config.ssm, target, this.awsCredentialEnv())
     }
-    if (this.config.ssh?.enabled) return new SshTunnel(this.config.ssh, target)
+    if (this.config.ssh?.enabled) return new SshTunnel(this.config.ssh, target, this.deps.hostKeys)
     return null
   }
 

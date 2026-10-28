@@ -48,7 +48,7 @@ export interface ExportedConnection {
   confirmWrites?: boolean
   options: SqlServerOptions
   ssh: Omit<SshConfig, 'password' | 'passphrase'>
-  ssm: Omit<SsmConfig, 'credentials' | 'credentialSummary' | 'credentialsText'>
+  ssm: Omit<SsmConfig, 'credentials' | 'credentialSummary' | 'credentialsText' | 'awsCliPath'>
   createdAt?: string
   /** What the other end will have to be given before this one will open. */
   missingSecrets: MissingSecret[]
@@ -98,6 +98,8 @@ export function toExportedConnection(connection: SavedConnection): ExportedConne
     credentials: _credentials,
     credentialSummary: _summary,
     credentialsText: _text,
+    // A program on this machine, which another one has no business running.
+    awsCliPath: _cli,
     ...ssm
   } = connection.ssm ?? {}
 
@@ -260,7 +262,20 @@ export function toSaveInput(
     confirmWrites: connection.confirmWrites === true,
     options: connection.options,
     ssh: connection.ssh as SshConfig,
-    ssm: connection.ssm as SsmConfig,
+    ssm: withoutCliPath(connection.ssm),
     createdAt: connection.createdAt
   }
+}
+
+/**
+ * The SSM settings with no CLI path, whatever the file says.
+ *
+ * Connect runs that path as a program, so a file that names one — a share on
+ * someone else's server, say — would have this machine run whatever is there.
+ * Exports leave it out; a file written by hand, or by an older version, may
+ * not, and this is where that stops.
+ */
+function withoutCliPath(ssm: ExportedConnection['ssm'] | undefined): SsmConfig {
+  const { awsCliPath: _cli, ...rest } = (ssm ?? {}) as SsmConfig
+  return rest as SsmConfig
 }

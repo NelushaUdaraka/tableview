@@ -114,6 +114,12 @@ Invariants that span multiple files:
 - **Secrets never reach the renderer.** Passwords, SSH passphrases and AWS credential blocks stay in the
   main process; connection export (`shared/connectionTransfer.ts`) omits them. The smoke and ssm-form
   e2e suites assert this.
+- **A window is kept on the app and given only what it asked for** (`src/main/guards.ts`): navigation
+  away is cancelled, only https links leave the app, a file is read only if the window's own open
+  dialog picked it, and exports go where the save dialog says. The preload hands any page in the
+  window the whole API, which is why.
+- **SSH tunnels trust a server only through a `HostKeyPolicy`** (`tunnel/hostKeys.ts`), handed down
+  from the registry; a tunnel without one trusts nobody. Integration tests pass a policy of their own.
 - **Read-only enforcement happens in the main process** (`shared/sql/readOnly.ts` is a T-SQL lexer-based
   check that errs toward refusing, e.g. any `EXEC`). The renderer only greys out UI.
 - **The menu is defined once** in `shared/menu.ts`; main builds the native Electron `Menu` from it and

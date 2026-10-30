@@ -10,6 +10,9 @@ import type {
 } from '@shared/types'
 import type { SavedTab, SavedTabs } from '@shared/uiState'
 import type { TableCache } from '../lib/tableCache'
+import type { ActivityCache } from '../lib/activity'
+import type { EditorPlace } from '../components/SqlEditor.vue'
+import type { ResultsPlace } from '../components/ResultsPanel.vue'
 import { transactionOpen } from '@shared/sessions'
 import { splitLines } from '../lib/lineDiff'
 import { endSession, stopRun } from '../lib/tabSessions'
@@ -75,6 +78,20 @@ export interface QueryTab {
    * clears it.
    */
   sessionLost?: SessionState
+  /**
+   * Where the tab was when it was last on screen — the editor's selection and
+   * scroll, which of the results was showing and how far it was scrolled — so
+   * picking it again puts it back. Written `markRaw`, like the result:
+   * CodeMirror's record of the scroll is an object of its own, and the
+   * results' place holds on to the result it was left on.
+   */
+  place?: QueryPlace
+}
+
+/** Where a query tab's editor and results were left; either is null when there was none. */
+export interface QueryPlace {
+  editor: EditorPlace | null
+  results: ResultsPlace | null
 }
 
 export interface TableTab {
@@ -113,12 +130,19 @@ export interface TableTab {
    */
   hiddenColumns?: string[]
   /**
-   * The page the browser last had on screen, so reselecting this tab shows it
-   * again straight away and re-reads it behind the rows rather than in front
-   * of them. Written `markRaw`, like a query tab's result: it holds a page of
-   * rows and nothing here ever mutates it field by field.
+   * The page the browser last had on screen, and how it was scrolled, so
+   * reselecting this tab shows it again straight away, as it was left — read
+   * again only if the tab refreshes itself. Written `markRaw`, like a query
+   * tab's result: it holds a page of rows and nothing here ever mutates it
+   * field by field.
    */
   cache?: TableCache
+  /**
+   * How far the structure was scrolled, both ways, when it was last on
+   * screen. The structure is read afresh each time it is shown; this puts the
+   * reader back where they were in it.
+   */
+  structureScroll?: { top: number; left: number }
 }
 
 /**
@@ -136,6 +160,12 @@ export interface ActivityTab {
   autoRefresh?: number
   /** List sleeping sessions that hold nothing open, too. */
   showIdle?: boolean
+  /**
+   * What the monitor last read, and where the reader was in it, so picking
+   * the tab again shows it as it was left — read again only if it refreshes
+   * itself. Written `markRaw`, like a table's page.
+   */
+  cache?: ActivityCache
 }
 
 export type Tab = QueryTab | TableTab | ActivityTab
@@ -857,9 +887,9 @@ export const useTabStore = defineStore('tabs', () => {
    * was holding.
    *
    * Its cached page does come along. A query tab's result cannot — nobody ran
-   * it in the new tab — but a table tab loads the moment it opens, so the copy
-   * is about to ask for those very rows and can just as well show them while
-   * it waits.
+   * it in the new tab — but a table tab's page is what that table showed a
+   * moment ago, so the copy opens on the same rows, scrolled the same way —
+   * read again only if the table refreshes itself.
    */
   function copyOf(tab: Tab): Tab {
     if (tab.kind === 'query') {

@@ -42,6 +42,31 @@ read, so a query tab in that window still completes table and column names. `Ctr
 tree in for anyone who wants it, and it stays once it is there. Drag that tab back into the window
 it came from and the empty frame goes with it: the window *was* the tab.
 
+### A tab comes back as it was left
+
+Only the tab showing in a pane is drawn; picking another takes it down until it is picked again,
+which is what keeps a window with thirty tabs open as quick as one with two. What a tab was showing
+is kept on the tab instead, and picking it again puts it back the way it was left:
+
+- **a table** — the same page of rows, scrolled to the same rows and the same columns, each column
+  as wide as it was, widened by hand or not; and its structure, scrolled where it was
+- **a query** — the same text selected, the editor scrolled to the same line, and the results on
+  the result set, the messages or the plan that was showing: a result set sorted the way it was and
+  scrolled down and across to the same rows and columns, the messages to the same line
+- **the activity monitor** — the sessions it last read, through the same filter, scrolled to the
+  same place
+
+**Nothing is read again unless the tab refreshes itself.** Rows written while a table was away stay
+out of it until *Refresh* (`F5`): coming back is no reason to move rows under the reader. A table or
+the monitor with auto refresh on is read straight away, since its timer stopped while it was away —
+behind the rows, as its timer's reads are, and the rows stay scrolled where they were. A table
+whose page was read in another database, the sidebar having switched while it was away, is read
+again too: its next sort or page would read the database the sidebar is in now. A table's
+structure is read afresh each time it is shown, as it always has been.
+
+All of this lasts as long as the tab is in the window. A tab moved to another window, and the tabs
+reopened after a restart, start afresh from the top and read what they show as they open.
+
 ## Quick open
 
 `Ctrl+P` (View → Quick Open…) opens a box at the top of the window that finds any table, view,

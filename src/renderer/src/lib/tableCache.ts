@@ -1,18 +1,21 @@
 /**
- * The page a table tab last had on screen, and what counts as it having
- * changed.
+ * The page a table tab last had on screen, whether to read it again, and what
+ * counts as it having changed.
  *
  * Only a pane's active tab is mounted, so picking another tab takes the table
  * browser down and everything it was holding with it — which is why coming
  * back to a tab used to mean an empty grid and a spinner for as long as the
- * server took. A tab keeps its last page here instead: the view draws it
- * before it has asked anything, then checks. The comparisons below are what
- * decide whether the answer, when it arrives, is worth redrawing for; rows
- * that came back the same are left exactly as they are, because replacing
- * them would cost the reader their scroll position, their selection and any
- * column they had widened by hand.
+ * server took. A tab keeps its last page here instead, scrolled where it was
+ * and with its columns as wide as they were: the view draws it before it has
+ * asked anything, and reads it again only when the tab refreshes itself
+ * (`readsOnReturn`). The comparisons below are what decide whether the
+ * answer to a read is worth redrawing for; rows that came back the same are
+ * left exactly as they are, because replacing them would cost the reader
+ * their scroll position, their selection and any column they had widened by
+ * hand.
  */
 import { isTagged, type CellValue, type ColumnMeta, type TableFilter, type TableSort } from '@shared/types'
+import type { GridView } from '../components/DataGrid.vue'
 
 export interface TableCache {
   columns: ColumnMeta[]
@@ -28,8 +31,13 @@ export interface TableCache {
   showFilters: boolean
   durationMs: number
   sql: string
-  /** Where the grid was scrolled to, in pixels. */
-  scrollTop: number
+  /** Where the grid was scrolled to, both ways, and how wide its columns were. */
+  grid: GridView
+  /**
+   * The database the rows were read in: the sidebar can switch it while the
+   * tab is away, and the tab's next read goes wherever the sidebar is.
+   */
+  database: string
   /**
    * The tab's `filterRevision` when these rows were read.
    *
@@ -39,6 +47,24 @@ export interface TableCache {
    * and that page is then an answer to a question nobody is asking any more.
    */
   filterRevision: number
+}
+
+/**
+ * Whether a tab coming back on screen reads its page again, rather than
+ * showing the one it kept as it is.
+ *
+ * Only a tab that refreshes itself does: its timer stopped with the view, and
+ * catching up is what it would have been doing. Any other tab comes back
+ * exactly as it was left — reading it again would move rows under the reader
+ * that they did not ask to have moved, and Refresh is there when they do. The
+ * one exception is a page read in a database the sidebar has since left,
+ * which sorting or paging would no longer agree with.
+ */
+export function readsOnReturn(
+  cache: Pick<TableCache, 'database'>,
+  now: { autoRefresh: number; database: string }
+): boolean {
+  return now.autoRefresh > 0 || cache.database !== now.database
 }
 
 /** Whether two cell values would draw the same. */

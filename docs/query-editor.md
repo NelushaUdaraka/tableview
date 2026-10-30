@@ -12,6 +12,9 @@
 - Results sort by clicking a header — a local reorder, since the statement is yours to re-issue, not
   ours to rewrite — with NULLs kept at the end either way
 - SQL formatting, open/save `.sql` files, saved queries, searchable query history
+- **A tab picked again is as it was left**: the same text selected, the editor scrolled to the same
+  line, and the results on the same result set (or the messages), sorted and scrolled the same way —
+  see [the workspace](workspace.md#a-tab-comes-back-as-it-was-left)
 - **A routine's definition shows what you changed in it**, and lets you put back any one change on
   its own — see below
 - **Each tab keeps a session of its own**, so a temp table, a setting or a transaction is still

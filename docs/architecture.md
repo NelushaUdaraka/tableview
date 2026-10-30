@@ -182,17 +182,30 @@ pane, folding the split away, dragging it into a new window — asks the tabs th
 The split pane is always rendered, collapsed rather than replaced when there is no second pane:
 swapping between two layouts would remount the first pane's view and take its staged edits with it.
 
-**A table tab keeps its last page, and re-reads it behind the rows.** Unmounting a view takes
-everything it was holding with it, so reselecting a tab used to mean an empty grid and a spinner for
-as long as the server took — to arrive at the rows it had a second earlier. The page it last drew is
-kept on the tab instead (`markRaw`, like a query tab's result, so a page of rows stays out of the
-reactivity graph), and the view is seeded from it during setup, before its first render. What
-follows is an ordinary read marked `background`: nothing is dimmed and nothing is blocked, and
-`lib/tableCache.ts` compares the answer against what is drawn so that only a real difference reaches
-the grid — handing it new columns resets the widths and the selection, and new rows lose the scroll
-position, which is a poor way to say "nothing has changed". Loads carry a token for the same reason:
-the reader can sort, filter or page while that read is in flight, and the last thing asked for is
-the one whose answer counts.
+**A table tab keeps its last page, and reads it again only if it refreshes itself.** Unmounting a
+view takes everything it was holding with it, so reselecting a tab used to mean an empty grid and a
+spinner for as long as the server took — to arrive at the rows it had a second earlier. The page it
+last drew is kept on the tab instead (`markRaw`, like a query tab's result, so a page of rows stays
+out of the reactivity graph), with how the grid was drawn — scrolled down and across, and each
+column's width (`GridView`, from `DataGrid`'s `view()`) — and the view is seeded from it during
+setup, before its first render, then has the grid put back with `restoreView`. The widths go first
+and are drawn before the scroll: they decide how far across there is to scroll. Nothing is read
+unless `readsOnReturn` says so — the tab refreshes itself, or the page came from a database the
+sidebar has since left. That read is an ordinary one marked `background`: nothing is dimmed and
+nothing is blocked, and `lib/tableCache.ts` compares the answer against what is drawn so that only
+a real difference reaches the grid — handing it new columns resets the widths and the selection,
+and new rows lose the scroll position, which is a poor way to say "nothing has changed". Loads
+carry a token for the same reason: the reader can sort, filter or page while that read is in
+flight, and the last thing asked for is the one whose answer counts.
+
+**The other tabs keep their place the same way.** A query tab keeps a `QueryPlace` — the editor's
+selection and CodeMirror's own scroll snapshot (`scrollSnapshot()`, given back as the new editor's
+`scrollTo`, so it lands on the same line whatever height the editor is now), and the results'
+place: which result set, messages or plan was showing, its sort, and its grid's view. The results'
+place holds on to the result it was taken over, and a run that finished while the tab was away
+opens from the start instead. The activity monitor keeps its last read, its filter and its scroll
+(`ActivityCache`), and a table's structure its scroll. Each view writes its place in
+`onBeforeUnmount`, while its children are still there to ask, and reads it in setup.
 
 **The renderer converts reactive state to plain data before the bridge.** `contextBridge` clones
 arguments with the structured clone algorithm, which refuses to clone a Proxy — which is exactly

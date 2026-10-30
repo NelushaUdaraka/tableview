@@ -485,7 +485,8 @@ describe('a tab\'s cached page', () => {
       showFilters: false,
       durationMs: 12,
       sql: 'SELECT * FROM [dbo].[customers]',
-      scrollTop: 240,
+      grid: { top: 240, left: 90, widths: [60] },
+      database: 'beekeeper_test',
       filterRevision: 0,
       ...over
     }
@@ -502,7 +503,7 @@ describe('a tab\'s cached page', () => {
 
     const cache = (tabs.tabs.find((tab) => tab.id === customers) as TableTab).cache
     expect(cache?.rows).toEqual([[1], [2]])
-    expect(cache?.scrollTop).toBe(240)
+    expect(cache?.grid).toEqual({ top: 240, left: 90, widths: [60] })
     expect(cache?.sorts).toEqual([{ column: 'id', direction: 'asc' }])
   })
 

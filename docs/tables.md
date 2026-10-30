@@ -79,12 +79,18 @@ rather than folding it away.
   it is, dimmed and inert, until the replacements arrive; a thin bar under the title bar carries the
   wait for the whole window
 - **A tab keeps its page.** Picking another tab takes the browser down with it, so what a table tab
-  was showing — its rows, its sort, its filters, the page it was on, even where it was scrolled to —
-  is kept on the tab. Coming back draws it straight away and re-reads it *behind* the rows, with
-  only a "Checking for changes…" beside the row count to say so. The answer reaches the grid only
+  was showing — its rows, its sort, its filters, the page it was on, where it was scrolled to down
+  and across, and how wide each column was, widened by hand or not — is kept on the tab, and coming
+  back draws it straight away, exactly as it was left. **It is not read again**: rows written
+  meanwhile wait for *Refresh*. Only a table with auto refresh on (below) is re-read on coming back,
+  *behind* the rows, with only a "Checking for changes…" beside the row count to say so — and so is a
+  page read in another database, should the sidebar have switched while the tab was away, since its
+  next sort or page would read the database the sidebar is in now. The answer reaches the grid only
   where it differs, so a table nobody has touched does not blink, and one that has changed updates
-  in place. A table opened for the first time shows the wait from the first frame rather than
-  flashing "No rows match" at it
+  in place. Switching to the table's structure and back keeps the page the same way, and the
+  structure keeps where it was scrolled to. A table opened for the first time shows the wait from
+  the first frame rather than flashing "No rows match" at it. See
+  [the workspace](workspace.md#a-tab-comes-back-as-it-was-left) for the other kinds of tab
 - **Auto refresh, when you ask for it** — beside *Refresh*, a table can be set to re-read itself
   every 5, 10 or 30 seconds, every minute, or every 5 or 15 minutes, picked from a menu that hangs
   from the button in the window's own colours, with the interval in force ticked. It is *Off*
@@ -92,9 +98,11 @@ rather than folding it away.
   table (connection, database, schema and name) across restarts, and choosing *Off* forgets it.
   While it is open the choice belongs to the tab: a table left on a second screen to watch a queue drain
   keeps refreshing across a trip to another tab, into a split, or out into a window of its own,
-  while every other table stays still. Each read is the same quiet re-read a reselected tab does —
-  nothing dims, and only rows that actually changed are redrawn — and the next is timed from the
-  end of the last, so a slow table is never asked twice at once. It waits while edits are staged
+  while every other table stays still. Each read is a quiet re-read behind the rows — nothing dims,
+  and only rows that actually changed are redrawn — and the next is timed from the end of the last,
+  so a slow table is never asked twice at once. Its timer stops while the tab is not showing, so a
+  refreshing table picked again is read straight away rather than at its next tick; a table that
+  does not refresh itself is left as it was. It waits while edits are staged
   (they are keyed by row position, and new rows under them would move them onto other rows), while
   a cell is being typed into, and while the connection is down; the control greys and says why. A
   read that fails turns it off and says so, rather than raising the same error every few seconds

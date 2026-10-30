@@ -7,7 +7,7 @@
  * reorders the rows already on screen. Nothing in this panel is editable — a
  * statement's output has no rows to write back to.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   READ_ONLY_CONNECTION,
   WRITE_NOT_CONFIRMED,
@@ -15,7 +15,7 @@ import {
   type ColumnMeta,
   type QueryExecutionResult
 } from '@shared/types'
-import DataGrid from './DataGrid.vue'
+import DataGrid, { type GridView } from './DataGrid.vue'
 import AppIcon from './AppIcon.vue'
 import ContextMenu, { type MenuEntry } from './ContextMenu.vue'
 import RowDetailPanel, { type RowField } from './RowDetailPanel.vue'
@@ -30,11 +30,31 @@ import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toasts'
 import { api } from '../lib/api'
 
+/**
+ * What the panel was showing, for one that has to be put back: which of the
+ * results — a result set, the messages or the plan — in what order, and how
+ * far it was scrolled. It belongs to one run's result, and is no use to the
+ * next.
+ */
+export interface ResultsPlace {
+  result: QueryExecutionResult
+  showing: number | 'messages' | 'plan'
+  sort: { column: string; direction: SortDirection } | null
+  grid: GridView | null
+  messagesTop: number
+}
+
 const props = defineProps<{
   result: QueryExecutionResult | null
   running: boolean
   /** Owned by the tab this panel belongs to, so a split toggles one side only. */
   showRowPanel: boolean
+  /**
+   * Where to open, read once as the panel is made: a tab picked again passes
+   * where it was left. A run that finished while the tab was away has a
+   * result of its own, and opens from the start.
+   */
+  place?: ResultsPlace | null
 }>()
 
 const emit = defineEmits<{
@@ -44,15 +64,18 @@ const emit = defineEmits<{
 
 const settings = useSettingsStore()
 const toasts = useToastStore()
-const activeIndex = ref(0)
-const showMessages = ref(false)
+/** Where this result was left, if it was. */
+const placed = props.place && props.place.result === props.result ? props.place : null
+const activeIndex = ref(typeof placed?.showing === 'number' ? placed.showing : 0)
+const showMessages = ref(placed?.showing === 'messages')
 /** The Plan tab is showing, rather than a result set or the messages. */
-const showPlan = ref(false)
+const showPlan = ref(placed?.showing === 'plan')
 const plans = computed(() => props.result?.plans ?? [])
 const menu = ref<{ kind: 'row' | 'header'; x: number; y: number; row: number; col: number } | null>(
   null
 )
 const grid = ref<InstanceType<typeof DataGrid> | null>(null)
+const messagesBox = ref<HTMLElement | null>(null)
 const selection = ref<{ rowIndex: number; columnIndex: number } | null>(null)
 /** Rows the grid has picked out, as indexes into the rows in the order shown. */
 const selectedRows = ref<number[]>([])
@@ -108,7 +131,9 @@ const active = computed(() => panels.value[activeIndex.value] ?? null)
 // --- ordering ---------------------------------------------------------------
 
 /** Client-side, and one column at a time: there is no query to re-issue. */
-const sort = ref<{ column: string; direction: SortDirection } | null>(null)
+const sort = ref<{ column: string; direction: SortDirection } | null>(
+  placed?.sort ? { ...placed.sort } : null
+)
 
 /** The active set's rows in the order the grid is showing them. */
 const rows = computed<CellValue[][]>(() => {
@@ -172,6 +197,28 @@ watch(
 watch(activeIndex, () => {
   sort.value = null
 })
+
+// The rows are drawn in the order they were left in by now, so the grid can
+// be scrolled back over the same ones.
+onMounted(() => {
+  if (!placed) return
+  if (placed.grid) void grid.value?.restoreView(placed.grid)
+  if (messagesBox.value) messagesBox.value.scrollTop = placed.messagesTop
+})
+
+/** Where the panel is now, for the next one over this result to open at. */
+function getPlace(): ResultsPlace | null {
+  if (!props.result) return null
+  return {
+    result: props.result,
+    showing: showPlan.value ? 'plan' : showMessages.value ? 'messages' : activeIndex.value,
+    sort: sort.value ? { ...sort.value } : null,
+    grid: grid.value?.view() ?? null,
+    messagesTop: messagesBox.value?.scrollTop ?? 0
+  }
+}
+
+defineExpose({ getPlace })
 
 // --- the selected row -------------------------------------------------------
 
@@ -392,7 +439,7 @@ function durationLabel(ms: number): string {
 
     <div class="results__body">
       <PlanView v-if="showPlan && plans.length" :plans="plans" />
-      <div v-else-if="showMessages" class="messages">
+      <div v-else-if="showMessages" ref="messagesBox" class="messages">
         <div v-for="(error, index) in errors" :key="`e-${index}`" class="message message--error">
           <!-- A script a read-only connection turned down has no server
                message number: nothing of it reached the server. -->

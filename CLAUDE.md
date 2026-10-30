@@ -131,9 +131,12 @@ Invariants that span multiple files:
   tab is mounted. Views holding staged edits register a leave guard against their own tab id, and every
   action that would unmount a view (switch, close, move pane, unsplit, detach to window) asks those
   guards. The split pane is always rendered (collapsed, not replaced) so the first pane never remounts.
-- **Table tabs cache their last page** (`markRaw`) and seed the view from it, then re-read in the
-  background; `lib/tableCache.ts` decides whether the result actually differs before touching the grid.
-  Loads carry a token so only the latest request's answer is applied.
+- **Table tabs cache their last page** (`markRaw`), with the grid's scroll and column widths, and seed
+  the view from it; they re-read in the background only when `readsOnReturn` says so (auto refresh on,
+  or the page came from another database). `lib/tableCache.ts` decides whether a result actually
+  differs before touching the grid. Loads carry a token so only the latest request's answer is
+  applied. Query tabs (`place`), the activity monitor (`cache`) and the structure view
+  (`structureScroll`) keep their place on the tab the same way, written as the view unmounts.
 - One connection per window: the schema store is keyed to a single connection.
 - **Query tabs run on sessions of their own.** A query tab's runs go to its `QuerySession`
   (`main/db/sqlserver/session.ts`): one connection, opened on the tab's first run, closed with the

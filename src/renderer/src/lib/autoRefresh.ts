@@ -7,10 +7,12 @@
  * from a few seconds for something being watched to a quarter of an hour for
  * something merely kept current.
  *
- * Each read is the background re-read a tab already does when it is picked
- * again: nothing is dimmed, and the grid only hears about rows that actually
- * changed. The next one is timed from when the last one finished rather than
- * from when it started, so a slow table is never asked twice at once.
+ * Each read is a background re-read, behind the rows: nothing is dimmed, and
+ * the grid only hears about rows that actually changed. The next one is timed
+ * from when the last one finished rather than from when it started, so a slow
+ * table is never asked twice at once. It is also what decides whether a tab
+ * reads again when it is picked: a tab that refreshes itself catches up, and
+ * any other comes back as it was left (`readsOnReturn` in `tableCache.ts`).
  */
 
 export interface AutoRefreshChoice {

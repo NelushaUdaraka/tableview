@@ -1,7 +1,9 @@
 /**
- * What counts as a table's page having changed.
+ * What counts as a table's page having changed, and when a tab picked again
+ * reads its page at all.
  *
- * A tab picked again draws the page it had and re-reads it behind the rows.
+ * A tab picked again draws the page it had; one that refreshes itself then
+ * re-reads it behind the rows, as its timer does every few seconds.
  * Handing the grid the answer unconditionally would undo the point of that:
  * a new `columns` array resets the grid's widths and its selection, and a new
  * `rows` array loses the scroll position — so a re-read that came back with
@@ -12,7 +14,13 @@
  * so.
  */
 import { describe, expect, it } from 'vitest'
-import { sameCell, sameColumns, sameRow, sameRows } from '../../../src/renderer/src/lib/tableCache'
+import {
+  readsOnReturn,
+  sameCell,
+  sameColumns,
+  sameRow,
+  sameRows
+} from '../../../src/renderer/src/lib/tableCache'
 import type { CellValue, ColumnMeta } from '../../../src/shared/types'
 
 function column(name: string, index: number, over: Partial<ColumnMeta> = {}): ColumnMeta {
@@ -133,5 +141,28 @@ describe('sameColumns', () => {
     expect(sameColumns([column('id', 0)], [column('id', 0, { nullable: false })])).toBe(false)
     expect(sameColumns([column('id', 0)], [column('id', 0, { isIdentity: true })])).toBe(false)
     expect(sameColumns([column('id', 0)], [column('id', 0, { isReadOnly: true })])).toBe(false)
+  })
+})
+
+/**
+ * A tab picked again draws the page it kept; whether it then reads that page
+ * again is this. The reader turned auto refresh off — or never turned it on —
+ * so the page they left is the page they get back, and Refresh is there when
+ * they want it read.
+ */
+describe('readsOnReturn', () => {
+  it('leaves the page alone when the tab does not refresh itself', () => {
+    expect(readsOnReturn({ database: 'sales' }, { autoRefresh: 0, database: 'sales' })).toBe(false)
+  })
+
+  it('reads a tab that refreshes itself, whose timer stopped while it was away', () => {
+    expect(readsOnReturn({ database: 'sales' }, { autoRefresh: 5000, database: 'sales' })).toBe(true)
+  })
+
+  it('reads a page read in another database, which the next read would not show', () => {
+    // The sidebar switched database while the tab was away: sorting or
+    // paging would read the other database's table, so the page on screen
+    // has to come from there too.
+    expect(readsOnReturn({ database: 'sales' }, { autoRefresh: 0, database: 'archive' })).toBe(true)
   })
 })

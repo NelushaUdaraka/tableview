@@ -23,6 +23,17 @@ import AppIcon from './AppIcon.vue'
 
 export type RowState = 'normal' | 'inserted' | 'deleted'
 
+/**
+ * How the grid was drawn: where it was scrolled to, down and across, and how
+ * wide each column was — one width per column, hidden ones included. What a
+ * parent keeps to put back a grid it had to take down.
+ */
+export interface GridView {
+  top: number
+  left: number
+  widths: number[]
+}
+
 const props = withDefaults(
   defineProps<{
     columns: ColumnMeta[]
@@ -293,17 +304,43 @@ watch(shownColumns, (shown) => {
 })
 
 /**
- * Puts the viewport back to a scroll position it had before.
+ * Puts the viewport back to a scroll position it had before; across too, when
+ * `left` is given.
  *
  * The browser clamps this to what there is to scroll, so a page that came
  * back shorter than it went away simply lands at the bottom rather than
  * nowhere.
  */
-function scrollTo(top: number): void {
+function scrollTo(top: number, left?: number): void {
   const element = viewport.value
   if (!element) return
   element.scrollTop = top
+  if (left !== undefined) element.scrollLeft = left
   scrollTop.value = element.scrollTop
+  // The scroll event that keeps the header in step arrives a frame later,
+  // which would draw that frame's header over other columns.
+  if (header.value) header.value.scrollLeft = element.scrollLeft
+}
+
+/** How the grid is drawn now, for `restoreView` to put back. */
+function view(): GridView {
+  return {
+    top: viewport.value?.scrollTop ?? 0,
+    left: viewport.value?.scrollLeft ?? 0,
+    widths: [...widths.value]
+  }
+}
+
+/**
+ * Puts the grid back the way `view` found it: the columns at the widths they
+ * had, when there are as many of them, then the viewport scrolled to where it
+ * was. The widths are drawn first, since they decide how far across there is
+ * to scroll.
+ */
+async function restoreView(saved: GridView): Promise<void> {
+  if (saved.widths.length === props.columns.length) widths.value = [...saved.widths]
+  await nextTick()
+  scrollTo(saved.top, saved.left)
 }
 
 function onScroll(): void {
@@ -843,9 +880,10 @@ defineExpose({
   autoFit,
   autoFitAll,
   focus: () => viewport.value?.focus(),
-  // Where the rows are scrolled to, for a parent that has to put the grid
-  // back the way it was — a tab reselected after being unmounted.
-  scrollOffset: () => viewport.value?.scrollTop ?? 0,
+  // How the grid is drawn, for a parent that has to put it back the way it
+  // was — a tab reselected after being unmounted.
+  view,
+  restoreView,
   scrollTo,
   // A cell editor is addressed by row position and survives new rows, so a
   // parent about to replace them has to know one is open.

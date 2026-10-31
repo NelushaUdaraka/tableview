@@ -69,6 +69,11 @@ seconds, every minute, or every 5 or 15 minutes — the intervals a table's auto
 from the end of the last read, and holding off while the connection is down, while a question is
 open over it and while the window is out of sight. A read that fails turns it off and says so.
 
+Picking another tab and coming back shows what the monitor last read, through the same filter and
+scrolled to the same place, and reads it again only if *Auto* is on — its timer stopped while the
+tab was away (see [the workspace](workspace.md#a-tab-comes-back-as-it-was-left)). *Refresh* reads
+it whenever you want it current.
+
 It reads through the window's shared pool, never a query tab's session, so watching the server never
 waits on a tab's run.
 

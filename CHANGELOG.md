@@ -4,6 +4,16 @@ What changed in each release of TableView, newest first. The downloads are on th
 [Releases page](https://github.com/NelushaUdaraka/tableview/releases); a version at the top that is
 not there yet is the next release, still being prepared.
 
+## 0.4.2
+
+- Switching tabs no longer loses your place. A tab you come back to is scrolled where you left
+  it: a table down and across, with any column you widened still wide, and its structure view; a
+  query's editor at the same line with the same text selected, and its results on the same result
+  set or the messages, sorted and scrolled the same way; and the activity monitor, with the same
+  filter.
+- Coming back to a table or the activity monitor no longer reads it again unless its auto refresh
+  is on. You get back what you left, and *Refresh* (`F5`) reads it when you want it current.
+
 ## 0.4.1
 
 - SSH tunnels check the server's identity, the way `ssh` does. The first connection to an SSH

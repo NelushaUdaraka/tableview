@@ -10,7 +10,13 @@
  * (which would lose undo history and the cursor).
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Compartment, EditorState, type Extension } from '@codemirror/state'
+import {
+  Compartment,
+  EditorSelection,
+  EditorState,
+  type Extension,
+  type StateEffect
+} from '@codemirror/state'
 import { EditorView, keymap, placeholder as placeholderExt } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { MSSQL, keywordCompletionSource, schemaCompletionSource } from '@codemirror/lang-sql'
@@ -48,6 +54,17 @@ import { snippetFrom } from '../lib/snippetCompletion'
 import { snippetPreview } from '@shared/snippets'
 import type { Snippet } from '@shared/types'
 
+/**
+ * Where the editor was: what was selected, and how far it was scrolled — the
+ * scroll as CodeMirror records it, by the line at the top rather than in
+ * pixels, so it lands on that line whatever height the editor is given back.
+ */
+export interface EditorPlace {
+  anchor: number
+  head: number
+  scroll: StateEffect<unknown>
+}
+
 const props = withDefaults(
   defineProps<{
     modelValue: string
@@ -66,6 +83,11 @@ const props = withDefaults(
      * to put each change back; null tracks nothing.
      */
     baseline?: string | null
+    /**
+     * Where to open, read once as the editor is made: a tab picked again
+     * passes where it was left. Null opens at the top.
+     */
+    place?: EditorPlace | null
   }>(),
   {
     schema: () => ({}),
@@ -75,7 +97,8 @@ const props = withDefaults(
     fontSize: 13,
     placeholder: '-- Write T-SQL here. Ctrl+Enter runs it.',
     readonly: false,
-    baseline: null
+    baseline: null,
+    place: null
   }
 )
 
@@ -415,8 +438,15 @@ onMounted(() => {
     { key: 'Mod-m', preventDefault: true, run: () => (emit('plan', 'actual'), true) }
   ])
 
+  // The text can have changed under a place it was left at, so the selection
+  // is kept inside it; the scroll clips itself.
+  const place = props.place
+  const end = props.modelValue.length
   const state = EditorState.create({
     doc: props.modelValue,
+    selection: place
+      ? EditorSelection.single(Math.min(place.anchor, end), Math.min(place.head, end))
+      : undefined,
     extensions: [
       lineNumbers(),
       // Between the line numbers and the fold markers, where an editor's
@@ -462,7 +492,7 @@ onMounted(() => {
     ]
   })
 
-  view = new EditorView({ state, parent: host.value })
+  view = new EditorView({ state, parent: host.value, scrollTo: place?.scroll })
   // A tab coming back on screen is a new editor over text that may already
   // differ from what is stored; no update reports that, so say it here.
   emit('changes', trackedChanges(view.state).length)
@@ -552,6 +582,13 @@ function getCursor(): number {
   return view?.state.selection.main.head ?? 0
 }
 
+/** Where the editor is now, for a later one over the same text to open at. */
+function getPlace(): EditorPlace | null {
+  if (!view) return null
+  const { anchor, head } = view.state.selection.main
+  return { anchor, head, scroll: view.scrollSnapshot() }
+}
+
 function focus(): void {
   view?.focus()
 }
@@ -600,6 +637,7 @@ function setValue(text: string): void {
 defineExpose({
   getSelection,
   getCursor,
+  getPlace,
   focus,
   insertText,
   setValue,

@@ -3,7 +3,18 @@
  * whom, as chains with the head blocker first, and which sessions are worth
  * listing.
  */
-import type { ActivitySession } from '@shared/types'
+import type { ActivitySession, ServerActivity } from '@shared/types'
+
+/**
+ * What a monitor tab last showed, kept on the tab for the next view of it: the
+ * read, the filter it was looked at through and how far down the list was
+ * scrolled — the filter decides which sessions the scroll is a position among.
+ */
+export interface ActivityCache {
+  activity: ServerActivity
+  filter: string
+  scrollTop: number
+}
 
 /** One line of a blocking chain: a session, and how far down the chain it is. */
 export interface ChainLink {

@@ -1,24 +1,28 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { TableForeignKey, TableStructure } from '@shared/types'
 import { buildCreateTableDdl } from '@shared/sql/builder'
 import AppIcon from '../components/AppIcon.vue'
 import TableViewSwitch from '../components/TableViewSwitch.vue'
 import { useSchemaStore } from '../stores/schema'
+import { useTabStore, type TableTab } from '../stores/tabs'
 import { useToastStore } from '../stores/toasts'
-import type { TableTab } from '../stores/tabs'
 import { api } from '../lib/api'
 
 const props = defineProps<{ tab: TableTab }>()
 const emit = defineEmits<{ (event: 'open-sql', sql: string, title: string): void }>()
 
 const schemaStore = useSchemaStore()
+const tabs = useTabStore()
 const toasts = useToastStore()
 
 const structure = ref<TableStructure | null>(null)
 const inbound = ref<TableForeignKey[]>([])
 const definition = ref<string | null>(null)
 const loading = ref(true)
+const scroller = ref<HTMLElement | null>(null)
+/** How far the structure was scrolled when the tab was last on screen. */
+const scrolled = props.tab.structureScroll
 
 onMounted(async () => {
   try {
@@ -46,6 +50,23 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  // Drawn once it is read: then the reader can be put back where they were.
+  if (!scrolled) return
+  await nextTick()
+  if (scroller.value) {
+    scroller.value.scrollTop = scrolled.top
+    scroller.value.scrollLeft = scrolled.left
+  }
+})
+
+// Picking another tab, or the rows, takes this view down; how far it was
+// scrolled stays on the tab.
+onBeforeUnmount(() => {
+  const element = scroller.value
+  if (!element) return
+  tabs.update<TableTab>(props.tab.id, {
+    structureScroll: { top: element.scrollTop, left: element.scrollLeft }
+  })
 })
 
 const ddl = computed(() => (structure.value ? buildCreateTableDdl(structure.value) : ''))
@@ -92,7 +113,7 @@ function nullLabel(value: string | null): string {
         </button>
       </div>
 
-      <div class="structure__scroll">
+      <div ref="scroller" class="structure__scroll">
         <section class="panel">
           <h3 class="panel__title">Columns <span class="panel__count">{{ structure.columns.length }}</span></h3>
           <table class="table">

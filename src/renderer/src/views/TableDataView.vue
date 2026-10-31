@@ -56,7 +56,7 @@ import {
   createAutoRefresher,
   type AutoRefreshHold
 } from '../lib/autoRefresh'
-import { sameColumns, sameRows } from '../lib/tableCache'
+import { readsOnReturn, sameColumns, sameRows } from '../lib/tableCache'
 import { readsFiltered } from '../lib/tableFilters'
 import { reindexStagedEdits } from '../lib/stagedRows'
 import { selectionFigures } from '../lib/selectionFigures'
@@ -121,7 +121,7 @@ const totalRows = ref<number | null>(cached?.totalRows ?? null)
  * True from the start, because mounting this view loads: starting at false
  * drew "No rows match" over the empty grid for as long as the first request
  * took, which is the one moment it is certainly wrong. A tab that has a page
- * cached starts false instead — it has rows, and its re-read happens behind
+ * cached starts false instead — it has rows, and any re-read happens behind
  * them.
  */
 const loading = ref(!cached)
@@ -352,9 +352,9 @@ async function loadStructure(): Promise<void> {
  * Handing the grid a new `columns` array resets it — its widths, its
  * selection, the row in the panel — and a new `rows` array loses the scroll
  * position, so a read that came back with the page it already had must leave
- * both alone. That is what makes the re-read behind a reselected tab
- * invisible when nothing has changed, and why this compares rather than
- * assigns.
+ * both alone. That is what makes a re-read behind the rows — a tab refreshing
+ * itself — invisible when nothing has changed, and why this compares rather
+ * than assigns.
  */
 function accept(response: TableDataResponse): void {
   const columnsChanged = !sameColumns(response.columns, columns.value)
@@ -368,8 +368,17 @@ function accept(response: TableDataResponse): void {
   lastSql.value = response.sql
 }
 
+/** The database the sidebar is in, which is where this tab's reads go. */
+function currentDatabase(): string {
+  return connections.statusFor(props.tab.connectionId).currentDatabase ?? ''
+}
+
 /** Keeps this page on the tab, for the next time the tab is picked. */
-function remember(): void {
+function remember(database: string): void {
+  // A read can land after the view has gone, and `props` stops being kept
+  // up with it: the tab as the store has it now holds the view it was put
+  // away with.
+  const kept = tabs.tabs.find((tab) => tab.id === props.tab.id) as TableTab | undefined
   tabs.update<TableTab>(props.tab.id, {
     cache: markRaw({
       columns: columns.value,
@@ -386,7 +395,8 @@ function remember(): void {
       showFilters: showFilters.value,
       durationMs: durationMs.value,
       sql: lastSql.value,
-      scrollTop: grid.value?.scrollOffset() ?? 0,
+      grid: grid.value?.view() ?? kept?.cache?.grid ?? { top: 0, left: 0, widths: [] },
+      database,
       filterRevision: props.tab.filterRevision
     })
   })
@@ -394,7 +404,8 @@ function remember(): void {
 
 /**
  * Writes down what the page picked up after it was read: where the reader
- * scrolled to, and whether the filter bar is open.
+ * scrolled to, how wide they made the columns, and whether the filter bar is
+ * open.
  *
  * Everything else in the cache describes the rows and is written with them.
  * Paging or sorting and then leaving before the answer arrives must not put
@@ -404,20 +415,19 @@ function remember(): void {
  */
 function rememberView(): void {
   const cache = props.tab.cache
-  if (!cache) return
-  const scrollTop = grid.value?.scrollOffset() ?? 0
-  if (cache.scrollTop === scrollTop && cache.showFilters === showFilters.value) return
+  const view = grid.value?.view()
+  if (!cache || !view) return
   tabs.update<TableTab>(props.tab.id, {
-    cache: markRaw({ ...cache, scrollTop, showFilters: showFilters.value })
+    cache: markRaw({ ...cache, grid: view, showFilters: showFilters.value })
   })
 }
 
 /**
  * Whichever load was asked for last is the one whose answer counts.
  *
- * A tab that comes back on screen re-reads its page in the background, and
- * that read is still in flight when the reader sorts, filters or pages — its
- * answer would otherwise land on top of theirs.
+ * A tab that refreshes itself re-reads its page in the background when it
+ * comes back on screen, and that read can still be in flight when the reader
+ * sorts, filters or pages — its answer would otherwise land on top of theirs.
  */
 let loadToken = 0
 
@@ -428,10 +438,10 @@ let loadToken = 0
  * grid dims them and stops answering, and the window's progress bar carries
  * the wait. Sorting a table no longer empties it for the round trip.
  *
- * `background` is the re-read a tab does when it is picked again. Those rows
- * are what the reader was looking at a moment ago, so nothing is dimmed and
- * nothing is blocked; the answer reaches the grid only where it differs from
- * what is already drawn.
+ * `background` is a re-read behind rows already on screen: a tab that
+ * refreshes itself, picked again. Those rows are what the reader was looking
+ * at a moment ago, so nothing is dimmed and nothing is blocked; the answer
+ * reaches the grid only where it differs from what is already drawn.
  *
  * `auto` is a background read the tab's timer asked for. Nobody is waiting on
  * it, so it stays off the window's progress bar and out of the "Checking for
@@ -454,6 +464,7 @@ async function load(resetOffset = false, background = false, auto = false): Prom
     filterMode: filterMode.value,
     rawWhere: rawWhere.value
   })
+  const database = currentDatabase()
   try {
     const response = await api.fetchTableData({
       connectionId: props.tab.connectionId,
@@ -474,7 +485,7 @@ async function load(resetOffset = false, background = false, auto = false): Prom
     accept(response)
     readFiltered.value = filtered
     if (!background) discard()
-    remember()
+    remember(database)
     lastReadAt.value = Date.now()
     return true
   } catch (error) {
@@ -556,8 +567,7 @@ const autoRefresher = createAutoRefresher({
  * an interval of its own already (switched to and back, or moved) keeps it.
  */
 function rememberedTable(): [string, string, string, string] {
-  const database = connections.statusFor(props.tab.connectionId).currentDatabase ?? ''
-  return [props.tab.connectionId, database, props.tab.schema, props.tab.table]
+  return [props.tab.connectionId, currentDatabase(), props.tab.schema, props.tab.table]
 }
 if (props.tab.autoRefresh === undefined) {
   const remembered = uiState.autoRefreshFor(...rememberedTable())
@@ -632,11 +642,13 @@ onMounted(async () => {
 
   if (cached) {
     // The rows are drawn already, and the sort and filters that produced them
-    // came back with them. Put the grid where the reader left it, then go and
-    // find out whether any of it is still true.
-    grid.value?.scrollTo(cached.scrollTop)
+    // came back with them. Put the grid the way the reader left it; only a
+    // tab that refreshes itself goes and finds out whether it is still true.
+    await grid.value?.restoreView(cached.grid)
     await loadStructure()
-    await load(false, true)
+    if (readsOnReturn(cached, { autoRefresh: autoRefresh.value, database: currentDatabase() })) {
+      await load(false, true)
+    }
     return
   }
 
@@ -1670,9 +1682,10 @@ const structureColumns = computed<TableColumn[]>(() => structure.value?.columns 
         {{ tab.schema }}.<strong>{{ tab.table }}</strong>
       </span>
       <span v-if="rowCountLabel" class="data__rows">{{ rowCountLabel }}</span>
-      <!-- A tab picked again re-reads the page it already had. Nothing on
-           screen changes while it does, so this is the only thing that says
-           the rows are a moment old and being checked. -->
+      <!-- A tab that refreshes itself, picked again, re-reads the page it
+           already had. Nothing on screen changes while it does, so this is
+           the only thing that says the rows are a moment old and being
+           checked. -->
       <span v-if="refreshing && !autoReading" class="data__refreshing">
         <span class="spinner"></span>
         Checking for changes…

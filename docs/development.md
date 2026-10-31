@@ -119,7 +119,7 @@ and flips `AllowTcpForwarding` on, which the `linuxserver/openssh-server` image 
 ### End-to-end
 
 ```bash
-scripts/e2e.sh all          # or: smoke | connections | workspace | editing | editor | table-ui | table-tools | routines | auto-refresh | unsaved | read-only | confirm-writes | certificate | workbench | ssm-form | ssm-sso
+scripts/e2e.sh all          # or: smoke | connections | workspace | editing | editor | table-ui | table-tools | routines | auto-refresh | tab-return | unsaved | read-only | confirm-writes | certificate | workbench | ssm-form | ssm-sso
 ```
 
 On a headless box it starts Xvfb itself. It needs Electron's usual Linux libraries:
@@ -188,6 +188,14 @@ The suites:
   outside to turn up unprompted, stages an edit and checks it holds
   (and says why) until the edit is discarded, takes the tab away and back, turns it off, and drops
   the table under it to see a failed read switch it off with a word about it
+- **tab-return** — takes each kind of tab away and back and checks it comes back as it was left: a
+  table scrolled down and across over a column widened by hand (the drag is real mouse input), with
+  a row written meanwhile kept out until *Refresh* — and brought in on coming back once auto
+  refresh is on, without moving the scroll; the table's structure scrolled; a query's editor
+  scrolled with a line selected, its second result set scrolled down and across, and a run's
+  messages scrolled; and the activity monitor filtered and scrolled, with a session opened meanwhile
+  left out until *Refresh*. A read that is over in a few milliseconds is caught as it is drawn, by
+  a `MutationObserver`, rather than looked for afterwards
 - **read-only** — saves a writable and a read-only connection to the container and checks the list
   marks only the read-only one and its form keeps the setting; connects it and checks the status bar
   and the query toolbar say so; runs a script that reads and then deletes and checks it is refused

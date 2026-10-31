@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, markRaw, onBeforeUnmount, ref, watch } from 'vue'
 import { format as formatSql } from 'sql-formatter'
 import type { CellValue, ColumnMeta, PlanKind } from '@shared/types'
 import { statementAt, statementsInRange } from '@shared/sql/statements'
@@ -46,10 +46,25 @@ const snippets = useSnippetStore()
 const uiState = useUiStateStore()
 
 const editor = ref<InstanceType<typeof SqlEditor> | null>(null)
+const results = ref<InstanceType<typeof ResultsPanel> | null>(null)
 /** Shared by every query tab, and kept across restarts: the last drag decides it. */
 const editorHeight = ref(uiState.state.queryEditorHeight)
 watch(editorHeight, (height) => uiState.remember({ queryEditorHeight: height }))
-const cursor = ref(0)
+/** Where this tab was when it was last on screen; nothing for one opening for the first time. */
+const place = props.tab.place
+const cursor = ref(place?.editor ? Math.min(place.editor.head, props.tab.sql.length) : 0)
+
+// The view is going — another tab picked, or this one moved — and the editor
+// and the results with it. Where they were is kept on the tab, for the next
+// view of it to open at.
+onBeforeUnmount(() => {
+  tabs.update<QueryTab>(props.tab.id, {
+    place: markRaw({
+      editor: editor.value?.getPlace() ?? null,
+      results: results.value?.getPlace() ?? null
+    })
+  })
+})
 
 /** The results' row panel, which belongs to this tab and not to the window. */
 const showRowPanel = useRowPanel(() => props.tab)
@@ -474,6 +489,7 @@ defineExpose({
             :font-family="settings.settings.editorFontFamily"
             :font-size="settings.settings.fontSize"
             :baseline="baseline"
+            :place="place?.editor"
             @changes="onChanges"
             @cursor="onCursor"
             @run="run()"
@@ -494,10 +510,12 @@ defineExpose({
             <span>{{ lostSessionNote(tab.sessionLost) }}</span>
           </div>
           <ResultsPanel
+            ref="results"
             v-model:show-row-panel="showRowPanel"
             class="query__results-panel"
             :result="tab.result"
             :running="tab.running"
+            :place="place?.results"
             @export="(columns, rows) => emit('export', columns, rows)"
           />
         </div>

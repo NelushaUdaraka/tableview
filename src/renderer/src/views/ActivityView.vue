@@ -8,7 +8,7 @@
  * cannot see the others' sessions is told which permission it lacks rather
  * than shown a list of one.
  */
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, markRaw, onBeforeUnmount, onMounted, ref, toRaw, watch } from 'vue'
 import type { ActivitySession, ServerActivity } from '@shared/types'
 import AppIcon from '../components/AppIcon.vue'
 import ChoiceMenu from '../components/ChoiceMenu.vue'
@@ -32,11 +32,18 @@ const toasts = useToastStore()
 const confirm = useConfirmStore()
 const connections = useConnectionStore()
 
-const activity = ref<ServerActivity | null>(null)
+/**
+ * What this tab showed when it was last on screen, read here in setup so the
+ * first render draws it: a monitor picked again comes back as it was left,
+ * rather than empty while it asks the server again.
+ */
+const cached = props.tab.cache
+const activity = ref<ServerActivity | null>(cached?.activity ?? null)
 const loading = ref(false)
 const error = ref<string | null>(null)
-const filter = ref('')
+const filter = ref(cached?.filter ?? '')
 const selectedId = ref<number | null>(null)
+const body = ref<HTMLElement | null>(null)
 
 const connected = computed(
   () => connections.statusFor(props.tab.connectionId).state === 'connected'
@@ -182,18 +189,31 @@ function onVisibilityChange(): void {
 }
 document.addEventListener('visibilitychange', onVisibilityChange)
 
-// Read when it opens, and again when the connection comes back.
-watch(
-  connected,
-  (now) => {
-    if (now) void load()
-  },
-  { immediate: true }
-)
+// Read when it opens, and again when the connection comes back. A tab picked
+// again has what it read last time to show, and reads afresh only if it
+// refreshes itself — its timer stopped while it was away.
+if (connected.value && (!cached || autoRefresh.value > 0)) void load()
+watch(connected, (now) => {
+  if (now) void load()
+})
+
+onMounted(() => {
+  if (cached && body.value) body.value.scrollTop = cached.scrollTop
+})
 
 onBeforeUnmount(() => {
   autoRefresher.dispose()
   document.removeEventListener('visibilitychange', onVisibilityChange)
+  // Picking another tab takes this view down: what it read, and where the
+  // reader was in it, stay on the tab for the next view of it.
+  if (!activity.value) return
+  tabs.update<ActivityTab>(props.tab.id, {
+    cache: markRaw({
+      activity: toRaw(activity.value),
+      filter: filter.value,
+      scrollTop: body.value?.scrollTop ?? 0
+    })
+  })
 })
 
 defineExpose({ refresh: () => void load() })
@@ -283,7 +303,7 @@ defineExpose({ refresh: () => void load() })
       <span class="selectable">{{ error }}</span>
     </div>
 
-    <div class="activity__body">
+    <div ref="body" class="activity__body">
       <section v-if="chains.length" class="chains" aria-label="Blocking">
         <div class="activity__heading caps">
           Blocking

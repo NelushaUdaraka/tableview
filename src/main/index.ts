@@ -126,6 +126,13 @@ function createWindow(position?: { x: number; y: number }): BrowserWindow | null
     return { action: 'deny' }
   })
 
+  // The app asks the OS for nothing a web page can request — camera, location,
+  // notifications and the rest all go through the main process — so every such
+  // request is denied rather than left to Electron's permissive default.
+  const { session } = window.webContents
+  session.setPermissionRequestHandler((_contents, _permission, done) => done(false))
+  session.setPermissionCheckHandler(() => false)
+
   // The window stays on the app. Any page it went to would be handed the same
   // API the app has — and a file dropped where nothing takes it, or a link
   // with no target, is all it takes to go. The first load raises no event, so
@@ -144,7 +151,11 @@ function createWindow(position?: { x: number; y: number }): BrowserWindow | null
     forgetWindow(contentsId)
   })
 
-  if (process.env.ELECTRON_RENDERER_URL) {
+  // The dev server URL is honoured only in development. In a packaged build
+  // the renderer is always the bundled file, so a stray ELECTRON_RENDERER_URL
+  // in the environment cannot point a window — handed the whole API — at a page
+  // of someone else's choosing.
+  if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
     void window.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
     void window.loadFile(path.join(__dirname, '../renderer/index.html'))

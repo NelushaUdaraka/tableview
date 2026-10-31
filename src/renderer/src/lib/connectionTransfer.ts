@@ -63,6 +63,17 @@ export async function importConnections(): Promise<void> {
       `Imported ${summary.added.length} ${summary.added.length === 1 ? 'connection' : 'connections'}`,
       detail.join(' · ') || undefined
     )
+    // A file is someone else's to write, so a connection that arrives set to
+    // skip certificate checking is called out plainly rather than left to be
+    // noticed under Advanced.
+    if (summary.weakenedTls.length > 0) {
+      toasts.error(
+        summary.weakenedTls.length === 1
+          ? 'One imported connection bypasses certificate checks'
+          : `${summary.weakenedTls.length} imported connections bypass certificate checks`,
+        `Trusting any certificate: ${summary.weakenedTls.join(', ')}. Check each is the server you meant before connecting.`
+      )
+    }
   } catch (error) {
     toasts.fromError('Could not import the connections', error)
   }

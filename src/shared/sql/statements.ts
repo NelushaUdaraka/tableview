@@ -40,8 +40,11 @@ function* tokenize(sql: string): Generator<Token> {
     if (ch === '-' && next === '-') {
       const code = flushCode(i)
       if (code) yield code
+      // A `--` comment ends at the line break, which SQL Server takes to be a
+      // CR as readily as an LF — so stopping only at `\n` would fold a lone-CR
+      // line and whatever follows it into the comment, hiding real code there.
       let j = i + 2
-      while (j < len && sql[j] !== '\n') j += 1
+      while (j < len && sql[j] !== '\n' && sql[j] !== '\r') j += 1
       yield { start: i, end: j, kind: 'line-comment' }
       i = j
       codeStart = i
@@ -329,13 +332,27 @@ export function stripComments(sql: string): string {
 }
 
 /**
+ * A number literal, so it can be blanked before a keyword is looked for.
+ *
+ * SQL Server needs no space between a number and the keyword after it:
+ * `0x1UPDATE` and `1e1EXEC` run the write. A keyword scan that steps over the
+ * digits — or, worse, reads `x1UPDATE` as one word — would miss it, so numbers
+ * are masked out the way comments and strings are. The lookbehind keeps the
+ * digits of a name (`t1`, `#t2`, `@p1`) in place: only a number that stands on
+ * its own is blanked. Covered: hex (`0x…`, `0x` empty), integers and decimals
+ * (`1`, `1.`, `.5`), and exponents (`1e1`, `1e`, `1e+`, `.5e1`).
+ */
+const NUMBER_LITERAL = /(?<![\p{L}\p{N}_@#$])(?:0x[0-9a-f]*|(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d*)?)/giu
+
+/**
  * The script with only its code left to read.
  *
- * Comments become spaces, and literals and quoted names keep their delimiters
- * around spaces, so a word found in what is left is a word of code — a
- * `DELETE` in a comment, a string or a `[bracketed]` name is gone. Every
- * character keeps its offset, and line breaks stay where they were, so a
- * position here is the same position in the script.
+ * Comments, string literals and `[bracketed]`/`"quoted"` names become spaces
+ * (the delimiters of the last two stay), and so do number literals, so a word
+ * found in what is left is a word of code — a `DELETE` in a comment, a string,
+ * a `[bracketed]` name or one glued to a number is gone. Every character keeps
+ * its offset, and line breaks stay where they were, so a position here is the
+ * same position in the script.
  */
 export function maskNonCode(sql: string): string {
   const blank = (part: string): string => part.replace(/[^\r\n]/g, ' ')
@@ -343,7 +360,8 @@ export function maskNonCode(sql: string): string {
   for (const token of tokenize(sql)) {
     const text = sql.slice(token.start, token.end)
     if (token.kind === 'code') {
-      out += text
+      // Numbers hold no line breaks, so blanking them keeps every offset.
+      out += text.replace(NUMBER_LITERAL, blank)
       continue
     }
     if (token.kind === 'line-comment' || token.kind === 'block-comment') {

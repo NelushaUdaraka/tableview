@@ -38,6 +38,7 @@ import {
   parseExportFile,
   planImport,
   toSaveInput,
+  weakensTls,
   type ConnectionExportFile,
   type ImportSummary
 } from '../../shared/connectionTransfer'
@@ -512,14 +513,16 @@ export class AppData {
     const plan = planImport(file, this.listConnections())
     const added: string[] = []
     const needSecrets: string[] = []
+    const weakenedTls: string[] = []
 
     for (const connection of plan.add) {
       this.saveConnection(toSaveInput(connection))
       added.push(connection.name)
       if (connection.missingSecrets.length > 0) needSecrets.push(connection.name)
+      if (weakensTls(connection.options)) weakenedTls.push(connection.name)
     }
 
-    return { added, skipped: plan.skipped, needSecrets }
+    return { added, skipped: plan.skipped, needSecrets, weakenedTls }
   }
 
   // -- settings -------------------------------------------------------------

@@ -25,6 +25,19 @@ buildDependenciesFromSource: false
 
 asar: true
 
+# Electron fuses, flipped in the packaged binary so the standard escape hatches
+# are off: the app is never a general Node runtime (RunAsNode), NODE_OPTIONS and
+# --inspect cannot inject code into it, and it only ever loads its own asar,
+# whose contents are checked. grantFileProtocolExtraPrivileges is left on,
+# because the renderer is still served from file://; turning it off needs a
+# custom protocol first (see docs/limitations.md).
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+
 win:
   icon: build/icon.png
   target:

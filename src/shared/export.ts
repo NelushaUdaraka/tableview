@@ -53,7 +53,11 @@ export function toDelimited(
 
   const lines: string[] = []
   if (includeHeader) {
-    lines.push(columns.map((column) => escapeDelimited(column.name, delimiter)).join(delimiter))
+    // A column name is a cell too: an alias like `=HYPERLINK(...)` would run in
+    // a spreadsheet just as a data cell would, so it is defused the same way.
+    const header = (name: string): string =>
+      options.escapeFormulas ? defuseFormula(name, name) : name
+    lines.push(columns.map((column) => escapeDelimited(header(column.name), delimiter)).join(delimiter))
   }
   const text = (cell: CellValue): string => {
     const plain = cellToText(cell, nullString)

@@ -13,6 +13,18 @@ not there yet is the next release, still being prepared.
   filter.
 - Coming back to a table or the activity monitor no longer reads it again unless its auto refresh
   is on. You get back what you left, and *Refresh* (`F5`) reads it when you want it current.
+- Read-only and confirm-writes now catch a write that was hidden by running it straight on from a
+  number (`SELECT 1e1DELETE …`, `0x1UPDATE …`) or past a bare carriage return in a `--` comment —
+  SQL Server runs these, and they were slipping through as if they only read.
+- A CSV or TSV export now also keeps the header row from being read as a spreadsheet formula, the
+  way the data cells already were: a column or alias named like `=HYPERLINK(…)` is written inert.
+- Importing connections now warns when a connection in the file is set to trust any server
+  certificate (or to skip encryption), so a shared file cannot quietly weaken how you connect.
+- Hardening under the hood: a packaged build ignores a stray development-server override in the
+  environment, the "test connection" button no longer reuses a saved password for a server or
+  login you changed in the form, Windows runs `aws` and `taskkill` from `PATH` rather than the
+  current folder, the packaged app turns off Electron's debugging escape hatches, and an Azure
+  dependency was updated for a published advisory.
 
 ## 0.4.1
 

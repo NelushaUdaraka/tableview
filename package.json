@@ -53,6 +53,9 @@
     "sql-formatter": "^15.8.2",
     "ssh2": "^1.17.0"
   },
+  "overrides": {
+    "@azure/identity": "^4.14.1"
+  },
   "devDependencies": {
     "@codemirror/autocomplete": "^6.19.0",
     "@codemirror/commands": "^6.9.0",

@@ -18,6 +18,7 @@ import { isLoopbackHost } from '../../shared/hosts'
 import { InstanceLookupError, resolveInstanceByName } from './ec2Instances'
 import { Tunnel, TunnelHandle, TunnelTarget, findFreePort, waitForPort } from './types'
 import { stopProcessTree } from './processTree'
+import { resolveCommand } from './executable'
 
 /** Resolves a bastion named by its Name tag; injected so tests can answer it. */
 export type InstanceResolver = (config: SsmConfig) => Promise<string>
@@ -345,7 +346,7 @@ export class SsmTunnel implements Tunnel {
 
     const { command, args, env } = buildSsmCommand(this.activeConfig, this.target, localPort)
 
-    const child = this.spawnFn(command, args, {
+    const child = this.spawnFn(resolveCommand(command), args, {
       // Pasted credentials win over anything inherited, so a stale AWS_PROFILE
       // in the app's environment cannot quietly take precedence.
       env: { ...process.env, ...env, ...(this.credentialEnv ?? {}) },

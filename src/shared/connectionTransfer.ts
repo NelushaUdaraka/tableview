@@ -73,6 +73,19 @@ export interface ImportSummary {
   skipped: string[]
   /** Of the added ones, those that arrived without a secret they need. */
   needSecrets: string[]
+  /**
+   * Of the added ones, those whose options turn off or bypass TLS checking.
+   * A file is a thing someone else can write, so a connection that arrives set
+   * to trust any certificate (or to skip encryption) is called out rather than
+   * taken on quietly.
+   */
+  weakenedTls: string[]
+}
+
+/** True when a connection's options turn off encryption or certificate checking. */
+export function weakensTls(options: Partial<SqlServerOptions> | undefined): boolean {
+  if (!options) return false
+  return options.encrypt === false || options.trustServerCertificate === true
 }
 
 /** The secrets a record had where it came from, in a stable order. */

@@ -49,12 +49,15 @@ on: read-only comes off into confirming, and every write will be asked about any
 
 ## How a script is checked
 
-The script is read by the app's own T-SQL lexer, with comments, literals and `[quoted]` names
-blanked out, and turned down on any reserved word that changes something — `INSERT`, `UPDATE`,
-`DELETE`, `MERGE`, `TRUNCATE`, DDL, `GRANT`, `BACKUP`, `DBCC`, `KILL` — and on `SELECT … INTO`.
-Reserved words cannot be bare names in T-SQL, so a `DELETE` found in the code is a `DELETE`
-statement, while a column called `[delete]` or a string that mentions one goes through. What it
-cannot see into it does not guess at: `EXEC`, dynamic SQL, `OPENQUERY`/`OPENROWSET`, and a
+The script is read by the app's own T-SQL lexer, with comments, literals, `[quoted]` names and
+number literals blanked out, and turned down on any reserved word that changes something —
+`INSERT`, `UPDATE`, `DELETE`, `MERGE`, `TRUNCATE`, DDL, `GRANT`, `BACKUP`, `DBCC`, `KILL` — and on
+`SELECT … INTO`. Reserved words cannot be bare names in T-SQL, so a `DELETE` found in the code is a
+`DELETE` statement, while a column called `[delete]` or a string that mentions one goes through.
+Numbers are blanked because SQL Server needs no space between one and the keyword after it, so
+`SELECT 1e1DELETE …` and `SELECT 0x1UPDATE …` run the write; a `--` comment is ended by a bare
+carriage return as well as a newline, the way SQL Server ends it, so neither hides what follows.
+What it cannot see into it does not guess at: `EXEC`, dynamic SQL, `OPENQUERY`/`OPENROWSET`, and a
 procedure called by name at the head of a batch — which SQL Server runs without an `EXEC` — are
 refused outright, whatever they would have done. A raw `WHERE` in the filter bar is checked the
 same way, since a `;` ends the `SELECT` there as readily as anywhere.

@@ -163,7 +163,11 @@ navigation anywhere else is cancelled (`will-navigate`), and a new window is nev
 https link goes to the browser, and nothing else goes anywhere, since the OS runs a program for a
 `file:` or a registered scheme as readily as it opens a page. A file is read only if the window's
 own open dialog just picked it, and an export is written only where the save dialog says. The
-renderer runs sandboxed; the preload needs nothing from Node beyond Electron's bridge.
+renderer runs sandboxed, and every web permission request (camera, location, notifications and the
+rest, none of which the app uses) is denied; the preload needs nothing from Node beyond Electron's
+bridge. A packaged build loads only its own bundled page — a stray `ELECTRON_RENDERER_URL` in the
+environment is honoured only in development — and the built binary has Electron's debugging escape
+hatches (`RunAsNode`, `NODE_OPTIONS`, `--inspect`) fused off (`electron-builder.yml`).
 
 **SSH servers are trusted the way `ssh` trusts them.** A tunnel is handed a policy (`tunnel/hostKeys.ts`)
 that knows the keys already trusted and can ask about one that is not; without one it trusts

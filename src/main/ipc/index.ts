@@ -59,6 +59,7 @@ import { snippetExportFileName } from '../../shared/snippets'
 import { MenuRole } from '../../shared/menu'
 import { EXPORT_EXTENSIONS, exportRows } from '../../shared/export'
 import { tablePlusUrlFromClipboard } from '../../shared/tableplus'
+import { mayReuseDbSecret, mayReuseSshSecret } from '../../shared/connectionSecrets'
 import { decodeText } from '../../shared/csv'
 import { liftPlans } from '../../shared/showplan'
 import type { UiStatePatch } from '../../shared/uiState'
@@ -839,9 +840,18 @@ function materialiseConfig(input: Partial<ConnectionConfig>, appData: AppData): 
   const stored = input.id ? appData.getConnectionWithSecrets(input.id) : null
   const now = new Date().toISOString()
 
+  // A saved secret is only borrowed to fill a blank when the form still points
+  // at the same target: a form that has changed the host or the login must not
+  // send the stored password somewhere else (defence in depth — the window
+  // never sees the secret, only names where a test sends it).
+  const reuseDb = stored ? mayReuseDbSecret(input, stored) : false
+  const reuseSsh = mayReuseSshSecret(input.ssh, stored?.ssh)
+
   const ssh = { ...DEFAULT_SSH_CONFIG, ...stored?.ssh, ...input.ssh }
-  if (!input.ssh?.password && stored?.ssh?.password) ssh.password = stored.ssh.password
-  if (!input.ssh?.passphrase && stored?.ssh?.passphrase) ssh.passphrase = stored.ssh.passphrase
+  if (!input.ssh?.password && stored?.ssh?.password) ssh.password = reuseSsh ? stored.ssh.password : undefined
+  if (!input.ssh?.passphrase && stored?.ssh?.passphrase) {
+    ssh.passphrase = reuseSsh ? stored.ssh.passphrase : undefined
+  }
 
   const ssm = { ...DEFAULT_SSM_CONFIG, ...stored?.ssm, ...input.ssm }
   // A block typed into the form but not yet saved should still be testable.
@@ -863,7 +873,7 @@ function materialiseConfig(input: Partial<ConnectionConfig>, appData: AppData): 
     database: input.database ?? stored?.database,
     authType: input.authType ?? stored?.authType ?? 'sql',
     username: input.username ?? stored?.username,
-    password: input.password || stored?.password,
+    password: input.password || (reuseDb ? stored?.password : undefined),
     domain: input.domain ?? stored?.domain,
     savePassword: false,
     options: { ...DEFAULT_SQLSERVER_OPTIONS, ...stored?.options, ...input.options },

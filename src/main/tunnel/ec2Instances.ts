@@ -18,6 +18,7 @@
 import { execFile } from 'node:child_process'
 import type { SsmConfig } from '../../shared/types'
 import type { SsmInstance, SsmInstanceList } from '../../shared/ipc'
+import { resolveCommand } from './executable'
 
 export class InstanceLookupError extends Error {
   constructor(
@@ -318,7 +319,7 @@ export function classifyInstanceLookupFailure(
 const runCli: CliRunner = (command, args, env) =>
   new Promise((resolve) => {
     execFile(
-      command,
+      resolveCommand(command),
       args,
       {
         timeout: 30000,

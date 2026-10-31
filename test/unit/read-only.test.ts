@@ -36,9 +36,34 @@ describe('findWrite: what a read-only connection lets through', () => {
     // The Service Broker words are not reserved, so they can be names.
     ['columns called receive and send', 'SELECT t.receive, t.send, x AS receive FROM t'],
     ['paging with FETCH NEXT', 'SELECT * FROM t ORDER BY id OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY'],
-    ['a conversation looked at, not changed', 'SELECT * FROM sys.conversation_endpoints']
+    ['a conversation looked at, not changed', 'SELECT * FROM sys.conversation_endpoints'],
+    // Numbers are blanked before the scan, so a read full of them stays a read.
+    ['hex, float and decimal literals', 'SELECT 0xDEAD, 1e3, .5e-2, 1.5 FROM t WHERE id = 0x1F'],
+    ['digits inside names and variables', 'SELECT @p1, #t2.c3, t4.col5 FROM dbo.t4 AS t4']
   ])('lets through %s', (_label, sql) => {
     expect(findWrite(sql)).toBeNull()
+  })
+})
+
+describe('findWrite: a write hidden behind a number or a lone CR', () => {
+  // SQL Server needs no space between a number literal and the keyword after
+  // it, and ends a `--` comment at a bare CR; neither must hide a write.
+  it.each([
+    ['hex glued to UPDATE', 'SELECT 0x1UPDATE t SET c = 1', 'UPDATE'],
+    ['empty hex glued to UPDATE', 'SELECT 0xUPDATE t SET c = 1', 'UPDATE'],
+    ['float glued to EXEC', "SELECT 1e1EXEC('x')", 'EXEC'],
+    ['bare-exponent float glued to DELETE', 'SELECT 1eDELETE t', 'DELETE'],
+    ['leading-dot float glued to INSERT', 'SELECT .5e1INSERT t VALUES (1)', 'INSERT'],
+    // A hex literal eats a following hex letter (`0x1DROP` is `0x1D` then `ROP`,
+    // which SQL Server rejects), so the DROP bypass is the float form.
+    ['float glued to DROP', 'SELECT 1e1DROP TABLE t', 'DROP'],
+    ['a lone CR ending a line comment', 'SELECT 1 -- note\rUPDATE t SET c = 1', 'UPDATE']
+  ])('refuses %s', (_label, sql, keyword) => {
+    expect(findWrite(sql)).toMatchObject({ keyword })
+  })
+
+  it('refuses a Service Broker statement after a decimal literal', () => {
+    expect(findWrite('IF 1=1. RECEIVE TOP(1) * FROM q')).toMatchObject({ keyword: 'RECEIVE' })
   })
 })
 

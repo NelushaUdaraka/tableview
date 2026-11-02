@@ -293,6 +293,16 @@ export function classifyInstanceLookupFailure(
   if (/expired|token has expired|refresh.*credentials|sso session associated/.test(text)) {
     return 'Your AWS credentials have expired. Paste a fresh block from the access portal (or for SSO run: aws sso login --profile <name>).'
   }
+  // AWS turns down a lapsed or wrong key with these, none of which say
+  // "expired"; a pasted block carries no expiry to catch up front, so this is
+  // where a block that ran out is first seen.
+  if (
+    /authfailure|was not able to validate the provided access credentials|invalidclienttokenid|unrecognizedclientexception|the security token included in the request is invalid|signaturedoesnotmatch/.test(
+      text
+    )
+  ) {
+    return 'AWS did not accept these credentials. If this connection uses a pasted block, it has most likely expired — paste a fresh one from the access portal (or for SSO run: aws sso login --profile <name>).'
+  }
   if (/unable to locate credentials|no credentials|missing credentials/.test(text)) {
     return 'No AWS credentials were found. Paste a block from the access portal, or pick a profile the CLI can resolve.'
   }
@@ -457,9 +467,11 @@ export async function resolveInstanceByName(
   const ec2 = buildInstanceListCommand(config, 'ec2', region, name)
   const result = await run(ec2.command, ec2.args, credentialEnv)
   if (result.code !== 0) {
-    throw new InstanceLookupError(
-      classifyInstanceLookupFailure(`${result.stderr} ${result.stdout}`, result.code, 'ec2')
-    )
+    const raw = `${result.stderr} ${result.stdout}`.trim()
+    // The raw output is carried as the detail: the connect path reads it to
+    // decide whether to offer a fresh credentials block, so it must not be lost
+    // to the friendlier message.
+    throw new InstanceLookupError(classifyInstanceLookupFailure(raw, result.code, 'ec2'), raw)
   }
 
   const { instances } = parseDescribeInstances(result.stdout)

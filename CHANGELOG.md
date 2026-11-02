@@ -20,6 +20,10 @@ not there yet is the next release, still being prepared.
   way the data cells already were: a column or alias named like `=HYPERLINK(…)` is written inert.
 - Importing connections now warns when a connection in the file is set to trust any server
   certificate (or to skip encryption), so a shared file cannot quietly weaken how you connect.
+- An SSM connection whose pasted AWS credentials have lapsed now offers the paste-a-fresh-block
+  box, instead of failing with a raw "AuthFailure" from the bastion lookup. A pasted block carries
+  no expiry, so a lapsed one only shows when AWS turns it down — and that refusal is now recognised
+  as a credentials problem however AWS words it (AuthFailure, InvalidClientTokenId, and the rest).
 - Hardening under the hood: a packaged build ignores a stray development-server override in the
   environment, the "test connection" button no longer reuses a saved password for a server or
   login you changed in the form, Windows runs `aws` and `taskkill` from `PATH` rather than the

@@ -191,6 +191,21 @@ describe('classifySsmFailure', () => {
     expect(isExpiredCredentialsFailure('bind: address already in use')).toBe(false)
   })
 
+  it('recognises the credentials AWS rejects without the word "expired"', () => {
+    // Portal env-var blocks carry no expiry, so a lapsed one is only found when
+    // AWS turns it down — and EC2 says "AuthFailure", not "expired".
+    for (const output of [
+      'An error occurred (AuthFailure) when calling the DescribeInstances operation: AWS was not able to validate the provided access credentials',
+      'An error occurred (InvalidClientTokenId) when calling the operation: The security token included in the request is invalid.',
+      'An error occurred (UnrecognizedClientException): The security token included in the request is invalid.',
+      'An error occurred (SignatureDoesNotMatch): The request signature we calculated does not match'
+    ]) {
+      expect(isExpiredCredentialsFailure(output)).toBe(true)
+    }
+    // IAM denial is a policy problem, not a credentials one, and must stay apart.
+    expect(isExpiredCredentialsFailure('An error occurred (UnauthorizedOperation)')).toBe(false)
+  })
+
   it('mentions SSO when the session has expired', () => {
     expect(classifySsmFailure('Error loading SSO Token: sso session associated', 253)).toMatch(
       /aws sso login/
@@ -373,6 +388,18 @@ describe('SsmTunnel against a stand-in CLI', () => {
   it('offers a fresh block when the lookup ran out of credentials', async () => {
     const tunnel = makeTunnel({ target: 'name', instanceName: 'prod', instanceId: '' }, 'ok', () =>
       Promise.reject(new Error('Your AWS credentials have expired. Paste a fresh block.'))
+    )
+
+    await expect(tunnel.open()).rejects.toMatchObject({ code: SSM_CREDENTIALS_EXPIRED })
+  })
+
+  it('offers a fresh block when AWS turns the lookup credentials down (AuthFailure)', async () => {
+    const tunnel = makeTunnel({ target: 'name', instanceName: 'prod', instanceId: '' }, 'ok', () =>
+      Promise.reject(
+        new Error(
+          'An error occurred (AuthFailure) when calling the DescribeInstances operation: AWS was not able to validate the provided access credentials'
+        )
+      )
     )
 
     await expect(tunnel.open()).rejects.toMatchObject({ code: SSM_CREDENTIALS_EXPIRED })

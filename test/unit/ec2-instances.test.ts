@@ -293,6 +293,14 @@ describe('classifyInstanceLookupFailure', () => {
   const cases: [string, RegExp][] = [
     ['spawn aws ENOENT', /AWS CLI was not found/],
     ['The security token included in the request is expired', /expired/i],
+    [
+      'An error occurred (AuthFailure) when calling the DescribeInstances operation: AWS was not able to validate the provided access credentials',
+      /paste a fresh/i
+    ],
+    [
+      'An error occurred (InvalidClientTokenId): The security token included in the request is invalid.',
+      /paste a fresh/i
+    ],
     ['Unable to locate credentials. You can configure credentials by running "aws configure".', /No AWS credentials/],
     ['An error occurred (UnauthorizedOperation) when calling the DescribeInstances operation', /Access denied by IAM/],
     ['You must specify a region. You can also configure your region by running "aws configure".', /Choose the region/],

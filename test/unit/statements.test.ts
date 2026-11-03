@@ -176,18 +176,33 @@ describe('stripComments', () => {
 
 describe('maskNonCode', () => {
   it('leaves code exactly as it is', () => {
-    expect(maskNonCode('SELECT a, b FROM dbo.t WHERE a = 1;')).toBe(
-      'SELECT a, b FROM dbo.t WHERE a = 1;'
+    expect(maskNonCode('SELECT a, b FROM dbo.t WHERE a = x;')).toBe(
+      'SELECT a, b FROM dbo.t WHERE a = x;'
     )
   })
 
   it('blanks comments, keeping their place', () => {
-    expect(maskNonCode('SELECT 1 -- DROP\nFROM t')).toBe('SELECT 1        \nFROM t')
-    expect(maskNonCode('SELECT /* DELETE */ 1')).toBe('SELECT              1')
+    expect(maskNonCode('SELECT a -- DROP\nFROM t')).toBe('SELECT a        \nFROM t')
+    expect(maskNonCode('SELECT /* DELETE */ a')).toBe('SELECT              a')
   })
 
   it('blanks a nested block comment whole', () => {
-    expect(maskNonCode('/* a /* DROP */ b */SELECT 1')).toBe(`${' '.repeat(20)}SELECT 1`)
+    expect(maskNonCode('/* a /* DROP */ b */SELECT x')).toBe(`${' '.repeat(20)}SELECT x`)
+  })
+
+  it('blanks number literals, so a keyword glued to one is still found', () => {
+    // SQL Server runs `0x1UPDATE` and `1e1EXEC` with no space; the number has
+    // to go so the keyword after it is read as a keyword. Offsets are kept
+    // (same length), and what is left, with its spaces collapsed, is the code.
+    const collapse = (sql: string): string => maskNonCode(sql).replace(/ +/g, ' ').trimEnd()
+    for (const sql of ['SELECT 0x1UPDATE t SET c = 1', 'SELECT 1e1EXEC(x)', 'WHERE a = 1.5e3']) {
+      expect(maskNonCode(sql)).toHaveLength(sql.length)
+    }
+    expect(collapse('SELECT 0x1UPDATE t SET c = 1')).toBe('SELECT UPDATE t SET c =')
+    expect(collapse('SELECT 1e1EXEC(x)')).toBe('SELECT EXEC(x)')
+    expect(collapse('WHERE a = 1.5e3')).toBe('WHERE a =')
+    // But the digits of a name stay: `t4`, `#t2`, `@p1` are not numbers.
+    expect(maskNonCode('SELECT @p1, #t2.c3 FROM t4')).toBe('SELECT @p1, #t2.c3 FROM t4')
   })
 
   it('keeps the line breaks a comment or a literal spans', () => {

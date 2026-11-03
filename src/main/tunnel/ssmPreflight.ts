@@ -8,6 +8,7 @@
  */
 import { execFile } from 'node:child_process'
 import type { SsmConfig } from '../../shared/types'
+import { resolveCommand } from './executable'
 
 export interface CheckResult {
   ok: boolean
@@ -30,7 +31,7 @@ function run(
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     execFile(
-      command,
+      resolveCommand(command),
       args,
       {
         timeout: timeoutMs,

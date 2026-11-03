@@ -8,13 +8,22 @@
  * grandchild keeps running (and, for a session, keeps holding the local port).
  */
 import { ChildProcess, spawn } from 'node:child_process'
+import path from 'node:path'
+
+/**
+ * taskkill's absolute path, so a `taskkill.exe` planted in the working
+ * directory cannot stand in for it — this runs on every SSM disconnect.
+ */
+function taskkillPath(): string {
+  return path.join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32', 'taskkill.exe')
+}
 
 export async function stopProcessTree(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return
 
   if (process.platform === 'win32' && child.pid !== undefined) {
     await new Promise<void>((resolve) => {
-      const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+      const killer = spawn(taskkillPath(), ['/pid', String(child.pid), '/T', '/F'], {
         windowsHide: true,
         stdio: 'ignore'
       })

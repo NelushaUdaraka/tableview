@@ -648,6 +648,42 @@ describe('the name each connection gives SQL Server', () => {
     )
     expect(appData.listConnections()[0].options.applicationName).toBe('TableView')
   })
+
+  it('flags an imported connection that bypasses certificate checking', () => {
+    const summary = appData.importConnections(
+      JSON.stringify({
+        kind: 'tableview/connections',
+        version: 1,
+        exportedAt: '2026-09-16T12:31:00.000Z',
+        connections: [
+          {
+            name: 'Trusting',
+            host: 'prod-sql.internal',
+            port: 1433,
+            authType: 'sql',
+            savePassword: false,
+            options: { ...DEFAULT_SQLSERVER_OPTIONS, trustServerCertificate: true },
+            ssh: { ...DEFAULT_SSH_CONFIG },
+            ssm: { ...DEFAULT_SSM_CONFIG },
+            missingSecrets: []
+          },
+          {
+            name: 'Careful',
+            host: 'db2.internal',
+            port: 1433,
+            authType: 'sql',
+            savePassword: false,
+            options: { ...DEFAULT_SQLSERVER_OPTIONS },
+            ssh: { ...DEFAULT_SSH_CONFIG },
+            ssm: { ...DEFAULT_SSM_CONFIG },
+            missingSecrets: []
+          }
+        ]
+      })
+    )
+    expect(summary.added).toEqual(['Trusting', 'Careful'])
+    expect(summary.weakenedTls).toEqual(['Trusting'])
+  })
 })
 
 describe('query history', () => {

@@ -75,7 +75,10 @@ Two sources, chosen per connection:
   (`ASIA************MPLE · eu-west-2 · temporary`), or what is wrong with it, rather than leaving
   that to Save. The block is **saved with that connection**, encrypted by the same vault that
   protects database passwords, so connections in different AWS accounts each carry their own.
-  Re-paste when they expire.
+  Re-paste when they expire. The portal's block carries no expiry time, so a lapsed one is not
+  caught up front — it shows when AWS turns it down (the bastion lookup comes back `AuthFailure`,
+  or `InvalidClientTokenId` and the like). TableView reads any of those as a credentials problem
+  and opens the paste-a-fresh-block dialog, rather than failing with the raw AWS message.
 - **Let the AWS CLI resolve them** — the normal chain: `--profile`, environment variables, SSO
   cache, `credential_process`, assume-role, instance profile. Use this if you keep profiles in
   `~/.aws/`.

@@ -14,6 +14,7 @@ import { ChildProcess, spawn } from 'node:child_process'
 import type { SsmConfig } from '../../shared/types'
 import type { SsoLoginPrompt } from '../../shared/ipc'
 import { stopProcessTree } from './processTree'
+import { resolveCommand } from './executable'
 
 export type SsoLoginConfig = Pick<SsmConfig, 'awsCliPath' | 'profile'>
 
@@ -120,7 +121,7 @@ export class SsoLogin {
   private attempt(deviceCode: boolean): Promise<'done' | 'no-browser'> {
     if (this.cancelled) return Promise.reject(new SsoLoginCancelled())
     const { command, args, env } = buildSsoLoginCommand(this.config, deviceCode)
-    const child = (this.deps.spawnFn ?? spawn)(command, args, {
+    const child = (this.deps.spawnFn ?? spawn)(resolveCommand(command), args, {
       env: { ...process.env, ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,

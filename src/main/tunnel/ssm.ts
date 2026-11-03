@@ -18,6 +18,7 @@ import { isLoopbackHost } from '../../shared/hosts'
 import { InstanceLookupError, resolveInstanceByName } from './ec2Instances'
 import { Tunnel, TunnelHandle, TunnelTarget, findFreePort, waitForPort } from './types'
 import { stopProcessTree } from './processTree'
+import { resolveCommand } from './executable'
 
 /** Resolves a bastion named by its Name tag; injected so tests can answer it. */
 export type InstanceResolver = (config: SsmConfig) => Promise<string>
@@ -53,16 +54,24 @@ export class SsmTunnelError extends Error {
 }
 
 /**
- * Credentials that have run out, in any of the ways the CLI says so.
+ * Credentials the user has to replace — expired, or otherwise turned down by
+ * AWS — in any of the wordings the CLI passes on.
  *
- * Callers tag the failure with a code from this rather than re-matching the
- * message, so the wording stays free to change.
+ * Portal env-var blocks carry no expiry, so a lapsed one is not caught up front
+ * and only shows when AWS rejects it; EC2 then says `AuthFailure … was not able
+ * to validate the provided access credentials` rather than anything with the
+ * word "expired", and STS says `InvalidClientTokenId` / `SignatureDoesNotMatch`.
+ * All of them mean the same thing for a pasted block: paste a fresh one. (An
+ * IAM policy denial — `UnauthorizedOperation`, `AccessDenied` — is a different
+ * problem and is deliberately left out.) Callers tag the failure with a code
+ * from this rather than re-matching the message, so the wording stays free to
+ * change.
  */
-const EXPIRED_CREDENTIALS =
-  /expired|token has expired|refresh.*credentials|sso session associated|error loading sso token/i
+const REJECTED_CREDENTIALS =
+  /expired|token has expired|refresh.*credentials|sso session associated|error loading sso token|authfailure|was not able to validate the provided access credentials|invalidclienttokenid|unrecognizedclientexception|the security token included in the request is invalid|signaturedoesnotmatch/i
 
 export function isExpiredCredentialsFailure(output: string): boolean {
-  return EXPIRED_CREDENTIALS.test(output)
+  return REJECTED_CREDENTIALS.test(output)
 }
 
 export interface SsmCommand {
@@ -328,12 +337,17 @@ export class SsmTunnel implements Tunnel {
         this.resolvedInstanceId = await this.resolveInstance(this.config)
       } catch (error) {
         // Same shape as every other way this tunnel fails, so a lookup that
-        // fell over expired credentials offers to take a fresh block too.
+        // fell over rejected credentials offers to take a fresh block too. The
+        // raw CLI output is checked alongside the message, since AWS's own
+        // wording (AuthFailure …) is what names a credentials problem.
         const message = error instanceof Error ? error.message : String(error)
+        const detail = error instanceof InstanceLookupError ? error.detail : undefined
         throw new SsmTunnelError(
           message,
-          error instanceof InstanceLookupError ? error.detail : undefined,
-          isExpiredCredentialsFailure(message) ? SSM_CREDENTIALS_EXPIRED : undefined
+          detail,
+          isExpiredCredentialsFailure(`${message}\n${detail ?? ''}`)
+            ? SSM_CREDENTIALS_EXPIRED
+            : undefined
         )
       }
     }
@@ -345,7 +359,7 @@ export class SsmTunnel implements Tunnel {
 
     const { command, args, env } = buildSsmCommand(this.activeConfig, this.target, localPort)
 
-    const child = this.spawnFn(command, args, {
+    const child = this.spawnFn(resolveCommand(command), args, {
       // Pasted credentials win over anything inherited, so a stale AWS_PROFILE
       // in the app's environment cannot quietly take precedence.
       env: { ...process.env, ...env, ...(this.credentialEnv ?? {}) },

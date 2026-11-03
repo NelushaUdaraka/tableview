@@ -16,7 +16,8 @@ import {
   parseExportFile,
   planImport,
   toExportedConnection,
-  toSaveInput
+  toSaveInput,
+  weakensTls
 } from '../../src/shared/connectionTransfer'
 import {
   DEFAULT_SQLSERVER_OPTIONS,
@@ -253,6 +254,18 @@ describe('planning an import', () => {
     const plan = planImport(doubled, [])
     expect(plan.add).toHaveLength(1)
     expect(plan.skipped).toEqual(['prod'])
+  })
+})
+
+describe('weakensTls', () => {
+  it('flags options that turn off encryption or certificate checking', () => {
+    expect(weakensTls({ encrypt: true, trustServerCertificate: true })).toBe(true)
+    expect(weakensTls({ encrypt: false, trustServerCertificate: false })).toBe(true)
+  })
+
+  it('passes a connection that keeps encryption and certificate checking', () => {
+    expect(weakensTls({ encrypt: true, trustServerCertificate: false })).toBe(false)
+    expect(weakensTls(undefined)).toBe(false)
   })
 })
 

@@ -102,6 +102,15 @@ describe('toDelimited', () => {
     ])
   })
 
+  it('defuses a column name that would run as a formula', () => {
+    const csv = toDelimited(
+      [meta('=HYPERLINK("http://x","y")', 'string', 0), meta('safe', 'string', 1)],
+      [['a', 'b']],
+      { format: 'csv', escapeFormulas: true }
+    )
+    expect(csv.split('\n')[0]).toBe(`"'=HYPERLINK(""http://x"",""y"")",safe`)
+  })
+
   it('leaves numbers, and text it was not asked about, as they are', () => {
     expect(toDelimited(columns, [[-1, '=1+1']], { format: 'csv', includeHeader: false })).toBe('-1,=1+1\n')
     expect(

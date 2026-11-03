@@ -41,7 +41,10 @@ they do once open. Connecting through an AWS bastion has [a page of its own](aws
   itself, so re-importing the same file to pick up one new connection does not leave you with two
   of everything. Nor does an AWS CLI path travel, in either direction: it names a program this
   machine runs on *Connect*, and a file someone sent has no business choosing that — one pointing at
-  a share on their server would have this machine run whatever they put there.
+  a share on their server would have this machine run whatever they put there. An import also warns
+  when a connection in the file is set to trust any server certificate, or to skip encryption, so a
+  file someone sent cannot quietly weaken how you connect: the toast names each one to check before
+  you open it.
 - **…or brought over from TablePlus** — *Import from TablePlus…*, on the list's ⋮ and in the File
   menu, opens a new connection with the three steps for getting one out of TablePlus: right-click
   it in TablePlus's start window, choose *Copy as URL*, and press *Paste URL* here. The form fills

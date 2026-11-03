@@ -102,20 +102,21 @@ jobs:
     defaults:
       run:
         shell: bash
-    env:
-      # Read by electron-builder to upload to the draft.
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
+      # No GH_TOKEN here: npm ci runs every dependency's install scripts, and the
+      # write token belongs only to the step that publishes.
       - run: npm ci
 
       - name: Build the installer and the portable exe
         run: npm run build:win -- --publish ${{ github.event_name == 'push' && 'always' || 'never' }}
         env:
+          # Read by electron-builder to upload to the draft.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Optional. Without them the builds are unsigned, which works but has
           # Windows SmartScreen warn on first install. WIN_CSC_LINK is a
           # base64-encoded .pfx (or a URL to one), with its password beside it.
@@ -141,19 +142,22 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: write
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
+      # No GH_TOKEN here: npm ci runs every dependency's install scripts, and the
+      # write token belongs only to the step that publishes.
       - run: npm ci
 
       # x64 and arm64 both, from this one machine: see electron-builder.yml.
       - name: Build the AppImages and the .debs
         run: npm run build:linux -- --publish ${{ github.event_name == 'push' && 'always' || 'never' }}
+        env:
+          # Read by electron-builder to upload to the draft.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Keep the files
         if: github.event_name != 'push'
